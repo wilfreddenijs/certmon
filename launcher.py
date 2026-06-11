@@ -31,7 +31,6 @@ def log(msg):
         pass
 
 # Suppress Werkzeug reloader
-os.environ["WERKZEUG_RUN_MAIN"] = "true"
 
 
 def find_free_port(start=5000):
