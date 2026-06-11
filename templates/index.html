@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CertMon — TLS Certificate Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d12;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --border: #1e2740;
+    --accent: #00e5ff;
+    --accent2: #7c4dff;
+    --ok: #00e676;
+    --warning: #ffab00;
+    --critical: #ff5252;
+    --expired: #b0bec5;
+    --text: #e8eaf6;
+    --muted: #546e7a;
+    --card-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(90deg, #0d1220 0%, #0a0d12 100%);
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: -0.5px;
+    color: var(--accent);
+  }
+
+  .logo span { color: var(--text); opacity: 0.5; }
+
+  .header-stats {
+    display: flex;
+    gap: 24px;
+  }
+
+  .stat-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+  }
+
+  .stat-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+
+  /* Layout */
+  .main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 0;
+    height: calc(100vh - 65px);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  input[type="text"], input[type="number"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    flex: 1;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+
+  .port-input { width: 70px; flex: none; }
+
+  .btn {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .btn:hover { background: #33eaff; transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+
+  .btn-ghost:hover { background: rgba(0,229,255,0.08); }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--critical);
+    border: 1px solid rgba(255,82,82,0.3);
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .btn-danger:hover { background: rgba(255,82,82,0.1); transform: none; }
+
+  .btn-scan {
+    background: var(--accent2);
+    color: #fff;
+    width: 100%;
+    padding: 10px;
+    font-size: 13px;
+  }
+
+  .btn-scan:hover { background: #9c6fff; }
+  .btn-scan:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .host-list, .range-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .progress-bar {
+    background: var(--border);
+    border-radius: 4px;
+    height: 6px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    transition: width 0.3s;
+    border-radius: 4px;
+  }
+
+  .progress-text {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
+  /* Main content */
+  .content {
+    overflow-y: auto;
+    padding: 24px 28px;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+
+  .tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    margin-bottom: -1px;
+  }
+
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Cert grid */
+  .cert-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+
+  .cert-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cert-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+
+  .cert-card.ok::before { background: var(--ok); }
+  .cert-card.warning::before { background: var(--warning); }
+  .cert-card.critical::before { background: var(--critical); }
+  .cert-card.expired::before { background: var(--expired); }
+  .cert-card.error::before { background: var(--muted); }
+
+  .cert-card:hover {
+    border-color: rgba(0,229,255,0.2);
+    transform: translateY(-2px);
+    box-shadow: var(--card-shadow);
+  }
+
+  .cert-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    gap: 10px;
+  }
+
+  .cert-host {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+  }
+
+  .cert-port {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .status-badge.ok { background: rgba(0,230,118,0.12); color: var(--ok); }
+  .status-badge.warning { background: rgba(255,171,0,0.12); color: var(--warning); }
+  .status-badge.critical { background: rgba(255,82,82,0.15); color: var(--critical); }
+  .status-badge.expired { background: rgba(176,190,197,0.12); color: var(--expired); }
+  .status-badge.error { background: rgba(84,110,122,0.12); color: var(--muted); }
+
+  .cert-meta {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 4px 8px;
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+
+  .meta-label { color: var(--muted); }
+  .meta-value { color: var(--text); word-break: break-all; }
+
+  .days-bar {
+    background: var(--bg);
+    border-radius: 4px;
+    height: 4px;
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+
+  .days-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+
+  .cert-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .btn-refresh {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .btn-refresh:hover { color: var(--text); border-color: var(--text); transform: none; background: transparent; }
+
+  .btn-renew {
+    background: rgba(124,77,255,0.15);
+    color: var(--accent2);
+    border: 1px solid rgba(124,77,255,0.3);
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .btn-renew:hover { background: rgba(124,77,255,0.25); transform: none; }
+
+  /* Renewals tab */
+  .renewal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .renewal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
+
+  .renewal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .renewal-host {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .renewal-status {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .renewal-status.pending { background: rgba(255,171,0,0.12); color: var(--warning); }
+  .renewal-status.ready { background: rgba(0,230,118,0.12); color: var(--ok); }
+  .renewal-status.manual { background: rgba(84,110,122,0.12); color: var(--muted); }
+
+  .command-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    word-break: break-all;
+    margin: 10px 0;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .command-block::after {
+    content: 'click to copy';
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .command-block:hover { border-color: var(--accent); }
+  .command-block.copied { border-color: var(--ok); color: var(--ok); }
+
+  /* Renewal modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    width: 460px;
+    max-width: 95vw;
+  }
+
+  .modal-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    color: var(--accent);
+  }
+
+  .form-group {
+    margin-bottom: 14px;
+  }
+
+  .form-label {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    width: 100%;
+    outline: none;
+  }
+
+  select:focus { border-color: var(--accent); }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    justify-content: flex-end;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+
+  .empty-state h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    margin-bottom: 8px;
+    color: var(--text);
+    opacity: 0.5;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  .tag {
+    display: inline-block;
+    background: rgba(0,229,255,0.08);
+    color: var(--accent);
+    border: 1px solid rgba(0,229,255,0.15);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 10px;
+    margin: 2px 2px 0 0;
+  }
+
+  .spinning { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Cert<span>/</span>Mon</div>
+  <div class="header-stats" id="header-stats">
+    <div class="stat-pill"><div class="stat-dot" style="background:var(--ok)"></div><span id="stat-ok">0 OK</span></div>
+    <div class="stat-pill"><div class="stat-dot" style="background:var(--warning)"></div><span id="stat-warn">0 Warning</span></div>
+    <div class="stat-pill"><div class="stat-dot" style="background:var(--critical)"></div><span id="stat-crit">0 Critical</span></div>
+    <div class="stat-pill"><div class="stat-dot" style="background:var(--expired)"></div><span id="stat-exp">0 Expired</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+
+    <!-- Manual hosts -->
+    <div>
+      <div class="section-title">Manual Hosts</div>
+      <div class="input-row">
+        <input type="text" id="host-input" placeholder="hostname or IP" />
+        <input type="number" id="port-input" class="port-input" placeholder="443" value="443" />
+        <button class="btn" onclick="addHost()">+</button>
+      </div>
+      <div class="host-list" id="host-list"></div>
+    </div>
+
+    <!-- Scan ranges -->
+    <div>
+      <div class="section-title">Network Scan Ranges</div>
+      <div class="input-row">
+        <input type="text" id="range-input" placeholder="192.168.0.0/24" />
+        <button class="btn" onclick="addRange()">+</button>
+      </div>
+      <div class="range-list" id="range-list"></div>
+      <button class="btn btn-scan" id="scan-btn" onclick="startScan()" style="margin-top:10px">
+        ▶ Scan Network
+      </button>
+      <div id="scan-progress" style="display:none">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+        <div class="progress-text" id="progress-text">Scanning...</div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div>
+      <div class="section-title">Status Legend</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--ok)"></div> OK (47+ days)</div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--warning)"></div> Warning (20–47 days)</div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--critical)"></div> Critical (&lt;20 days)</div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--expired)"></div> Expired</div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- Main content -->
+  <div class="content">
+    <div class="tabs" style="justify-content:space-between">
+      <div style="display:flex">
+        <div class="tab active" onclick="switchTab('certs')">Certificates</div>
+        <div class="tab" onclick="switchTab('renewals')">Renewals</div>
+      </div>
+      <a href="/api/export/excel" download>
+        <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
+      </a>
+    </div>
+
+    <div class="tab-panel active" id="tab-certs">
+      <div class="cert-grid" id="cert-grid">
+        <div class="empty-state">
+          <h3>No certificates yet</h3>
+          <p>Add a host or run a network scan to get started.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="tab-renewals">
+      <div class="renewal-list" id="renewal-list">
+        <div class="empty-state">
+          <h3>No renewals yet</h3>
+          <p>Click "Renew" on a certificate card to create a renewal task.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Renewal Modal -->
+<div class="modal-overlay" id="renewal-modal">
+  <div class="modal">
+    <div class="modal-title">⟳ Create Renewal</div>
+    <div id="modal-host-label" style="color:var(--muted);margin-bottom:16px;font-size:12px"></div>
+    <div class="form-group">
+      <label class="form-label">Method</label>
+      <select id="renewal-method">
+        <option value="certbot">Certbot (Let's Encrypt)</option>
+        <option value="acme.sh">acme.sh</option>
+        <option value="manual">Manual / Other CA</option>
+      </select>
+    </div>
+    <div class="form-group checkbox-row">
+      <input type="checkbox" id="staging-check" />
+      <label for="staging-check" style="font-size:12px">Use Let's Encrypt staging environment</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitRenewal()">Create Renewal</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentRenewalHost = null;
+  let currentRenewalPort = null;
+  let scanPollInterval = null;
+
+  async function loadData() {
+    const res = await fetch('/api/data');
+    const data = await res.json();
+    renderSidebar(data);
+    renderCerts(data.certificates || {});
+    renderRenewals(data.renewals || []);
+    updateStats(data.certificates || {});
+  }
+
+  function renderSidebar(data) {
+    // Manual hosts
+    const hl = document.getElementById('host-list');
+    hl.innerHTML = '';
+    (data.manual_hosts || []).forEach(h => {
+      const d = document.createElement('div');
+      d.className = 'list-item';
+      d.innerHTML = `<span>${h.host}:${h.port}</span><button class="btn btn-danger" onclick="removeHost('${h.host}',${h.port})">✕</button>`;
+      hl.appendChild(d);
+    });
+
+    // Ranges
+    const rl = document.getElementById('range-list');
+    rl.innerHTML = '';
+    (data.scan_ranges || []).forEach(r => {
+      const d = document.createElement('div');
+      d.className = 'list-item';
+      d.innerHTML = `<span>${r}</span><button class="btn btn-danger" onclick="removeRange('${r}')">✕</button>`;
+      rl.appendChild(d);
+    });
+  }
+
+  function updateStats(certs) {
+    const counts = { ok: 0, warning: 0, critical: 0, expired: 0 };
+    Object.values(certs).forEach(c => {
+      if (counts[c.status] !== undefined) counts[c.status]++;
+    });
+    document.getElementById('stat-ok').textContent = `${counts.ok} OK`;
+    document.getElementById('stat-warn').textContent = `${counts.warning} Warning`;
+    document.getElementById('stat-crit').textContent = `${counts.critical} Critical`;
+    document.getElementById('stat-exp').textContent = `${counts.expired} Expired`;
+  }
+
+  function statusColor(s) {
+    return { ok: 'var(--ok)', warning: 'var(--warning)', critical: 'var(--critical)', expired: 'var(--expired)', error: 'var(--muted)' }[s] || 'var(--muted)';
+  }
+
+  function daysBarWidth(days) {
+    if (days === null) return 0;
+    // 0 days = 0%, 398 days (old max) = 100%
+    return Math.min(100, Math.max(0, (days / 398) * 100));
+  }
+
+  function formatDate(iso) {
+    if (!iso) return 'N/A';
+    return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  function renderCerts(certs) {
+    const grid = document.getElementById('cert-grid');
+    const entries = Object.values(certs);
+
+    if (!entries.length) {
+      grid.innerHTML = `<div class="empty-state"><h3>No certificates yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
+      return;
+    }
+
+    // Sort: critical first, then warning, then ok
+    const order = { critical: 0, expired: 1, warning: 2, error: 3, ok: 4 };
+    entries.sort((a, b) => (order[a.status] ?? 5) - (order[b.status] ?? 5));
+
+    grid.innerHTML = entries.map(c => {
+      const color = statusColor(c.status);
+      const barW = daysBarWidth(c.days_remaining);
+      const daysLabel = c.days_remaining !== null
+        ? (c.days_remaining < 0 ? `Expired ${Math.abs(c.days_remaining)}d ago` : `${c.days_remaining} days left`)
+        : 'N/A';
+      const canRenew = ['warning', 'critical', 'expired'].includes(c.status);
+      const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
+
+      return `
+        <div class="cert-card ${c.status}">
+          <div class="cert-header">
+            <div>
+              <div class="cert-host">${c.cn || c.host}</div>
+              <div class="cert-port">${c.host}:${c.port}</div>
+              <div style="margin-top:4px">
+                <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;
+                  background:${c.self_signed ? 'rgba(255,171,0,0.12)' : 'rgba(0,230,118,0.10)'};
+                  color:${c.self_signed ? 'var(--warning)' : 'var(--ok)'}">
+                  ${c.cert_type || (c.self_signed ? 'Self-signed' : 'CA-signed')}
+                </span>
+              </div>
+            </div>
+            <div class="status-badge ${c.status}">${daysLabel}</div>
+          </div>
+          ${c.error ? `<div style="color:var(--critical);font-size:12px;margin-bottom:10px">${c.error}</div>` : ''}
+          <div class="cert-meta">
+            <span class="meta-label">Issuer</span><span class="meta-value">${c.issuer || 'N/A'}</span>
+            <span class="meta-label">Expires</span><span class="meta-value">${formatDate(c.not_after)}</span>
+            <span class="meta-label">Issued</span><span class="meta-value">${formatDate(c.not_before)}</span>
+            <span class="meta-label">Checked</span><span class="meta-value">${formatDate(c.last_checked)}</span>
+          </div>
+          ${sansHtml ? `<div style="margin-bottom:12px">${sansHtml}</div>` : ''}
+          <div class="days-bar">
+            <div class="days-fill" style="width:${barW}%;background:${color}"></div>
+          </div>
+          <div class="cert-actions">
+            <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
+            ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
+            <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderRenewals(renewals) {
+    const list = document.getElementById('renewal-list');
+    if (!renewals.length) {
+      list.innerHTML = `<div class="empty-state"><h3>No renewals yet</h3><p>Click "Renew" on a certificate card to create a renewal task.</p></div>`;
+      return;
+    }
+    list.innerHTML = renewals.slice().reverse().map(r => `
+      <div class="renewal-card">
+        <div class="renewal-header">
+          <div>
+            <div class="renewal-host">${r.host}:${r.port}</div>
+            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.method} · ${r.staging ? 'staging' : 'production'} · ${new Date(r.created).toLocaleDateString()}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="renewal-status ${r.status}">${r.status}</span>
+            <button class="btn btn-danger" onclick="deleteRenewal(${r.id})">✕</button>
+          </div>
+        </div>
+        ${r.command ? `
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run this command on your server:</div>
+          <div class="command-block" onclick="copyCommand(this, '${escapeHtml(r.command)}')">${r.command}</div>
+        ` : ''}
+        ${r.log && r.log.length ? `<div style="font-size:11px;color:var(--muted);margin-top:8px">${r.log.join('<br>')}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  }
+
+  async function addHost() {
+    const host = document.getElementById('host-input').value.trim();
+    const port = parseInt(document.getElementById('port-input').value) || 443;
+    if (!host) return;
+    await fetch('/api/hosts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, port })
+    });
+    document.getElementById('host-input').value = '';
+    loadData();
+  }
+
+  async function removeHost(host, port) {
+    await fetch(`/api/hosts/${host}:${port}`, { method: 'DELETE' });
+    loadData();
+  }
+
+  async function refreshCert(host, port) {
+    await fetch(`/api/refresh/${host}:${port}`, { method: 'POST' });
+    loadData();
+  }
+
+  async function addRange() {
+    const r = document.getElementById('range-input').value.trim();
+    if (!r) return;
+    const res = await fetch('/api/scan/ranges', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ range: r })
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    document.getElementById('range-input').value = '';
+    loadData();
+  }
+
+  async function removeRange(r) {
+    await fetch(`/api/scan/ranges/${r}`, { method: 'DELETE' });
+    loadData();
+  }
+
+  async function startScan() {
+    const btn = document.getElementById('scan-btn');
+    const progressDiv = document.getElementById('scan-progress');
+    const res = await fetch('/api/scan/start', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    btn.disabled = true;
+    progressDiv.style.display = 'block';
+    scanPollInterval = setInterval(pollScan, 1000);
+  }
+
+  async function pollScan() {
+    const res = await fetch('/api/scan/progress');
+    const p = await res.json();
+    const pct = p.total > 0 ? Math.round((p.progress / p.total) * 100) : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-text').textContent = p.current || 'Scanning...';
+    if (!p.running) {
+      clearInterval(scanPollInterval);
+      document.getElementById('scan-btn').disabled = false;
+      document.getElementById('progress-text').textContent = 'Scan complete';
+      setTimeout(() => { document.getElementById('scan-progress').style.display = 'none'; }, 2000);
+      loadData();
+    }
+  }
+
+  function openModal(host, port) {
+    currentRenewalHost = host;
+    currentRenewalPort = port;
+    document.getElementById('modal-host-label').textContent = `${host}:${port}`;
+    document.getElementById('renewal-modal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('renewal-modal').classList.remove('open');
+  }
+
+  async function submitRenewal() {
+    const method = document.getElementById('renewal-method').value;
+    const staging = document.getElementById('staging-check').checked;
+    await fetch('/api/renew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: currentRenewalHost, port: currentRenewalPort, method, staging })
+    });
+    closeModal();
+    switchTab('renewals');
+    loadData();
+  }
+
+  async function deleteRenewal(id) {
+    await fetch(`/api/renewals/${id}`, { method: 'DELETE' });
+    loadData();
+  }
+
+  function copyCommand(el, cmd) {
+    navigator.clipboard.writeText(cmd).then(() => {
+      el.classList.add('copied');
+      const orig = el.innerHTML;
+      setTimeout(() => el.classList.remove('copied'), 1500);
+    });
+  }
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', ['certs','renewals'][i] === name);
+    });
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById(`tab-${name}`).classList.add('active');
+  }
+
+  // Enter key support
+  document.getElementById('host-input').addEventListener('keydown', e => { if (e.key === 'Enter') addHost(); });
+  document.getElementById('range-input').addEventListener('keydown', e => { if (e.key === 'Enter') addRange(); });
+
+  // Close modal on overlay click
+  document.getElementById('renewal-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('renewal-modal')) closeModal();
+  });
+
+  // Initial load + auto-refresh every 60s
+  loadData();
+  setInterval(loadData, 60000);
+</script>
+</body>
+</html>
