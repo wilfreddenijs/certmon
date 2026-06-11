@@ -439,8 +439,16 @@ def export_excel():
     wb.save(buf)
     buf.seek(0)
     filename = f"certmon_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return send_file(buf, as_attachment=True, download_name=filename,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    from flask import Response
+    response = Response(
+        buf.getvalue(),
+        status=200,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 if __name__ == "__main__":
