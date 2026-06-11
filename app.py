@@ -455,3 +455,287 @@ if __name__ == "__main__":
     os.makedirs(data_dir(), exist_ok=True)
     print("CertMon running at http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+# ─────────────────────────────────────────────
+# CA Management
+# ─────────────────────────────────────────────
+
+CA_DIR = r"C:\CertMon\CA" if sys.platform == "win32" else os.path.join(data_dir(), "CA")
+CA_KEY_FILE = os.path.join(CA_DIR, "certmon-ca.key")
+CA_CERT_FILE = os.path.join(CA_DIR, "certmon-ca.crt")
+
+
+def ca_exists():
+    return os.path.exists(CA_KEY_FILE) and os.path.exists(CA_CERT_FILE)
+
+
+def load_ca():
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    from cryptography import x509
+    with open(CA_KEY_FILE, "rb") as f:
+        key = load_pem_private_key(f.read(), password=None)
+    with open(CA_CERT_FILE, "rb") as f:
+        cert = x509.load_pem_x509_certificate(f.read())
+    return key, cert
+
+
+@app.route("/api/ca/status")
+def ca_status():
+    if not ca_exists():
+        return jsonify({"exists": False})
+    try:
+        _, cert = load_ca()
+        now = datetime.now(timezone.utc)
+        days = (cert.not_valid_after_utc - now).days
+        try:
+            cn = cert.subject.get_attributes_for_oid(
+                __import__('cryptography').x509.NameOID.COMMON_NAME)[0].value
+        except Exception:
+            cn = "CertMon CA"
+        return jsonify({
+            "exists": True,
+            "cn": cn,
+            "not_after": cert.not_valid_after_utc.isoformat(),
+            "days_remaining": days,
+            "ca_cert_path": CA_CERT_FILE,
+        })
+    except Exception as e:
+        return jsonify({"exists": False, "error": str(e)})
+
+
+@app.route("/api/ca/generate", methods=["POST"])
+def ca_generate():
+    if ca_exists():
+        return jsonify({"error": "CA already exists. Delete existing CA files first."}), 400
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import datetime as dt
+
+        os.makedirs(CA_DIR, exist_ok=True)
+
+        # Generate CA key
+        key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
+
+        # CA certificate — valid 10 years
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, "CertMon Local CA"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CertMon"),
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "NL"),
+        ])
+        now_utc = dt.datetime.now(dt.timezone.utc)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now_utc)
+            .not_valid_after(now_utc + dt.timedelta(days=3650))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(
+                digital_signature=True, key_cert_sign=True, crl_sign=True,
+                content_commitment=False, key_encipherment=False,
+                data_encipherment=False, key_agreement=False,
+                encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            .sign(key, hashes.SHA256())
+        )
+
+        # Save key
+        with open(CA_KEY_FILE, "wb") as f:
+            f.write(key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption()
+            ))
+        # Save cert
+        with open(CA_CERT_FILE, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+        return jsonify({"ok": True, "ca_cert_path": CA_CERT_FILE, "ca_dir": CA_DIR})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ca/install", methods=["POST"])
+def ca_install():
+    """Install CA cert into Windows trust store."""
+    if not ca_exists():
+        return jsonify({"error": "No CA found. Generate one first."}), 400
+    try:
+        if sys.platform == "win32":
+            import subprocess
+            result = subprocess.run(
+                ["certutil", "-addstore", "-user", "Root", CA_CERT_FILE],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                return jsonify({"ok": True, "method": "certutil", "output": result.stdout})
+            else:
+                return jsonify({"error": result.stderr or result.stdout}), 500
+        else:
+            return jsonify({"ok": True, "method": "manual",
+                            "message": f"Copy {CA_CERT_FILE} to your browser/OS trust store manually."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ca/download-cert")
+def ca_download_cert():
+    """Download the CA certificate for manual installation."""
+    if not ca_exists():
+        return jsonify({"error": "No CA found"}), 404
+    from flask import Response
+    with open(CA_CERT_FILE, "rb") as f:
+        data = f.read()
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = 'attachment; filename="certmon-ca.crt"'
+    return response
+
+
+@app.route("/api/ca/issue", methods=["POST"])
+def ca_issue():
+    """Issue a device certificate signed by the local CA."""
+    if not ca_exists():
+        return jsonify({"error": "No CA found. Generate one first."}), 400
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509 import IPAddress, DNSName as CryptoDNSName
+        import ipaddress as ipmod
+        import datetime as dt
+
+        body = request.json
+        ip = body.get("ip", "").strip()
+        hostname = body.get("hostname", "").strip()
+        device_name = body.get("name", ip or hostname)
+
+        if not ip and not hostname:
+            return jsonify({"error": "Provide at least an IP or hostname"}), 400
+
+        ca_key, ca_cert = load_ca()
+
+        # Generate device key
+        dev_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+        # Build SANs
+        sans = []
+        if ip:
+            try:
+                sans.append(IPAddress(ipmod.ip_address(ip)))
+            except ValueError:
+                pass
+        if hostname:
+            sans.append(CryptoDNSName(hostname))
+        if not sans:
+            return jsonify({"error": "Could not parse IP or hostname"}), 400
+
+        cn = hostname or ip
+        now_utc = dt.datetime.now(dt.timezone.utc)
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(x509.Name([
+                x509.NameAttribute(NameOID.COMMON_NAME, cn),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CertMon"),
+            ]))
+            .issuer_name(ca_cert.subject)
+            .public_key(dev_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now_utc)
+            .not_valid_after(now_utc + dt.timedelta(days=397))
+            .add_extension(x509.SubjectAlternativeName(sans), critical=False)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(
+                digital_signature=True, key_encipherment=True,
+                content_commitment=False, data_encipherment=False,
+                key_agreement=False, key_cert_sign=False,
+                crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([
+                x509.ExtendedKeyUsageOID.SERVER_AUTH
+            ]), critical=False)
+            .sign(ca_key, hashes.SHA256())
+        )
+
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+        key_pem = dev_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption()
+        ).decode()
+
+        # Save to CA dir
+        safe_name = (hostname or ip).replace(".", "_").replace(":", "_")
+        cert_path = os.path.join(CA_DIR, f"{safe_name}.crt")
+        key_path = os.path.join(CA_DIR, f"{safe_name}.key")
+        with open(cert_path, "w") as f:
+            f.write(cert_pem)
+        with open(key_path, "w") as f:
+            f.write(key_pem)
+
+        return jsonify({
+            "ok": True,
+            "cert_pem": cert_pem,
+            "key_pem": key_pem,
+            "cert_path": cert_path,
+            "key_path": key_path,
+            "cn": cn,
+            "not_after": cert.not_valid_after_utc.isoformat(),
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/ca/issued")
+def ca_issued():
+    """List issued device certs."""
+    if not os.path.exists(CA_DIR):
+        return jsonify([])
+    from cryptography import x509
+    certs = []
+    for fname in os.listdir(CA_DIR):
+        if fname.endswith(".crt") and fname != "certmon-ca.crt":
+            try:
+                with open(os.path.join(CA_DIR, fname), "rb") as f:
+                    cert = x509.load_pem_x509_certificate(f.read())
+                now = datetime.now(timezone.utc)
+                days = (cert.not_valid_after_utc - now).days
+                cn = cert.subject.get_attributes_for_oid(
+                    x509.NameOID.COMMON_NAME)[0].value
+                key_file = os.path.join(CA_DIR, fname.replace(".crt", ".key"))
+                certs.append({
+                    "filename": fname,
+                    "cn": cn,
+                    "not_after": cert.not_valid_after_utc.isoformat(),
+                    "days_remaining": days,
+                    "cert_path": os.path.join(CA_DIR, fname),
+                    "key_path": key_file if os.path.exists(key_file) else None,
+                })
+            except Exception:
+                pass
+    return jsonify(certs)
+
+
+@app.route("/api/ca/download/<filename>")
+def ca_download_file(filename):
+    """Download a specific cert or key file."""
+    # Security: only allow files from CA_DIR, no path traversal
+    safe = os.path.basename(filename)
+    full_path = os.path.join(CA_DIR, safe)
+    if not os.path.exists(full_path):
+        return jsonify({"error": "Not found"}), 404
+    if not (safe.endswith(".crt") or safe.endswith(".key")):
+        return jsonify({"error": "Invalid file type"}), 400
+    from flask import Response
+    with open(full_path, "rb") as f:
+        data = f.read()
+    mime = "application/x-pem-file"
+    response = Response(data, status=200, mimetype=mime)
+    response.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
+    return response

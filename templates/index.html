@@ -604,6 +604,7 @@
       <div style="display:flex">
         <div class="tab active" onclick="switchTab('certs')">Certificates</div>
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
+        <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -626,6 +627,10 @@
           <p>Click "Renew" on a certificate card to create a renewal task.</p>
         </div>
       </div>
+    </div>
+
+    <div class="tab-panel" id="tab-ca">
+      <div id="ca-content" style="max-width:860px"></div>
     </div>
   </div>
 </div>
@@ -917,6 +922,148 @@
     });
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${name}`).classList.add('active');
+  }
+
+
+  // ── CA Management ──────────────────────────────────────────────
+
+  async function loadCA() {
+    const res = await fetch('/api/ca/status');
+    const ca = await res.json();
+    const issued = await (await fetch('/api/ca/issued')).json();
+    renderCA(ca, issued);
+  }
+
+  function renderCA(ca, issued) {
+    const el = document.getElementById('ca-content');
+
+    const caCard = ca.exists ? `
+      <div class="cert-card ok" style="margin-bottom:20px">
+        <div class="cert-header">
+          <div>
+            <div class="cert-host">${ca.cn}</div>
+            <div class="cert-port">Local Certificate Authority · expires ${new Date(ca.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</div>
+          </div>
+          <div class="status-badge ok">${ca.days_remaining} days</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
+          <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
+        </div>
+        <div id="ca-install-result" style="margin-top:10px;font-size:12px"></div>
+      </div>` : `
+      <div class="cert-card error" style="margin-bottom:20px;padding:24px">
+        <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">No Local CA yet</div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:16px">Generate a local CA once — then install it in Windows so all browsers trust your device certificates.</div>
+        <button class="btn" onclick="generateCA()">⚡ Generate Local CA</button>
+        <div id="ca-generate-result" style="margin-top:12px;font-size:12px"></div>
+      </div>`;
+
+    const issueForm = ca.exists ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px">
+        <div class="section-title" style="margin-bottom:14px">Issue Device Certificate</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <div class="form-label">Device IP</div>
+            <input type="text" id="issue-ip" placeholder="192.168.0.114" style="width:180px" />
+          </div>
+          <div>
+            <div class="form-label">Hostname (optional)</div>
+            <input type="text" id="issue-hostname" placeholder="ucs303.local" style="width:180px" />
+          </div>
+          <button class="btn" style="padding:8px 18px" onclick="issueCert()">Issue Certificate</button>
+        </div>
+        <div id="issue-result" style="margin-top:14px;font-size:12px"></div>
+      </div>` : '';
+
+    const issuedSection = issued.length ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+        <div class="section-title" style="margin-bottom:14px">Issued Device Certificates</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${issued.map(c => `
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+              <div>
+                <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:600">${c.cn}</div>
+                <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${c.days_remaining} days</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <a href="/api/ca/download/${c.filename}" download="${c.filename}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
+                ${c.key_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.key')}" download="${c.filename.replace('.crt','.key')}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Key</button></a>` : ''}
+                <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    el.innerHTML = caCard + issueForm + issuedSection;
+  }
+
+  async function generateCA() {
+    document.getElementById('ca-generate-result').textContent = 'Generating 4096-bit CA key...';
+    const res = await fetch('/api/ca/generate', {method:'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">✓ CA created at ${data.ca_dir}</span>`;
+      setTimeout(loadCA, 800);
+    } else {
+      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
+    }
+  }
+
+  async function installCA() {
+    document.getElementById('ca-install-result').textContent = 'Installing in Windows trust store...';
+    const res = await fetch('/api/ca/install', {method:'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--ok)">✓ Installed! Restart your browser for changes to take effect.</span>`;
+    } else {
+      document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error} — try running CertMon as Administrator.</span>`;
+    }
+  }
+
+  async function issueCert() {
+    const ip = document.getElementById('issue-ip').value.trim();
+    const hostname = document.getElementById('issue-hostname').value.trim();
+    if (!ip && !hostname) { alert('Enter an IP or hostname'); return; }
+    document.getElementById('issue-result').textContent = 'Issuing certificate...';
+    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname})});
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Saved to ${data.cert_path}</span>`;
+      setTimeout(loadCA, 500);
+    } else {
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
+    }
+  }
+
+  function showUploadGuide(cn) {
+    const guides = {
+      default: `<b>Generic upload guide for ${cn}:</b><br><br>
+        1. Open the device web interface<br>
+        2. Find the SSL/TLS or Certificate section<br>
+        3. Upload the <b>.crt</b> file as the certificate<br>
+        4. Upload the <b>.key</b> file as the private key<br>
+        5. Save and reboot the device<br><br>
+        <b>Extron UCS 303:</b> Settings → Security → SSL Certificate → upload .crt and .key`
+    };
+    const modal = document.createElement('div');
+    modal.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:500px;max-width:95vw">
+      <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:16px">📋 Upload Guide</div>
+      <div style="font-size:13px;line-height:1.8;color:var(--text)">${guides.default}</div>
+      <button class="btn" style="margin-top:20px" onclick="this.closest('div[style]').remove()">Close</button>
+    </div>`;
+    document.body.appendChild(modal);
+  }
+
+  // Patch switchTab to load CA when needed
+  const _origSwitchTab = switchTab;
+  function switchTab(name) {
+    _origSwitchTab(name);
+    if (name === 'ca') loadCA();
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', ['certs','renewals','ca'][i] === name);
+    });
   }
 
   // Enter key support
