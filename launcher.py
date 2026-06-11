@@ -11,12 +11,24 @@ import threading
 import time
 import webbrowser
 import socket
+import traceback
 
 # When frozen by PyInstaller, add the bundle dir to sys.path
 if getattr(sys, 'frozen', False):
     bundle_dir = sys._MEIPASS
     if bundle_dir not in sys.path:
         sys.path.insert(0, bundle_dir)
+    # Write errors to a log file next to the exe
+    log_path = os.path.join(os.path.dirname(sys.executable), "certmon_error.log")
+else:
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certmon_error.log")
+
+def log(msg):
+    try:
+        with open(log_path, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+    except Exception:
+        pass
 
 # Suppress Werkzeug reloader
 os.environ["WERKZEUG_RUN_MAIN"] = "true"
@@ -44,13 +56,25 @@ def wait_for_server(port, timeout=20):
 
 
 def start_flask(port):
-    import logging
-    log = logging.getLogger("werkzeug")
-    log.setLevel(logging.ERROR)
+    try:
+        log(f"Starting Flask on port {port}")
+        log(f"sys.path: {sys.path}")
+        log(f"frozen: {getattr(sys, 'frozen', False)}")
+        if getattr(sys, 'frozen', False):
+            log(f"_MEIPASS: {sys._MEIPASS}")
+            log(f"_MEIPASS contents: {os.listdir(sys._MEIPASS)}")
 
-    from app import app, data_dir
-    os.makedirs(data_dir(), exist_ok=True)
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+        import logging
+        log_wz = logging.getLogger("werkzeug")
+        log_wz.setLevel(logging.ERROR)
+
+        from app import app, data_dir
+        log(f"app imported OK, data_dir={data_dir()}")
+        os.makedirs(data_dir(), exist_ok=True)
+        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+    except Exception as e:
+        log(f"FLASK ERROR: {e}")
+        log(traceback.format_exc())
 
 
 def make_tray_icon(port):
@@ -79,21 +103,25 @@ def make_tray_icon(port):
         icon = pystray.Icon("CertMon", img, "CertMon", menu)
         icon.run()
 
-    except Exception:
+    except Exception as e:
+        log(f"TRAY ERROR: {e}")
         while True:
             time.sleep(1)
 
 
 def main():
+    log("CertMon starting")
     port = find_free_port(5000)
+    log(f"Using port {port}")
 
     flask_thread = threading.Thread(target=start_flask, args=(port,), daemon=True)
     flask_thread.start()
 
     if wait_for_server(port):
+        log("Server ready, opening browser")
         webbrowser.open(f"http://127.0.0.1:{port}")
     else:
-        # Open anyway — might just be slow
+        log("Server did not respond after 20s, opening browser anyway")
         webbrowser.open(f"http://127.0.0.1:{port}")
 
     make_tray_icon(port)
