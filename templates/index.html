@@ -1093,10 +1093,12 @@
 
   function switchTab(name) {
     document.querySelectorAll('.tab').forEach((t, i) => {
-      t.classList.toggle('active', ['certs','renewals'][i] === name);
+      t.classList.toggle('active', ['certs','renewals','ca','upload'][i] === name);
     });
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${name}`).classList.add('active');
+    if (name === 'ca') loadCA();
+    if (name === 'upload') loadUploadDevices();
   }
 
 
@@ -1231,16 +1233,7 @@
     document.body.appendChild(modal);
   }
 
-  // Patch switchTab to load CA when needed
-  const _origSwitchTab = switchTab;
-  function switchTab(name) {
-    _origSwitchTab(name);
-    if (name === 'ca') loadCA();
-    if (name === 'upload') loadUploadDevices();
-    document.querySelectorAll('.tab').forEach((t, i) => {
-      t.classList.toggle('active', ['certs','renewals','ca','upload'][i] === name);
-    });
-  }
+  // (switchTab handles all tabs directly above — no wrapper needed)
 
   // Enter key support
   document.getElementById('host-input').addEventListener('keydown', e => { if (e.key === 'Enter') addHost(); });
