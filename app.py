@@ -607,10 +607,20 @@ def ca_issue():
         import ipaddress as ipmod
         import datetime as dt
 
+        import secrets
+        import string
+
         body = request.json
         ip = body.get("ip", "").strip()
         hostname = body.get("hostname", "").strip()
         device_name = body.get("name", ip or hostname)
+
+        # Optional private-key passphrase (some devices, e.g. Extron Toolbelt,
+        # require an encrypted key). Either supplied or generated on request.
+        passphrase = (body.get("passphrase") or "").strip()
+        if not passphrase and body.get("generate_passphrase"):
+            alphabet = string.ascii_letters + string.digits
+            passphrase = "".join(secrets.choice(alphabet) for _ in range(24))
 
         if not ip and not hostname:
             return jsonify({"error": "Provide at least an IP or hostname"}), 400
@@ -660,10 +670,14 @@ def ca_issue():
         )
 
         cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+        if passphrase:
+            enc_algo = serialization.BestAvailableEncryption(passphrase.encode())
+        else:
+            enc_algo = serialization.NoEncryption()
         key_pem = dev_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption()
+            enc_algo
         ).decode()
 
         # Save to CA dir
@@ -682,6 +696,8 @@ def ca_issue():
             "cert_path": cert_path,
             "key_path": key_path,
             "cn": cn,
+            "encrypted": bool(passphrase),
+            "passphrase": passphrase or None,
             "not_after": cert.not_valid_after_utc.isoformat(),
         })
     except Exception as e:

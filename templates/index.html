@@ -1148,6 +1148,16 @@
             <div class="form-label">Hostname (optional)</div>
             <input type="text" id="issue-hostname" placeholder="ucs303.local" style="width:180px" />
           </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
+          <div>
+            <div class="form-label">Key passphrase (required for Extron Toolbelt)</div>
+            <input type="text" id="issue-passphrase" placeholder="leave blank = unencrypted key" style="width:280px" />
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding-bottom:9px;cursor:pointer">
+            <input type="checkbox" id="issue-genpass" onchange="const p=document.getElementById('issue-passphrase'); if(this.checked){p.value='';p.placeholder='will be generated…';p.disabled=true}else{p.placeholder='leave blank = unencrypted key';p.disabled=false}" />
+            generate one for me
+          </label>
           <button class="btn" style="padding:8px 18px" onclick="issueCert()">Issue Certificate</button>
         </div>
         <div id="issue-result" style="margin-top:14px;font-size:12px"></div>
@@ -1202,15 +1212,43 @@
     const ip = document.getElementById('issue-ip').value.trim();
     const hostname = document.getElementById('issue-hostname').value.trim();
     if (!ip && !hostname) { alert('Enter an IP or hostname'); return; }
+    const passphrase = document.getElementById('issue-passphrase').value;
+    const generate_passphrase = document.getElementById('issue-genpass').checked;
     document.getElementById('issue-result').textContent = 'Issuing certificate...';
-    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname})});
+    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname, passphrase, generate_passphrase})});
     const data = await res.json();
     if (data.ok) {
-      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Saved to ${data.cert_path}</span>`;
+      let passLine = '';
+      if (data.encrypted && data.passphrase) {
+        // Generated — show in a persistent modal so the list refresh can't wipe it
+        showPassphraseModal(data.cn, data.passphrase);
+        passLine = `<br><span style="color:var(--warning)">🔑 Encrypted key — passphrase shown in the popup (save it).</span>`;
+      } else if (data.encrypted) {
+        passLine = `<br><span style="color:var(--warning)">🔑 Key encrypted with the passphrase you entered.</span>`;
+      }
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Saved to ${data.cert_path}</span>${passLine}`;
       setTimeout(loadCA, 500);
     } else {
       document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
     }
+  }
+
+  function showPassphraseModal(cn, passphrase) {
+    const overlay = document.createElement('div');
+    overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:480px;max-width:95vw">
+      <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:8px">🔑 Key Passphrase</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px">The private key for <b style="color:var(--text)">${cn}</b> was encrypted. Enter this passphrase in Extron Toolbelt — and save it now, it won't be shown again.</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
+        <code style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:14px;color:var(--accent);word-break:break-all">${passphrase}</code>
+        <button class="btn" id="pp-copy" style="padding:8px 14px">Copy</button>
+      </div>
+      <button class="btn btn-ghost" id="pp-close">Close</button>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#pp-copy').onclick = (e) => { navigator.clipboard.writeText(passphrase); e.target.textContent = 'Copied ✓'; };
+    overlay.querySelector('#pp-close').onclick = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   }
 
   function showUploadGuide(cn) {
@@ -1221,7 +1259,9 @@
         3. Upload the <b>.crt</b> file as the certificate<br>
         4. Upload the <b>.key</b> file as the private key<br>
         5. Save and reboot the device<br><br>
-        <b>Extron UCS 303:</b> Settings → Security → SSL Certificate → upload .crt and .key`
+        <b>Extron UCS 303 (Toolbelt):</b> upload the .crt and .key. Toolbelt requires
+        an <b>encrypted key</b> — issue the cert with a passphrase (above) and enter
+        that same passphrase in Toolbelt's passphrase field.`
     };
     const modal = document.createElement('div');
     modal.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
