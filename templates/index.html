@@ -1173,7 +1173,8 @@
                 <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:600">${c.cn}</div>
                 <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${c.days_remaining} days</div>
               </div>
-              <div style="display:flex;gap:8px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                ${c.pem_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.pem')}" download="${c.filename.replace('.crt','.pem')}"><button class="btn" style="font-size:11px;padding:5px 10px" title="Combined cert+key for Extron Toolbelt (Utilities tab)">⬇ PEM (Extron)</button></a>` : ''}
                 <a href="/api/ca/download/${c.filename}" download="${c.filename}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
                 ${c.key_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.key')}" download="${c.filename.replace('.crt','.key')}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Key</button></a>` : ''}
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
@@ -1226,7 +1227,7 @@
       } else if (data.encrypted) {
         passLine = `<br><span style="color:var(--warning)">🔑 Key encrypted with the passphrase you entered.</span>`;
       }
-      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Saved to ${data.cert_path}</span>${passLine}`;
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Extron PEM: ${data.pem_path || data.cert_path}</span>${passLine}`;
       setTimeout(loadCA, 500);
     } else {
       document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
@@ -1253,15 +1254,17 @@
 
   function showUploadGuide(cn) {
     const guides = {
-      default: `<b>Generic upload guide for ${cn}:</b><br><br>
-        1. Open the device web interface<br>
-        2. Find the SSL/TLS or Certificate section<br>
-        3. Upload the <b>.crt</b> file as the certificate<br>
-        4. Upload the <b>.key</b> file as the private key<br>
-        5. Save and reboot the device<br><br>
-        <b>Extron UCS 303 (Toolbelt):</b> upload the .crt and .key. Toolbelt requires
-        an <b>encrypted key</b> — issue the cert with a passphrase (above) and enter
-        that same passphrase in Toolbelt's passphrase field.`
+      default: `<b>Extron (Toolbelt) — recommended for ${cn}:</b><br><br>
+        1. Download the <b>⬇ PEM (Extron)</b> file (certificate + key combined)<br>
+        2. Open <b>Extron Toolbelt</b> → <b>Utilities</b> tab<br>
+        3. Load the <b>.pem</b> file onto the controller<br>
+        4. The device reboots / restarts its web server<br><br>
+        This single .pem is the format Extron documents (cert block first, then the
+        unencrypted key) and avoids the passphrase prompt entirely.<br><br>
+        <b>Make sure the CA is installed in Windows</b> (button at the top) so the
+        browser trusts the device — then browse to https://${cn} with no warning.<br><br>
+        <b>Generic web-UI alternative:</b> some devices instead take the <b>.crt</b> as
+        the certificate and <b>.key</b> as the private key in their SSL/TLS settings.`
     };
     const modal = document.createElement('div');
     modal.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';

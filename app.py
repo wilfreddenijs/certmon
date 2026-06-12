@@ -476,6 +476,20 @@ def load_ca():
     return key, cert
 
 
+def _authority_key_id(ca_cert):
+    """Build authorityKeyIdentifier=keyid,issuer for a leaf cert (Extron profile)."""
+    from cryptography import x509
+    try:
+        ski = ca_cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+        return x509.AuthorityKeyIdentifier(
+            key_identifier=ski.digest,
+            authority_cert_issuer=[x509.DirectoryName(ca_cert.subject)],
+            authority_cert_serial_number=ca_cert.serial_number,
+        )
+    except Exception:
+        return x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key())
+
+
 @app.route("/api/ca/status")
 def ca_status():
     if not ca_exists():
@@ -655,39 +669,53 @@ def ca_issue():
             .public_key(dev_key.public_key())
             .serial_number(x509.random_serial_number())
             .not_valid_before(now_utc)
-            .not_valid_after(now_utc + dt.timedelta(days=397))
+            .not_valid_after(now_utc + dt.timedelta(days=825))
             .add_extension(x509.SubjectAlternativeName(sans), critical=False)
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            # Match Extron's documented profile: digitalSignature, nonRepudiation,
+            # keyEncipherment, dataEncipherment
             .add_extension(x509.KeyUsage(
-                digital_signature=True, key_encipherment=True,
-                content_commitment=False, data_encipherment=False,
+                digital_signature=True, content_commitment=True,
+                key_encipherment=True, data_encipherment=True,
                 key_agreement=False, key_cert_sign=False,
                 crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
             .add_extension(x509.ExtendedKeyUsage([
                 x509.ExtendedKeyUsageOID.SERVER_AUTH
             ]), critical=False)
+            .add_extension(_authority_key_id(ca_cert), critical=False)
             .sign(ca_key, hashes.SHA256())
         )
 
         cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-        if passphrase:
-            enc_algo = serialization.BestAvailableEncryption(passphrase.encode())
-        else:
-            enc_algo = serialization.NoEncryption()
-        key_pem = dev_key.private_bytes(
+        plain_key_pem = dev_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.TraditionalOpenSSL,
-            enc_algo
+            serialization.NoEncryption()
         ).decode()
+        if passphrase:
+            key_pem = dev_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.BestAvailableEncryption(passphrase.encode())
+            ).decode()
+        else:
+            key_pem = plain_key_pem
+
+        # Combined PEM for Extron Toolbelt (Utilities tab): certificate first,
+        # then the UNENCRYPTED private key. See Extron "Create Signed Certificate".
+        combined_pem = (cert_pem if cert_pem.endswith("\n") else cert_pem + "\n") + plain_key_pem
 
         # Save to CA dir
         safe_name = (hostname or ip).replace(".", "_").replace(":", "_")
         cert_path = os.path.join(CA_DIR, f"{safe_name}.crt")
         key_path = os.path.join(CA_DIR, f"{safe_name}.key")
+        pem_path = os.path.join(CA_DIR, f"{safe_name}.pem")
         with open(cert_path, "w") as f:
             f.write(cert_pem)
         with open(key_path, "w") as f:
             f.write(key_pem)
+        with open(pem_path, "w") as f:
+            f.write(combined_pem)
 
         return jsonify({
             "ok": True,
@@ -695,6 +723,7 @@ def ca_issue():
             "key_pem": key_pem,
             "cert_path": cert_path,
             "key_path": key_path,
+            "pem_path": pem_path,
             "cn": cn,
             "encrypted": bool(passphrase),
             "passphrase": passphrase or None,
@@ -722,6 +751,7 @@ def ca_issued():
                 cn = cert.subject.get_attributes_for_oid(
                     x509.NameOID.COMMON_NAME)[0].value
                 key_file = os.path.join(CA_DIR, fname.replace(".crt", ".key"))
+                pem_file = os.path.join(CA_DIR, fname.replace(".crt", ".pem"))
                 certs.append({
                     "filename": fname,
                     "cn": cn,
@@ -729,6 +759,7 @@ def ca_issued():
                     "days_remaining": days,
                     "cert_path": os.path.join(CA_DIR, fname),
                     "key_path": key_file if os.path.exists(key_file) else None,
+                    "pem_path": pem_file if os.path.exists(pem_file) else None,
                 })
             except Exception:
                 pass
@@ -743,7 +774,7 @@ def ca_download_file(filename):
     full_path = os.path.join(CA_DIR, safe)
     if not os.path.exists(full_path):
         return jsonify({"error": "Not found"}), 404
-    if not (safe.endswith(".crt") or safe.endswith(".key")):
+    if not (safe.endswith(".crt") or safe.endswith(".key") or safe.endswith(".pem")):
         return jsonify({"error": "Invalid file type"}), 400
     from flask import Response
     with open(full_path, "rb") as f:
