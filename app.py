@@ -12,9 +12,11 @@ import subprocess
 import threading
 import ipaddress
 import io
+import base64
+import uuid
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, Response
 
 
 def resource_path(relative):
@@ -46,7 +48,7 @@ def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE) as f:
             return json.load(f)
-    return {"manual_hosts": [], "scan_ranges": [], "certificates": {}, "renewals": []}
+    return {"manual_hosts": [], "scan_ranges": [], "certificates": {}, "renewals": [], "upload_devices": []}
 
 
 def save_data(data):
@@ -451,11 +453,6 @@ def export_excel():
     return response
 
 
-if __name__ == "__main__":
-    os.makedirs(data_dir(), exist_ok=True)
-    print("CertMon running at http://localhost:5000")
-    app.run(host="0.0.0.0", port=5000, debug=False)
-
 # ─────────────────────────────────────────────
 # CA Management
 # ─────────────────────────────────────────────
@@ -739,3 +736,313 @@ def ca_download_file(filename):
     response = Response(data, status=200, mimetype=mime)
     response.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
     return response
+
+
+# ── Certificate Upload Module ─────────────────────────────────────────────────
+
+@app.route("/api/upload/devices", methods=["GET"])
+def list_upload_devices():
+    data = load_data()
+    devices = data.get("upload_devices", [])
+    # Never send password back to frontend
+    safe = [{k: v for k, v in d.items() if k != "password"} for d in devices]
+    return jsonify(safe)
+
+
+@app.route("/api/upload/devices", methods=["POST"])
+def add_upload_device():
+    data = load_data()
+    body = request.json
+    required = ("name", "host", "device_type")
+    if not all(body.get(k, "").strip() for k in required):
+        return jsonify({"error": "name, host and device_type are required"}), 400
+    device = {
+        "id": str(uuid.uuid4()),
+        "name": body["name"].strip(),
+        "host": body["host"].strip(),
+        "device_type": body["device_type"].strip(),
+        "username": body.get("username", "").strip(),
+        "password": body.get("password", "").strip(),
+        "port": int(body.get("port", 80)),
+        "https": bool(body.get("https", False)),
+        "added": datetime.now(timezone.utc).isoformat(),
+    }
+    data.setdefault("upload_devices", []).append(device)
+    save_data(data)
+    safe = {k: v for k, v in device.items() if k != "password"}
+    return jsonify({"ok": True, "device": safe})
+
+
+@app.route("/api/upload/devices/<device_id>", methods=["DELETE"])
+def remove_upload_device(device_id):
+    data = load_data()
+    data["upload_devices"] = [d for d in data.get("upload_devices", []) if d["id"] != device_id]
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/upload/devices/<device_id>", methods=["PATCH"])
+def update_upload_device(device_id):
+    data = load_data()
+    body = request.json
+    for d in data.get("upload_devices", []):
+        if d["id"] == device_id:
+            for field in ("name", "host", "username", "password", "port", "https", "device_type"):
+                if field in body:
+                    d[field] = body[field]
+            break
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+def _extron_push(host, port, use_https, username, password, cert_pem, key_pem):
+    """
+    Attempt to push a cert+key to an Extron device via its web interface.
+    Returns (success: bool, log: list[str])
+    """
+    import urllib.request
+    import urllib.parse
+    import urllib.error
+    import http.cookiejar
+
+    log = []
+    scheme = "https" if use_https else "http"
+    base = f"{scheme}://{host}:{port}"
+
+    # Build an opener with cookie jar and no SSL verification
+    cj = http.cookiejar.CookieJar()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    https_handler = urllib.request.HTTPSHandler(context=ctx)
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cj),
+        https_handler
+    )
+    opener.addheaders = [("User-Agent", "Mozilla/5.0")]
+
+    # Step 1: Fetch the login page to discover form fields
+    login_candidates = ["/", "/login", "/auth", "/index.html"]
+    login_url = None
+    for path in login_candidates:
+        try:
+            resp = opener.open(f"{base}{path}", timeout=5)
+            body_bytes = resp.read(4096)
+            body_str = body_bytes.decode("utf-8", errors="ignore")
+            if "password" in body_str.lower() or "login" in body_str.lower():
+                login_url = f"{base}{path}"
+                log.append(f"Found login page at {path}")
+                break
+        except Exception:
+            continue
+
+    if not login_url:
+        login_url = base + "/"
+        log.append("Login page not identified, trying root")
+
+    # Step 2: POST credentials
+    login_payloads = [
+        {"username": username or "admin", "password": password},
+        {"user": username or "admin", "passwd": password},
+        {"login": username or "admin", "password": password},
+    ]
+    login_post_urls = [login_url, base + "/login", base + "/auth", base + "/api/login"]
+    authenticated = False
+    for post_url in login_post_urls:
+        for payload in login_payloads:
+            try:
+                data_enc = urllib.parse.urlencode(payload).encode()
+                req = urllib.request.Request(post_url, data=data_enc,
+                                             headers={"Content-Type": "application/x-www-form-urlencoded"})
+                resp = opener.open(req, timeout=5)
+                status = resp.getcode()
+                resp_body = resp.read(1024).decode("utf-8", errors="ignore")
+                if status in (200, 302) and "invalid" not in resp_body.lower():
+                    log.append(f"Login succeeded at {post_url} (HTTP {status})")
+                    authenticated = True
+                    break
+            except urllib.error.HTTPError as e:
+                if e.code == 401:
+                    continue
+                log.append(f"Login HTTP error {e.code} at {post_url}")
+            except Exception as e:
+                log.append(f"Login error at {post_url}: {e}")
+        if authenticated:
+            break
+
+    if not authenticated:
+        log.append("WARNING: Could not confirm login — will attempt upload anyway")
+
+    # Step 3: Try known Extron certificate upload endpoints
+    cert_bytes = cert_pem.encode() if isinstance(cert_pem, str) else cert_pem
+    key_bytes = key_pem.encode() if isinstance(key_pem, str) else key_pem
+
+    boundary = "----CertMonBoundary7a3f9b"
+    def make_multipart(cert_field, key_field):
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{cert_field}"; filename="cert.pem"\r\n'
+            f"Content-Type: application/x-pem-file\r\n\r\n"
+        ).encode() + cert_bytes + (
+            f"\r\n--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{key_field}"; filename="key.pem"\r\n'
+            f"Content-Type: application/x-pem-file\r\n\r\n"
+        ).encode() + key_bytes + f"\r\n--{boundary}--\r\n".encode()
+        return body
+
+    upload_attempts = [
+        ("/api/certificate",        "certificate", "private_key"),
+        ("/api/config/certificate", "cert",        "key"),
+        ("/Certificate",            "certificate", "key"),
+        ("/certificate",            "cert_file",   "key_file"),
+        ("/api/security/cert",      "cert",        "key"),
+    ]
+
+    for path, cert_field, key_field in upload_attempts:
+        try:
+            body = make_multipart(cert_field, key_field)
+            req = urllib.request.Request(
+                base + path,
+                data=body,
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+            )
+            req.get_method = lambda: "POST"
+            resp = opener.open(req, timeout=10)
+            status = resp.getcode()
+            resp_body = resp.read(512).decode("utf-8", errors="ignore")
+            log.append(f"Upload attempt {path}: HTTP {status} — {resp_body[:120]}")
+            if status in (200, 201, 204):
+                log.append("Certificate upload succeeded!")
+                return True, log
+        except urllib.error.HTTPError as e:
+            log.append(f"Upload {path}: HTTP {e.code}")
+            if e.code not in (404, 405):
+                # Non-404/405 means the endpoint exists but may need different params
+                log.append(f"  → endpoint exists (HTTP {e.code}), may need manual parameter adjustment")
+        except Exception as e:
+            log.append(f"Upload {path}: {e}")
+
+    log.append("Automatic upload did not succeed — see manual upload instructions")
+    return False, log
+
+
+def _generic_instructions(device):
+    device_type = device.get("device_type", "generic")
+    host = device.get("host", "")
+    port = device.get("port", 443)
+    https = device.get("https", False)
+    scheme = "https" if https else "http"
+
+    instructions = {
+        "extron": (
+            f"1. Open Extron Toolbelt on this PC\n"
+            f"2. Connect to {host}\n"
+            f"3. Go to the Security / Certificate section\n"
+            f"4. Upload the .crt file as the Certificate and the .key file as the Private Key\n"
+            f"5. Apply and reboot the device if prompted\n\n"
+            f"Alternatively: open http://{host} → Security → Certificate"
+        ),
+        "homeassistant": (
+            f"1. Copy cert.pem to your HA config directory (e.g. /config/ssl/fullchain.pem)\n"
+            f"2. Copy key.pem to /config/ssl/privkey.pem\n"
+            f"3. In configuration.yaml set:\n"
+            f"   http:\n"
+            f"     ssl_certificate: /config/ssl/fullchain.pem\n"
+            f"     ssl_key: /config/ssl/privkey.pem\n"
+            f"4. Restart Home Assistant"
+        ),
+        "synology": (
+            f"1. Open DSM → Control Panel → Security → Certificate\n"
+            f"2. Click Add → Import certificate\n"
+            f"3. Upload cert.pem as Certificate and key.pem as Private Key\n"
+            f"4. Set as default if needed"
+        ),
+        "generic": (
+            f"1. Open the device web interface at {scheme}://{host}:{port}\n"
+            f"2. Navigate to Security or Certificate settings\n"
+            f"3. Upload cert.pem as the certificate and key.pem as the private key\n"
+            f"4. Apply / restart as needed"
+        ),
+    }
+    return instructions.get(device_type, instructions["generic"])
+
+
+@app.route("/api/upload/push", methods=["POST"])
+def push_cert():
+    data = load_data()
+    body = request.json
+    device_id = body.get("device_id")
+    cert_pem = body.get("cert_pem", "")
+    key_pem = body.get("key_pem", "")
+
+    if not device_id or not cert_pem or not key_pem:
+        return jsonify({"error": "device_id, cert_pem and key_pem are required"}), 400
+
+    device = next((d for d in data.get("upload_devices", []) if d["id"] == device_id), None)
+    if not device:
+        return jsonify({"error": "Device not found"}), 404
+
+    device_type = device.get("device_type", "generic")
+    log = []
+
+    if device_type in ("extron",):
+        success, log = _extron_push(
+            host=device["host"],
+            port=device.get("port", 80),
+            use_https=device.get("https", False),
+            username=device.get("username", "admin"),
+            password=device.get("password", "extron"),
+            cert_pem=cert_pem,
+            key_pem=key_pem,
+        )
+        instructions = None if success else _generic_instructions(device)
+    else:
+        success = False
+        instructions = _generic_instructions(device)
+        log.append(f"Device type '{device_type}' does not support automatic push.")
+        log.append("See manual instructions below.")
+
+    return jsonify({
+        "ok": success,
+        "log": log,
+        "instructions": instructions,
+    })
+
+
+@app.route("/api/upload/test", methods=["POST"])
+def test_device_connection():
+    body = request.json
+    host = body.get("host", "").strip()
+    port = int(body.get("port", 80))
+    use_https = bool(body.get("https", False))
+
+    if not host:
+        return jsonify({"error": "host is required"}), 400
+
+    import urllib.request
+    import urllib.error
+    scheme = "https" if use_https else "http"
+    url = f"{scheme}://{host}:{port}/"
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+    opener.addheaders = [("User-Agent", "Mozilla/5.0")]
+
+    try:
+        resp = opener.open(url, timeout=5)
+        return jsonify({"ok": True, "status": resp.getcode(), "message": f"Reachable (HTTP {resp.getcode()})"})
+    except urllib.error.HTTPError as e:
+        # 401/403 means the device is reachable but needs auth — that's fine
+        if e.code in (401, 403):
+            return jsonify({"ok": True, "status": e.code, "message": f"Reachable — requires authentication (HTTP {e.code})"})
+        return jsonify({"ok": False, "status": e.code, "message": f"HTTP {e.code}"})
+    except Exception as e:
+        return jsonify({"ok": False, "status": 0, "message": str(e)})
+
+
+if __name__ == "__main__":
+    os.makedirs(data_dir(), exist_ok=True)
+    print("CertMon running at http://localhost:5000")
+    app.run(host="0.0.0.0", port=5000, debug=False)

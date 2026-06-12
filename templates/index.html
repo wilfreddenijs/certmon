@@ -539,6 +539,68 @@
 
   .spinning { animation: spin 1s linear infinite; display: inline-block; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .btn-upload {
+    background: rgba(0,229,255,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(0,229,255,0.3);
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .btn-upload:hover { background: rgba(0,229,255,0.22); transform: none; }
+
+  /* Upload tab */
+  .cert-drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.2s;
+    margin-bottom: 8px;
+  }
+  .cert-drop-zone:hover, .cert-drop-zone.dragover { border-color: var(--accent); color: var(--text); }
+
+  .pem-area {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 10px;
+    border-radius: 6px;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+  }
+  .pem-area:focus { border-color: var(--accent); }
+
+  .device-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .device-card:hover { border-color: rgba(0,229,255,0.3); }
+  .device-card.selected { border-color: var(--accent); background: rgba(0,229,255,0.05); }
+
+  .device-type-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(124,77,255,0.15);
+    color: var(--accent2);
+    font-weight: 700;
+  }
 </style>
 </head>
 <body>
@@ -605,6 +667,7 @@
         <div class="tab active" onclick="switchTab('certs')">Certificates</div>
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
         <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
+        <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -631,6 +694,109 @@
 
     <div class="tab-panel" id="tab-ca">
       <div id="ca-content" style="max-width:860px"></div>
+    </div>
+
+    <!-- Upload Tab -->
+    <div class="tab-panel" id="tab-upload">
+      <div style="display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start">
+
+        <!-- Left: device list + add form -->
+        <div>
+          <div class="section-title" style="margin-bottom:12px">Target Devices</div>
+
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+            <div class="form-group">
+              <label class="form-label">Device Name</label>
+              <input type="text" id="ud-name" placeholder="e.g. UCS 303 Boardroom" style="width:100%"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">IP Address / Host</label>
+              <input type="text" id="ud-host" placeholder="192.168.0.114" style="width:100%"/>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
+              <div class="form-group">
+                <label class="form-label">Port</label>
+                <input type="number" id="ud-port" value="80" style="width:100%"/>
+              </div>
+              <div class="form-group">
+                <label class="form-label">HTTPS</label>
+                <div style="padding-top:8px"><input type="checkbox" id="ud-https" style="width:16px;height:16px"/></div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Device Type</label>
+              <select id="ud-type" style="width:100%">
+                <option value="extron">Extron (UCS 303, etc.)</option>
+                <option value="homeassistant">Home Assistant</option>
+                <option value="synology">Synology NAS</option>
+                <option value="generic">Generic / Manual</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Username</label>
+              <input type="text" id="ud-username" placeholder="admin" style="width:100%"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Password</label>
+              <input type="password" id="ud-password" placeholder="extron" style="width:100%"/>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn" style="flex:1" onclick="addUploadDevice()">+ Add Device</button>
+              <button class="btn btn-ghost" style="padding:8px 12px" onclick="testUploadDevice()" title="Test connection">⟳ Test</button>
+            </div>
+            <div id="ud-test-result" style="font-size:11px;margin-top:8px;display:none"></div>
+          </div>
+
+          <div id="upload-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+
+        <!-- Right: cert upload + push -->
+        <div>
+          <div class="section-title" style="margin-bottom:12px">Certificate Files</div>
+
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+            <div class="form-group">
+              <label class="form-label">Certificate (.crt / .pem)</label>
+              <div id="cert-drop" class="cert-drop-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event,'cert')">
+                <div id="cert-drop-label">Drag & drop or <label for="cert-file-input" style="color:var(--accent);cursor:pointer;text-decoration:underline">browse</label></div>
+                <input type="file" id="cert-file-input" accept=".crt,.pem,.cer" style="display:none" onchange="handleFileSelect(event,'cert')"/>
+                <div id="cert-filename" style="color:var(--ok);font-size:11px;margin-top:4px"></div>
+              </div>
+              <textarea id="cert-pem" class="pem-area" placeholder="Or paste certificate PEM here&#10;-----BEGIN CERTIFICATE-----&#10;..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Private Key (.key / .pem)</label>
+              <div id="key-drop" class="cert-drop-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event,'key')">
+                <div id="key-drop-label">Drag & drop or <label for="key-file-input" style="color:var(--accent);cursor:pointer;text-decoration:underline">browse</label></div>
+                <input type="file" id="key-file-input" accept=".key,.pem" style="display:none" onchange="handleFileSelect(event,'key')"/>
+                <div id="key-filename" style="color:var(--ok);font-size:11px;margin-top:4px"></div>
+              </div>
+              <textarea id="key-pem" class="pem-area" placeholder="Or paste private key PEM here&#10;-----BEGIN PRIVATE KEY-----&#10;..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Push to Device</label>
+              <select id="push-device-select" style="width:100%">
+                <option value="">— select a device —</option>
+              </select>
+            </div>
+
+            <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">⬆ Push Certificate to Device</button>
+          </div>
+
+          <!-- Push log / result -->
+          <div id="push-result" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:600;margin-bottom:10px" id="push-result-title"></div>
+            <div id="push-log" style="font-size:11px;color:var(--muted);line-height:1.8;font-family:'JetBrains Mono',monospace"></div>
+            <div id="push-instructions" style="display:none;margin-top:14px">
+              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required — follow these steps:</div>
+              <pre id="push-instructions-text" style="font-size:11px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -667,6 +833,11 @@
   async function loadData() {
     const res = await fetch('/api/data');
     const data = await res.json();
+    // Load saved upload devices too, so cert cards can show "Push" vs "Upload"
+    try {
+      const udRes = await fetch('/api/upload/devices');
+      uploadDevices = await udRes.json();
+    } catch (e) { /* keep existing uploadDevices */ }
     renderSidebar(data);
     renderCerts(data.certificates || {});
     renderRenewals(data.renewals || []);
@@ -742,6 +913,9 @@
         : 'N/A';
       const canRenew = ['warning', 'critical', 'expired'].includes(c.status);
       const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
+      const hasDevice = (uploadDevices || []).some(d => d.host === c.host);
+      const uploadLabel = hasDevice ? '⬆ Push' : '⬆ Upload';
+      const uploadTitle = hasDevice ? 'Push a cert to this saved device' : 'Add this device to the Upload tab';
 
       return `
         <div class="cert-card ${c.status}">
@@ -773,6 +947,7 @@
           <div class="cert-actions">
             <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
             ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
+            <button class="btn btn-upload" title="${uploadTitle}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${uploadLabel}</button>
             <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
           </div>
         </div>
@@ -1061,8 +1236,9 @@
   function switchTab(name) {
     _origSwitchTab(name);
     if (name === 'ca') loadCA();
+    if (name === 'upload') loadUploadDevices();
     document.querySelectorAll('.tab').forEach((t, i) => {
-      t.classList.toggle('active', ['certs','renewals','ca'][i] === name);
+      t.classList.toggle('active', ['certs','renewals','ca','upload'][i] === name);
     });
   }
 
@@ -1073,6 +1249,238 @@
   // Close modal on overlay click
   document.getElementById('renewal-modal').addEventListener('click', e => {
     if (e.target === document.getElementById('renewal-modal')) closeModal();
+  });
+
+  // ── Upload Tab ──────────────────────────────────────────────────────────────
+
+  let uploadDevices = [];
+  let selectedDeviceId = null;
+
+  // Escape a string for safe use inside a single-quoted HTML attribute
+  function escAttr(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  }
+
+  // Guess device type from hostname / CN so the dropdown defaults sensibly
+  function guessDeviceType(hostOrCn) {
+    const s = (hostOrCn || '').toLowerCase();
+    if (s.includes('ucs') || s.includes('extron')) return 'extron';
+    if (s.includes('homeassistant') || s.includes('hassio') || s.includes('home-assistant')) return 'homeassistant';
+    if (s.includes('synology') || s.includes('diskstation') || s.includes('nas')) return 'synology';
+    return 'generic';
+  }
+
+  function flashCard(el) {
+    if (!el) return;
+    el.style.transition = 'box-shadow 0.3s';
+    el.style.boxShadow = '0 0 0 2px var(--accent)';
+    setTimeout(() => { el.style.boxShadow = 'none'; }, 1100);
+  }
+
+  // Called from the "⬆ Upload / Push" button on a cert card.
+  // If a device is already saved for this host, skip the add-device form and
+  // jump straight to the cert-file drop area with that device pre-selected.
+  // Otherwise prefill the add-device form.
+  async function sendToUpload(host, port, cn) {
+    switchTab('upload');
+    await loadUploadDevices();
+
+    const existing = uploadDevices.find(d => d.host === host);
+    if (existing) {
+      // Saved device — go straight to push
+      selectDevice(existing.id);
+      const pushCard = document.getElementById('push-btn').closest('div[style*="border-radius:10px"]');
+      flashCard(pushCard);
+      document.getElementById('cert-pem').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    // No saved device — prefill the add-device form.
+    // Cert was found on `port`; device web UI is usually 80/443.
+    const isHttps = (port === 443 || port === 8443 || port === 4443 || port === 9443);
+
+    document.getElementById('ud-name').value = cn || host;
+    document.getElementById('ud-host').value = host;
+    document.getElementById('ud-port').value = isHttps ? port : 80;
+    document.getElementById('ud-https').checked = isHttps;
+    document.getElementById('ud-type').value = guessDeviceType(cn || host);
+
+    // Prefill Extron default password as a convenience
+    if (guessDeviceType(cn || host) === 'extron' && !document.getElementById('ud-password').value) {
+      document.getElementById('ud-password').value = 'extron';
+    }
+
+    flashCard(document.getElementById('ud-name').closest('div[style*="border-radius:10px"]'));
+    document.getElementById('ud-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function loadUploadDevices() {
+    const res = await fetch('/api/upload/devices');
+    uploadDevices = await res.json();
+    renderUploadDevices();
+    renderDeviceSelect();
+  }
+
+  function renderUploadDevices() {
+    const list = document.getElementById('upload-device-list');
+    if (!uploadDevices.length) {
+      list.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px">No devices yet — add one above.</div>';
+      return;
+    }
+    list.innerHTML = uploadDevices.map(d => `
+      <div class="device-card${selectedDeviceId === d.id ? ' selected' : ''}" onclick="selectDevice('${d.id}')">
+        <div style="flex:1;min-width:0">
+          <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:600;color:var(--text)">${d.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${d.host}:${d.port} ${d.https ? '(HTTPS)' : '(HTTP)'}</div>
+        </div>
+        <span class="device-type-badge">${d.device_type}</span>
+        <button class="btn btn-danger" style="flex-shrink:0" onclick="event.stopPropagation();removeUploadDevice('${d.id}')">✕</button>
+      </div>
+    `).join('');
+  }
+
+  function renderDeviceSelect() {
+    const sel = document.getElementById('push-device-select');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— select a device —</option>' +
+      uploadDevices.map(d => `<option value="${d.id}"${d.id === cur ? ' selected' : ''}>${d.name} (${d.host})</option>`).join('');
+  }
+
+  function selectDevice(id) {
+    selectedDeviceId = id;
+    document.getElementById('push-device-select').value = id;
+    renderUploadDevices();
+  }
+
+  async function addUploadDevice() {
+    const name = document.getElementById('ud-name').value.trim();
+    const host = document.getElementById('ud-host').value.trim();
+    const port = parseInt(document.getElementById('ud-port').value) || 80;
+    const https = document.getElementById('ud-https').checked;
+    const device_type = document.getElementById('ud-type').value;
+    const username = document.getElementById('ud-username').value.trim();
+    const password = document.getElementById('ud-password').value;
+
+    if (!name || !host) { alert('Name and host are required'); return; }
+
+    const res = await fetch('/api/upload/devices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, host, port, https, device_type, username, password })
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+
+    // Clear form
+    ['ud-name','ud-host','ud-username','ud-password'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('ud-port').value = '80';
+    document.getElementById('ud-https').checked = false;
+
+    await loadUploadDevices();
+    loadData();  // refresh cert cards so they show "Push" for this host
+  }
+
+  async function removeUploadDevice(id) {
+    await fetch(`/api/upload/devices/${id}`, { method: 'DELETE' });
+    if (selectedDeviceId === id) selectedDeviceId = null;
+    await loadUploadDevices();
+    loadData();  // refresh cert cards (back to "Upload" if no device left)
+  }
+
+  async function testUploadDevice() {
+    const host = document.getElementById('ud-host').value.trim();
+    const port = parseInt(document.getElementById('ud-port').value) || 80;
+    const https = document.getElementById('ud-https').checked;
+    if (!host) { alert('Enter a host first'); return; }
+
+    const el = document.getElementById('ud-test-result');
+    el.style.display = 'block';
+    el.style.color = 'var(--muted)';
+    el.textContent = 'Testing connection...';
+
+    const res = await fetch('/api/upload/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, port, https })
+    });
+    const data = await res.json();
+    el.style.color = data.ok ? 'var(--ok)' : 'var(--critical)';
+    el.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
+  }
+
+  function handleDrop(event, type) {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (file) readPemFile(file, type);
+    event.currentTarget.classList.remove('dragover');
+  }
+
+  function handleFileSelect(event, type) {
+    const file = event.target.files[0];
+    if (file) readPemFile(file, type);
+  }
+
+  function readPemFile(file, type) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById(`${type}-pem`).value = e.target.result;
+      document.getElementById(`${type}-filename`).textContent = '✓ ' + file.name;
+    };
+    reader.readAsText(file);
+  }
+
+  async function pushCert() {
+    const cert_pem = document.getElementById('cert-pem').value.trim();
+    const key_pem = document.getElementById('key-pem').value.trim();
+    const device_id = document.getElementById('push-device-select').value;
+
+    if (!cert_pem) { alert('Please provide a certificate (drag & drop or paste)'); return; }
+    if (!key_pem) { alert('Please provide a private key (drag & drop or paste)'); return; }
+    if (!device_id) { alert('Please select a target device'); return; }
+
+    const btn = document.getElementById('push-btn');
+    btn.disabled = true;
+    btn.textContent = '⟳ Pushing...';
+
+    const res = await fetch('/api/upload/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id, cert_pem, key_pem })
+    });
+    const data = await res.json();
+
+    btn.disabled = false;
+    btn.textContent = '⬆ Push Certificate to Device';
+
+    const resultDiv = document.getElementById('push-result');
+    const titleEl = document.getElementById('push-result-title');
+    const logEl = document.getElementById('push-log');
+    const instrDiv = document.getElementById('push-instructions');
+    const instrText = document.getElementById('push-instructions-text');
+
+    resultDiv.style.display = 'block';
+    titleEl.style.color = data.ok ? 'var(--ok)' : 'var(--warning)';
+    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Automatic push did not succeed';
+    logEl.innerHTML = (data.log || []).map(l => `<div>${l}</div>`).join('');
+
+    if (data.instructions) {
+      instrDiv.style.display = 'block';
+      instrText.textContent = data.instructions;
+    } else {
+      instrDiv.style.display = 'none';
+    }
+
+    resultDiv.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // Drag highlight
+  document.addEventListener('DOMContentLoaded', () => {
+    ['cert-drop','key-drop'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('dragover', () => el.classList.add('dragover'));
+      el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+    });
   });
 
   // Initial load + auto-refresh every 60s
