@@ -549,6 +549,16 @@
 
   .btn-upload:hover { background: rgba(0,229,255,0.22); transform: none; }
 
+  .btn-ca {
+    background: rgba(124,77,255,0.12);
+    color: var(--accent2);
+    border: 1px solid rgba(124,77,255,0.3);
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .btn-ca:hover { background: rgba(124,77,255,0.22); transform: none; }
+
   /* Upload tab */
   .cert-drop-zone {
     border: 2px dashed var(--border);
@@ -948,6 +958,7 @@
             <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
             ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
             <button class="btn btn-upload" title="${uploadTitle}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${uploadLabel}</button>
+            <button class="btn btn-ca" title="Issue a CA-signed cert for this device (prefills the Local CA tab)" onclick="sendToCA('${c.host}','${escAttr(c.cn || '')}')">🔐 CA</button>
             <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
           </div>
         </div>
@@ -1184,6 +1195,7 @@
       </div>` : '';
 
     el.innerHTML = caCard + issueForm + issuedSection;
+    applyCAPrefill();  // fill IP/hostname if a cert card requested it
   }
 
   async function generateCA() {
@@ -1311,6 +1323,34 @@
     el.style.transition = 'box-shadow 0.3s';
     el.style.boxShadow = '0 0 0 2px var(--accent)';
     setTimeout(() => { el.style.boxShadow = 'none'; }, 1100);
+  }
+
+  // ── CA prefill from a cert card ──────────────────────────────────────────────
+  let pendingCAPrefill = null;
+  const isIp = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s || '');
+
+  // "🔐 CA" button on a cert card — jump to Local CA tab and prefill the issue form
+  function sendToCA(host, cn) {
+    pendingCAPrefill = {
+      ip: isIp(host) ? host : '',
+      hostname: (cn && cn !== host && !isIp(cn)) ? cn : (isIp(host) ? '' : host)
+    };
+    switchTab('ca');           // triggers loadCA(); renderCA() will call applyCAPrefill
+    setTimeout(applyCAPrefill, 60);  // fallback if the form is already present
+  }
+
+  // Applies a pending prefill once the issue form exists. If the CA hasn't been
+  // generated yet the form is absent, so we keep the values pending until it is.
+  function applyCAPrefill() {
+    if (!pendingCAPrefill) return;
+    const ipEl = document.getElementById('issue-ip');
+    const hnEl = document.getElementById('issue-hostname');
+    if (!ipEl || !hnEl) return;  // no CA yet — keep pending until renderCA shows the form
+    ipEl.value = pendingCAPrefill.ip || '';
+    hnEl.value = pendingCAPrefill.hostname || '';
+    flashCard(ipEl.closest('div[style*="border-radius:10px"]'));
+    ipEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    pendingCAPrefill = null;
   }
 
   // Called from the "⬆ Upload / Push" button on a cert card.
