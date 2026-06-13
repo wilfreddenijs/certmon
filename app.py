@@ -14,9 +14,12 @@ import ipaddress
 import io
 import base64
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response
+
+from certmon.config import resolve_data_dir
 
 
 def resource_path(relative):
@@ -26,10 +29,14 @@ def resource_path(relative):
 
 
 def data_dir():
-    """Writable directory next to the .exe (or script)."""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    """Return CertMon's writable server data directory."""
+    path = resolve_data_dir(
+        frozen=getattr(sys, "frozen", False),
+        executable=Path(sys.executable),
+        source_dir=Path(__file__).resolve().parent,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
 
 
 app = Flask(__name__, template_folder=resource_path("templates"))
