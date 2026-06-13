@@ -21,6 +21,7 @@ from flask import Flask, render_template, request, jsonify, send_file, Response
 
 from certmon.config import resolve_data_dir
 from certmon.db import Database
+from certmon.vault import Vault, WindowsDpapiProtector
 
 
 def resource_path(relative):
@@ -53,10 +54,20 @@ legacy_base = (
     else Path(__file__).resolve().parent
 )
 legacy_data_file = legacy_base / "certmon_data.json"
+migration_source = None
 for migration_source in (Path(DATA_FILE), legacy_data_file):
     if migration_source.exists():
         database.migrate_legacy_nonsecrets(migration_source)
         break
+else:
+    migration_source = None
+
+vault = None
+if sys.platform == "win32":
+    vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
+    vault.initialize()
+    if migration_source is not None:
+        database.complete_legacy_secret_migration(migration_source, vault)
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
 ACME_PROD = "https://acme-v02.api.letsencrypt.org/directory"
 
@@ -66,11 +77,33 @@ scan_progress = {"running": False, "progress": 0, "total": 0, "current": ""}
 
 
 def load_data():
-    return database.load_legacy_state()
+    data = database.load_legacy_state()
+    if vault is not None:
+        for device in data.get("upload_devices", []):
+            device_id = device.get("id") or f"legacy:{device.get('host')}"
+            blob = database.get_secret(f"device-password:{device_id}")
+            if blob is not None:
+                device["password"] = vault.decrypt(
+                    blob, purpose="device-password"
+                ).decode("utf-8")
+    return data
 
 
 def save_data(data):
-    database.save_legacy_state(data)
+    sanitized = json.loads(json.dumps(data))
+    for device in sanitized.get("upload_devices", []):
+        password = device.pop("password", None)
+        if password is None:
+            continue
+        if vault is None:
+            raise RuntimeError("Secure credential storage is unavailable")
+        device_id = device.get("id") or f"legacy:{device.get('host')}"
+        database.put_secret(
+            f"device-password:{device_id}",
+            vault.encrypt(password.encode("utf-8"), purpose="device-password"),
+            {"device_id": device_id},
+        )
+    database.save_legacy_state(sanitized)
 
 
 def get_cert_info(host, port=443, timeout=3):

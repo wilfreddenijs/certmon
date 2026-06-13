@@ -1,4 +1,5 @@
 import json
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -196,6 +197,111 @@ class Database:
                 (payload,),
             )
 
+    def put_secret(self, secret_id, blob, metadata=None):
+        now = _utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO secrets(
+                    id, key_id, nonce, ciphertext, purpose, metadata_json,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    key_id=excluded.key_id,
+                    nonce=excluded.nonce,
+                    ciphertext=excluded.ciphertext,
+                    purpose=excluded.purpose,
+                    metadata_json=excluded.metadata_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    secret_id,
+                    blob.key_id,
+                    blob.nonce,
+                    blob.ciphertext,
+                    blob.purpose,
+                    json.dumps(metadata or {}),
+                    now,
+                    now,
+                ),
+            )
+
+    def get_secret(self, secret_id):
+        from certmon.vault import EncryptedBlob
+
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT key_id, nonce, ciphertext, purpose FROM secrets WHERE id=?",
+                (secret_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return EncryptedBlob(
+            row["key_id"], row["nonce"], row["ciphertext"], row["purpose"]
+        )
+
+    def delete_secret(self, secret_id):
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM secrets WHERE id=?", (secret_id,))
+
+    def list_secret_metadata(self):
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id, key_id, purpose, metadata_json, created_at, updated_at FROM secrets"
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "key_id": row["key_id"],
+                "purpose": row["purpose"],
+                "metadata": json.loads(row["metadata_json"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def rotate_secrets(self, vault, *, interrupt_after=None):
+        pending_key_id = vault.begin_rotation()
+        with self.connect() as conn:
+            secret_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM secrets WHERE key_id != ? ORDER BY id",
+                    (pending_key_id,),
+                )
+            ]
+
+        converted = 0
+        for secret_id in secret_ids:
+            blob = self.get_secret(secret_id)
+            plaintext = vault.decrypt(blob, purpose=blob.purpose)
+            replacement = vault.encrypt_for_rotation(
+                plaintext, purpose=blob.purpose
+            )
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    UPDATE secrets
+                    SET key_id=?, nonce=?, ciphertext=?, updated_at=?
+                    WHERE id=? AND key_id=?
+                    """,
+                    (
+                        replacement.key_id,
+                        replacement.nonce,
+                        replacement.ciphertext,
+                        _utc_now(),
+                        secret_id,
+                        blob.key_id,
+                    ),
+                )
+            converted += 1
+            if interrupt_after is not None and converted >= interrupt_after:
+                raise RuntimeError("Simulated rotation interruption")
+
+        vault.activate_pending_key()
+        return converted
+
     def migrate_legacy_nonsecrets(self, source: Path):
         source = Path(source)
         if not source.exists():
@@ -243,6 +349,67 @@ class Database:
                 "INSERT INTO settings(key, value) VALUES (?, ?)",
                 ("legacy_nonsecrets_imported_at", _utc_now()),
             )
+        return True
+
+    def complete_legacy_secret_migration(self, source: Path, vault):
+        source = Path(source)
+        if not source.exists():
+            return False
+        with self.connect() as conn:
+            done = conn.execute(
+                "SELECT 1 FROM settings WHERE key='legacy_json_migrated_at'"
+            ).fetchone()
+        if done:
+            return False
+
+        raw = json.loads(source.read_text(encoding="utf-8"))
+        encrypted = []
+        for device in raw.get("upload_devices", []):
+            password = device.get("password")
+            if not password:
+                continue
+            device_id = device.get("id") or f"legacy:{device.get('host')}"
+            secret_id = f"device-password:{device_id}"
+            encrypted.append(
+                (
+                    device_id,
+                    secret_id,
+                    vault.encrypt(password.encode("utf-8"), purpose="device-password"),
+                )
+            )
+
+        now = _utc_now()
+        with self.transaction() as conn:
+            for device_id, secret_id, blob in encrypted:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO secrets(
+                        id, key_id, nonce, ciphertext, purpose, metadata_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, '{}', ?, ?)
+                    """,
+                    (
+                        secret_id,
+                        blob.key_id,
+                        blob.nonce,
+                        blob.ciphertext,
+                        blob.purpose,
+                        now,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE devices SET secret_id=? WHERE id=? AND secret_id IS NULL",
+                    (secret_id, device_id),
+                )
+            conn.execute(
+                "INSERT INTO settings(key, value) VALUES (?, ?)",
+                ("legacy_json_migrated_at", now),
+            )
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = source.with_name(f"certmon_data.{timestamp}.bak.json")
+        shutil.copy2(source, backup)
         return True
 
 

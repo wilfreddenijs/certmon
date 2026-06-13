@@ -1,6 +1,7 @@
 import json
 
 from certmon.db import Database
+from certmon.vault import MemoryKeyProtector, Vault
 
 
 def test_legacy_nonsecret_migration_is_idempotent(tmp_path):
@@ -36,3 +37,35 @@ def test_legacy_nonsecret_migration_is_idempotent(tmp_path):
     assert state["scan_ranges"] == ["192.168.1.0/24"]
     assert "password" not in state["upload_devices"][0]
     assert source.exists()
+
+
+def test_legacy_password_is_encrypted_before_migration_completes(tmp_path):
+    source = tmp_path / "certmon_data.json"
+    source.write_text(
+        json.dumps(
+            {
+                "upload_devices": [
+                    {
+                        "id": "dev-1",
+                        "name": "Extron",
+                        "host": "192.168.1.20",
+                        "device_type": "extron",
+                        "password": "secret",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    db = Database(tmp_path / "certmon.db")
+    db.initialize()
+    db.migrate_legacy_nonsecrets(source)
+    vault = Vault(tmp_path / "vault", MemoryKeyProtector())
+    vault.initialize()
+
+    assert db.complete_legacy_secret_migration(source, vault) is True
+
+    blob = db.get_secret("device-password:dev-1")
+    assert blob is not None
+    assert vault.decrypt(blob, purpose="device-password") == b"secret"
+    assert list(tmp_path.glob("certmon_data.*.bak.json"))
