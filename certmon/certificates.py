@@ -74,6 +74,7 @@ def validate_certificate_import(
     expected_identifiers=(),
     system_roots=(),
     enterprise_roots=(),
+    explicit_private_roots=(),
     explicit_private_root=False,
 ):
     errors = []
@@ -140,11 +141,17 @@ def validate_certificate_import(
     enterprise_fingerprints = {
         cert.fingerprint(hashes.SHA256()) for cert in enterprise_roots
     }
+    explicit_private_fingerprints = {
+        cert.fingerprint(hashes.SHA256()) for cert in explicit_private_roots
+    }
     if root is not None and root.fingerprint(hashes.SHA256()) in system_fingerprints:
         trust_status = "system"
     elif root is not None and root.fingerprint(hashes.SHA256()) in enterprise_fingerprints:
         trust_status = "enterprise"
-    elif root is not None and explicit_private_root:
+    elif root is not None and (
+        root.fingerprint(hashes.SHA256()) in explicit_private_fingerprints
+        or explicit_private_root
+    ):
         trust_status = "explicit_private"
     else:
         trust_status = "untrusted"

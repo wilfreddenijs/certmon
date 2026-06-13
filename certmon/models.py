@@ -24,6 +24,7 @@ ALLOWED_TRANSITIONS = {
         RenewalState.AWAITING_DNS,
         RenewalState.AWAITING_EXTERNAL_CA,
         RenewalState.ISSUING,
+        RenewalState.ISSUED,
         RenewalState.CANCELLED,
         RenewalState.FAILED,
     },

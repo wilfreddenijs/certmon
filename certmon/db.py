@@ -275,6 +275,50 @@ class Database:
         with self.transaction() as conn:
             conn.execute("DELETE FROM certificates WHERE id=?", (certificate_id,))
 
+    def complete_job_with_certificate(
+        self,
+        *,
+        job_id,
+        expected_state,
+        expected_version,
+        certificate_id,
+        metadata,
+    ):
+        now = _utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                "INSERT INTO certificates(id, metadata_json, created_at) VALUES (?, ?, ?)",
+                (certificate_id, json.dumps(metadata), now),
+            )
+            cursor = conn.execute(
+                """
+                UPDATE renewal_jobs
+                SET state='issued', version=version + 1, certificate_id=?, updated_at=?
+                WHERE id=? AND state=? AND version=?
+                """,
+                (
+                    certificate_id,
+                    now,
+                    job_id,
+                    expected_state,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrentUpdateError(
+                    f"Job {job_id} was changed by another request"
+                )
+            conn.execute(
+                "INSERT INTO events(job_id, event_type, details_json, created_at) "
+                "VALUES (?, 'state_changed', ?, ?)",
+                (
+                    job_id,
+                    json.dumps({"from": expected_state, "to": "issued"}),
+                    now,
+                ),
+            )
+        return self.get_job(job_id)
+
     def load_legacy_state(self):
         with self.connect() as conn:
             row = conn.execute(
