@@ -1162,15 +1162,16 @@
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
           <div>
-            <div class="form-label">Key passphrase (required for Extron Toolbelt)</div>
-            <input type="text" id="issue-passphrase" placeholder="leave blank = unencrypted key" style="width:280px" />
+            <div class="form-label">Certificate profile</div>
+            <select id="issue-profile" style="width:220px">
+              <option value="extron-rsa">Extron compatible (RSA)</option>
+              <option value="generic-rsa">Generic RSA</option>
+              <option value="generic-ecdsa">Generic modern (ECDSA)</option>
+            </select>
           </div>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding-bottom:9px;cursor:pointer">
-            <input type="checkbox" id="issue-genpass" onchange="const p=document.getElementById('issue-passphrase'); if(this.checked){p.value='';p.placeholder='will be generated…';p.disabled=true}else{p.placeholder='leave blank = unencrypted key';p.disabled=false}" />
-            generate one for me
-          </label>
           <button class="btn" style="padding:8px 18px" onclick="issueCert()">Issue Certificate</button>
         </div>
+        <div style="color:var(--muted);font-size:11px;margin-top:10px">Private keys remain encrypted on the CertMon server and are not sent to the browser.</div>
         <div id="issue-result" style="margin-top:14px;font-size:12px"></div>
       </div>` : '';
 
@@ -1185,9 +1186,7 @@
                 <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${c.days_remaining} days</div>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                ${c.pem_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.pem')}" download="${c.filename.replace('.crt','.pem')}"><button class="btn" style="font-size:11px;padding:5px 10px" title="Combined cert+key for Extron Toolbelt (Utilities tab)">⬇ PEM (Extron)</button></a>` : ''}
-                <a href="/api/ca/download/${c.filename}" download="${c.filename}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
-                ${c.key_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.key')}" download="${c.filename.replace('.crt','.key')}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Key</button></a>` : ''}
+                <a href="/api/ca/download/${c.certificate_id}" download="${c.certificate_id}.crt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
               </div>
             </div>`).join('')}
@@ -1203,7 +1202,7 @@
     const res = await fetch('/api/ca/generate', {method:'POST'});
     const data = await res.json();
     if (data.ok) {
-      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">✓ CA created at ${data.ca_dir}</span>`;
+      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">✓ CA created in encrypted server storage</span>`;
       setTimeout(loadCA, 800);
     } else {
       document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
@@ -1225,21 +1224,12 @@
     const ip = document.getElementById('issue-ip').value.trim();
     const hostname = document.getElementById('issue-hostname').value.trim();
     if (!ip && !hostname) { alert('Enter an IP or hostname'); return; }
-    const passphrase = document.getElementById('issue-passphrase').value;
-    const generate_passphrase = document.getElementById('issue-genpass').checked;
+    const profile = document.getElementById('issue-profile').value;
     document.getElementById('issue-result').textContent = 'Issuing certificate...';
-    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname, passphrase, generate_passphrase})});
+    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname, profile})});
     const data = await res.json();
     if (data.ok) {
-      let passLine = '';
-      if (data.encrypted && data.passphrase) {
-        // Generated — show in a persistent modal so the list refresh can't wipe it
-        showPassphraseModal(data.cn, data.passphrase);
-        passLine = `<br><span style="color:var(--warning)">🔑 Encrypted key — passphrase shown in the popup (save it).</span>`;
-      } else if (data.encrypted) {
-        passLine = `<br><span style="color:var(--warning)">🔑 Key encrypted with the passphrase you entered.</span>`;
-      }
-      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Extron PEM: ${data.pem_path || data.cert_path}</span>${passLine}`;
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Stored securely as ${data.certificate_id}</span>`;
       setTimeout(loadCA, 500);
     } else {
       document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;

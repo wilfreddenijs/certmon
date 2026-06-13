@@ -21,6 +21,9 @@ from flask import Flask, render_template, request, jsonify, send_file, Response
 
 from certmon.config import resolve_data_dir
 from certmon.db import Database
+from certmon.artifacts import ArtifactStore
+from certmon.external_ca import ExternalCAService
+from certmon.local_ca import LocalCAService
 from certmon.vault import Vault, WindowsDpapiProtector
 
 
@@ -63,9 +66,15 @@ else:
     migration_source = None
 
 vault = None
+artifact_store = None
+local_ca_service = None
+external_ca_service = None
 if sys.platform == "win32":
     vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
     vault.initialize()
+    artifact_store = ArtifactStore(Path(data_dir()) / "certificates", vault)
+    local_ca_service = LocalCAService(database, artifact_store)
+    external_ca_service = ExternalCAService(database, artifact_store)
     if migration_source is not None:
         database.complete_legacy_secret_migration(migration_source, vault)
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -507,37 +516,11 @@ def export_excel():
 # CA Management
 # ─────────────────────────────────────────────
 
-CA_DIR = r"C:\CertMon\CA" if sys.platform == "win32" else os.path.join(data_dir(), "CA")
-CA_KEY_FILE = os.path.join(CA_DIR, "certmon-ca.key")
-CA_CERT_FILE = os.path.join(CA_DIR, "certmon-ca.crt")
-
-
 def ca_exists():
-    return os.path.exists(CA_KEY_FILE) and os.path.exists(CA_CERT_FILE)
-
-
-def load_ca():
-    from cryptography.hazmat.primitives.serialization import load_pem_private_key
-    from cryptography import x509
-    with open(CA_KEY_FILE, "rb") as f:
-        key = load_pem_private_key(f.read(), password=None)
-    with open(CA_CERT_FILE, "rb") as f:
-        cert = x509.load_pem_x509_certificate(f.read())
-    return key, cert
-
-
-def _authority_key_id(ca_cert):
-    """Build authorityKeyIdentifier=keyid,issuer for a leaf cert (Extron profile)."""
-    from cryptography import x509
-    try:
-        ski = ca_cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
-        return x509.AuthorityKeyIdentifier(
-            key_identifier=ski.digest,
-            authority_cert_issuer=[x509.DirectoryName(ca_cert.subject)],
-            authority_cert_serial_number=ca_cert.serial_number,
-        )
-    except Exception:
-        return x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key())
+    return bool(
+        artifact_store
+        and artifact_store.has_certificate(LocalCAService.CA_CERTIFICATE_ID)
+    )
 
 
 @app.route("/api/ca/status")
@@ -545,20 +528,23 @@ def ca_status():
     if not ca_exists():
         return jsonify({"exists": False})
     try:
-        _, cert = load_ca()
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        cert = x509.load_pem_x509_certificate(
+            artifact_store.read_public(
+                LocalCAService.CA_CERTIFICATE_ID, "certificate.pem"
+            )
+        )
         now = datetime.now(timezone.utc)
         days = (cert.not_valid_after_utc - now).days
-        try:
-            cn = cert.subject.get_attributes_for_oid(
-                __import__('cryptography').x509.NameOID.COMMON_NAME)[0].value
-        except Exception:
-            cn = "CertMon CA"
+        cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
         return jsonify({
             "exists": True,
             "cn": cn,
             "not_after": cert.not_valid_after_utc.isoformat(),
             "days_remaining": days,
-            "ca_cert_path": CA_CERT_FILE,
+            "certificate_id": LocalCAService.CA_CERTIFICATE_ID,
         })
     except Exception as e:
         return jsonify({"exists": False, "error": str(e)})
@@ -566,57 +552,12 @@ def ca_status():
 
 @app.route("/api/ca/generate", methods=["POST"])
 def ca_generate():
+    if local_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     if ca_exists():
         return jsonify({"error": "CA already exists. Delete existing CA files first."}), 400
     try:
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-        import datetime as dt
-
-        os.makedirs(CA_DIR, exist_ok=True)
-
-        # Generate CA key
-        key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-
-        # CA certificate — valid 10 years
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "CertMon Local CA"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CertMon"),
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "NL"),
-        ])
-        now_utc = dt.datetime.now(dt.timezone.utc)
-        cert = (
-            x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(issuer)
-            .public_key(key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now_utc)
-            .not_valid_after(now_utc + dt.timedelta(days=3650))
-            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-            .add_extension(x509.KeyUsage(
-                digital_signature=True, key_cert_sign=True, crl_sign=True,
-                content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False,
-                encipher_only=False, decipher_only=False), critical=True)
-            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-            .sign(key, hashes.SHA256())
-        )
-
-        # Save key
-        with open(CA_KEY_FILE, "wb") as f:
-            f.write(key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.NoEncryption()
-            ))
-        # Save cert
-        with open(CA_CERT_FILE, "wb") as f:
-            f.write(cert.public_bytes(serialization.Encoding.PEM))
-
-        return jsonify({"ok": True, "ca_cert_path": CA_CERT_FILE, "ca_dir": CA_DIR})
+        return jsonify({"ok": True, **local_ca_service.generate_ca()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -626,20 +567,26 @@ def ca_install():
     """Install CA cert into Windows trust store."""
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
+    if sys.platform != "win32":
+        return jsonify({
+            "ok": True,
+            "method": "manual",
+            "message": "Download the CA certificate and install it in your OS trust store.",
+        })
     try:
-        if sys.platform == "win32":
-            import subprocess
-            result = subprocess.run(
-                ["certutil", "-addstore", "-user", "Root", CA_CERT_FILE],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                return jsonify({"ok": True, "method": "certutil", "output": result.stdout})
-            else:
-                return jsonify({"error": result.stderr or result.stdout}), 500
-        else:
-            return jsonify({"ok": True, "method": "manual",
-                            "message": f"Copy {CA_CERT_FILE} to your browser/OS trust store manually."})
+        certificate_path = (
+            artifact_store.root
+            / LocalCAService.CA_CERTIFICATE_ID
+            / "certificate.pem"
+        )
+        result = subprocess.run(
+            ["certutil", "-addstore", "-user", "Root", str(certificate_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return jsonify({"ok": True, "method": "certutil", "output": result.stdout})
+        return jsonify({"error": result.stderr or result.stdout}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -649,9 +596,9 @@ def ca_download_cert():
     """Download the CA certificate for manual installation."""
     if not ca_exists():
         return jsonify({"error": "No CA found"}), 404
-    from flask import Response
-    with open(CA_CERT_FILE, "rb") as f:
-        data = f.read()
+    data = artifact_store.read_public(
+        LocalCAService.CA_CERTIFICATE_ID, "certificate.pem"
+    )
     response = Response(data, status=200, mimetype="application/x-pem-file")
     response.headers["Content-Disposition"] = 'attachment; filename="certmon-ca.crt"'
     return response
@@ -662,177 +609,135 @@ def ca_issue():
     """Issue a device certificate signed by the local CA."""
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
+    if local_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     try:
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.x509 import IPAddress, DNSName as CryptoDNSName
-        import ipaddress as ipmod
-        import datetime as dt
-
-        import secrets
-        import string
-
-        body = request.json
-        ip = body.get("ip", "").strip()
-        hostname = body.get("hostname", "").strip()
-        device_name = body.get("name", ip or hostname)
-
-        # Optional private-key passphrase (some devices, e.g. Extron Toolbelt,
-        # require an encrypted key). Either supplied or generated on request.
-        passphrase = (body.get("passphrase") or "").strip()
-        if not passphrase and body.get("generate_passphrase"):
-            alphabet = string.ascii_letters + string.digits
-            passphrase = "".join(secrets.choice(alphabet) for _ in range(24))
-
-        if not ip and not hostname:
+        body = request.get_json(silent=True) or {}
+        ip = (body.get("ip") or "").strip()
+        hostname = (body.get("hostname") or "").strip()
+        identifiers = tuple(value for value in (hostname, ip) if value)
+        if not identifiers:
             return jsonify({"error": "Provide at least an IP or hostname"}), 400
-
-        ca_key, ca_cert = load_ca()
-
-        # Generate device key
-        dev_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-        # Build SANs
-        sans = []
-        if ip:
-            try:
-                sans.append(IPAddress(ipmod.ip_address(ip)))
-            except ValueError:
-                pass
-        if hostname:
-            sans.append(CryptoDNSName(hostname))
-        if not sans:
-            return jsonify({"error": "Could not parse IP or hostname"}), 400
-
-        cn = hostname or ip
-        now_utc = dt.datetime.now(dt.timezone.utc)
-
-        cert = (
-            x509.CertificateBuilder()
-            .subject_name(x509.Name([
-                x509.NameAttribute(NameOID.COMMON_NAME, cn),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CertMon"),
-            ]))
-            .issuer_name(ca_cert.subject)
-            .public_key(dev_key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now_utc)
-            .not_valid_after(now_utc + dt.timedelta(days=825))
-            .add_extension(x509.SubjectAlternativeName(sans), critical=False)
-            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-            # Match Extron's documented profile: digitalSignature, nonRepudiation,
-            # keyEncipherment, dataEncipherment
-            .add_extension(x509.KeyUsage(
-                digital_signature=True, content_commitment=True,
-                key_encipherment=True, data_encipherment=True,
-                key_agreement=False, key_cert_sign=False,
-                crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
-            .add_extension(x509.ExtendedKeyUsage([
-                x509.ExtendedKeyUsageOID.SERVER_AUTH
-            ]), critical=False)
-            .add_extension(_authority_key_id(ca_cert), critical=False)
-            .sign(ca_key, hashes.SHA256())
+        result = local_ca_service.issue(
+            identifiers=identifiers,
+            profile_name=body.get("profile") or "extron-rsa",
+            device_name=body.get("name") or hostname or ip,
         )
-
-        cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-        plain_key_pem = dev_key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption()
-        ).decode()
-        if passphrase:
-            key_pem = dev_key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.BestAvailableEncryption(passphrase.encode())
-            ).decode()
-        else:
-            key_pem = plain_key_pem
-
-        # Combined PEM for Extron Toolbelt (Utilities tab): certificate first,
-        # then the UNENCRYPTED private key. See Extron "Create Signed Certificate".
-        combined_pem = (cert_pem if cert_pem.endswith("\n") else cert_pem + "\n") + plain_key_pem
-
-        # Save to CA dir
-        safe_name = (hostname or ip).replace(".", "_").replace(":", "_")
-        cert_path = os.path.join(CA_DIR, f"{safe_name}.crt")
-        key_path = os.path.join(CA_DIR, f"{safe_name}.key")
-        pem_path = os.path.join(CA_DIR, f"{safe_name}.pem")
-        with open(cert_path, "w") as f:
-            f.write(cert_pem)
-        with open(key_path, "w") as f:
-            f.write(key_pem)
-        with open(pem_path, "w") as f:
-            f.write(combined_pem)
-
-        return jsonify({
-            "ok": True,
-            "cert_pem": cert_pem,
-            "key_pem": key_pem,
-            "cert_path": cert_path,
-            "key_path": key_path,
-            "pem_path": pem_path,
-            "cn": cn,
-            "encrypted": bool(passphrase),
-            "passphrase": passphrase or None,
-            "not_after": cert.not_valid_after_utc.isoformat(),
-        })
+        return jsonify({"ok": True, "cn": hostname or ip, **result})
+    except (KeyError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/ca/issued")
 def ca_issued():
     """List issued device certs."""
-    if not os.path.exists(CA_DIR):
+    if artifact_store is None:
         return jsonify([])
-    from cryptography import x509
-    certs = []
-    for fname in os.listdir(CA_DIR):
-        if fname.endswith(".crt") and fname != "certmon-ca.crt":
-            try:
-                with open(os.path.join(CA_DIR, fname), "rb") as f:
-                    cert = x509.load_pem_x509_certificate(f.read())
-                now = datetime.now(timezone.utc)
-                days = (cert.not_valid_after_utc - now).days
-                cn = cert.subject.get_attributes_for_oid(
-                    x509.NameOID.COMMON_NAME)[0].value
-                key_file = os.path.join(CA_DIR, fname.replace(".crt", ".key"))
-                pem_file = os.path.join(CA_DIR, fname.replace(".crt", ".pem"))
-                certs.append({
-                    "filename": fname,
-                    "cn": cn,
-                    "not_after": cert.not_valid_after_utc.isoformat(),
-                    "days_remaining": days,
-                    "cert_path": os.path.join(CA_DIR, fname),
-                    "key_path": key_file if os.path.exists(key_file) else None,
-                    "pem_path": pem_file if os.path.exists(pem_file) else None,
-                })
-            except Exception:
-                pass
-    return jsonify(certs)
+    now = datetime.now(timezone.utc)
+    certificates = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf" or metadata.get("issuer_type") != "local_ca":
+            continue
+        not_after = datetime.fromisoformat(metadata["not_after"])
+        certificates.append({
+            "certificate_id": metadata["id"],
+            "cn": metadata.get("identifiers", [metadata["id"]])[0],
+            "not_after": metadata["not_after"],
+            "days_remaining": (not_after - now).days,
+            "profile": metadata.get("profile"),
+        })
+    return jsonify(certificates)
 
 
-@app.route("/api/ca/download/<filename>")
-def ca_download_file(filename):
-    """Download a specific cert or key file."""
-    # Security: only allow files from CA_DIR, no path traversal
-    safe = os.path.basename(filename)
-    full_path = os.path.join(CA_DIR, safe)
-    if not os.path.exists(full_path):
+@app.route("/api/ca/download/<certificate_id>")
+def ca_download_file(certificate_id):
+    """Download a public device certificate. Private artifacts stay server-side."""
+    if artifact_store is None or not artifact_store.has_certificate(certificate_id):
         return jsonify({"error": "Not found"}), 404
-    if not (safe.endswith(".crt") or safe.endswith(".key") or safe.endswith(".pem")):
-        return jsonify({"error": "Invalid file type"}), 400
-    from flask import Response
-    with open(full_path, "rb") as f:
-        data = f.read()
-    mime = "application/x-pem-file"
-    response = Response(data, status=200, mimetype=mime)
-    response.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
+    try:
+        data = artifact_store.read_public(certificate_id, "certificate.pem")
+    except (FileNotFoundError, ValueError):
+        return jsonify({"error": "Not found"}), 404
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = f'attachment; filename="{certificate_id}.crt"'
     return response
+
+
+@app.route("/api/external-ca/trust-anchors", methods=["POST"])
+def external_ca_import_trust_anchor():
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        trust_anchor_id = external_ca_service.import_trust_anchor(
+            body.get("trust_anchor_id", "").strip(),
+            body.get("certificate_pem", "").encode("utf-8"),
+        )
+        return jsonify({"ok": True, "trust_anchor_id": trust_anchor_id})
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/renewals/<job_id>/external/csr", methods=["POST"])
+def external_ca_create_csr(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    try:
+        artifact_name = external_ca_service.create_csr_job(job_id)
+        return jsonify({"ok": True, "artifact_name": artifact_name})
+    except (KeyError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/renewals/<job_id>/external/csr", methods=["GET"])
+def external_ca_download_csr(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    try:
+        data = external_ca_service.read_csr(job_id)
+    except (FileNotFoundError, KeyError, ValueError):
+        return jsonify({"error": "CSR not found"}), 404
+    response = Response(data, status=200, mimetype="application/pkcs10")
+    response.headers["Content-Disposition"] = f'attachment; filename="{job_id}.csr"'
+    return response
+
+
+@app.route("/api/renewals/<job_id>/external/complete", methods=["POST"])
+def external_ca_complete(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        certificate_id = external_ca_service.complete_csr_job(
+            job_id,
+            body.get("certificate_pem", "").encode("utf-8"),
+            (body.get("chain_pem") or "").encode("utf-8") or None,
+            body.get("trust_anchor_id"),
+        )
+        return jsonify({"ok": True, "certificate_id": certificate_id})
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/renewals/<job_id>/external/import", methods=["POST"])
+def external_ca_import_existing(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        certificate_id = external_ca_service.import_existing(
+            job_id,
+            body.get("certificate_pem", "").encode("utf-8"),
+            (body.get("chain_pem") or "").encode("utf-8") or None,
+            body.get("private_key_pem", "").encode("utf-8"),
+            body.get("passphrase"),
+            body.get("trust_anchor_id"),
+        )
+        return jsonify({"ok": True, "certificate_id": certificate_id})
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
 
 
 # ── Certificate Upload Module ─────────────────────────────────────────────────

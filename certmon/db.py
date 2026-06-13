@@ -271,6 +271,13 @@ class Database:
         result["created_at"] = row["created_at"]
         return result
 
+    def list_certificates(self):
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM certificates ORDER BY created_at, id"
+            ).fetchall()
+        return [self.get_certificate(row["id"]) for row in rows]
+
     def delete_certificate(self, certificate_id):
         with self.transaction() as conn:
             conn.execute("DELETE FROM certificates WHERE id=?", (certificate_id,))
