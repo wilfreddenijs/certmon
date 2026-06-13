@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response
 
 from certmon.config import resolve_data_dir
+from certmon.db import Database
 
 
 def resource_path(relative):
@@ -43,6 +44,19 @@ app = Flask(__name__, template_folder=resource_path("templates"))
 
 # Persistent storage
 DATA_FILE = os.path.join(data_dir(), "certmon_data.json")
+DB_FILE = os.path.join(data_dir(), "certmon.db")
+database = Database(Path(DB_FILE))
+database.initialize()
+legacy_base = (
+    Path(sys.executable).parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent
+)
+legacy_data_file = legacy_base / "certmon_data.json"
+for migration_source in (Path(DATA_FILE), legacy_data_file):
+    if migration_source.exists():
+        database.migrate_legacy_nonsecrets(migration_source)
+        break
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
 ACME_PROD = "https://acme-v02.api.letsencrypt.org/directory"
 
@@ -52,15 +66,11 @@ scan_progress = {"running": False, "progress": 0, "total": 0, "current": ""}
 
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE) as f:
-            return json.load(f)
-    return {"manual_hosts": [], "scan_ranges": [], "certificates": {}, "renewals": [], "upload_devices": []}
+    return database.load_legacy_state()
 
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    database.save_legacy_state(data)
 
 
 def get_cert_info(host, port=443, timeout=3):
