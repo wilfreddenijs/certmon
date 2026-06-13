@@ -59,6 +59,9 @@ class ArtifactStore:
     def has_certificate(self, certificate_id):
         return self._certificate_dir(certificate_id).is_dir()
 
+    def delete_certificate_set(self, certificate_id):
+        shutil.rmtree(self._certificate_dir(certificate_id), ignore_errors=True)
+
     def read_public(self, certificate_id, name):
         self._validate_name(name)
         if name in self.PRIVATE_NAMES or name.endswith(".enc"):

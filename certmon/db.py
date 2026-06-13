@@ -251,6 +251,30 @@ class Database:
             for row in rows
         ]
 
+    def put_certificate(self, certificate_id, metadata):
+        with self.transaction() as conn:
+            conn.execute(
+                "INSERT INTO certificates(id, metadata_json, created_at) VALUES (?, ?, ?)",
+                (certificate_id, json.dumps(metadata), _utc_now()),
+            )
+
+    def get_certificate(self, certificate_id):
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT metadata_json, created_at FROM certificates WHERE id=?",
+                (certificate_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        result = json.loads(row["metadata_json"])
+        result["id"] = certificate_id
+        result["created_at"] = row["created_at"]
+        return result
+
+    def delete_certificate(self, certificate_id):
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM certificates WHERE id=?", (certificate_id,))
+
     def load_legacy_state(self):
         with self.connect() as conn:
             row = conn.execute(
