@@ -177,6 +177,80 @@ class Database:
                     f"Job {job_id} was changed by another request"
                 )
 
+    def transition_job(
+        self, job_id, expected_state, expected_version, new_state, updates
+    ):
+        allowed = {
+            "certificate_id",
+            "error_code",
+            "error_message",
+            "environment",
+            "dns_provider",
+        }
+        unknown = set(updates) - allowed
+        if unknown:
+            raise ValueError(f"Unsupported job updates: {sorted(unknown)}")
+        assignments = ["state = ?", "version = version + 1", "updated_at = ?"]
+        values = [new_state, _utc_now()]
+        for key, value in updates.items():
+            assignments.append(f"{key} = ?")
+            values.append(value)
+        values.extend([job_id, expected_state, expected_version])
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                f"UPDATE renewal_jobs SET {', '.join(assignments)} "
+                "WHERE id = ? AND state = ? AND version = ?",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrentUpdateError(
+                    f"Job {job_id} was changed by another request"
+                )
+            conn.execute(
+                "INSERT INTO events(job_id, event_type, details_json, created_at) "
+                "VALUES (?, 'state_changed', ?, ?)",
+                (
+                    job_id,
+                    json.dumps({"from": expected_state, "to": new_state}),
+                    _utc_now(),
+                ),
+            )
+        return self.get_job(job_id)
+
+    def get_job(self, job_id):
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM renewal_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["identifiers"] = json.loads(result.pop("identifiers_json"))
+        return result
+
+    def list_jobs(self):
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM renewal_jobs ORDER BY created_at, id"
+            ).fetchall()
+        return [self.get_job(row["id"]) for row in rows]
+
+    def list_events(self, job_id):
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT event_type, details_json, created_at FROM events "
+                "WHERE job_id=? ORDER BY id",
+                (job_id,),
+            ).fetchall()
+        return [
+            {
+                "event_type": row["event_type"],
+                "details": json.loads(row["details_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def load_legacy_state(self):
         with self.connect() as conn:
             row = conn.execute(
