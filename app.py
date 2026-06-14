@@ -1230,10 +1230,9 @@ def push_cert():
 
     device_id = body.get("device_id")
     certificate_id = body.get("certificate_id")
-    job_id = body.get("job_id")
     if not device_id or not certificate_id:
         return jsonify({"error": "certificate_id and device_id are required"}), 400
-    unknown = set(body) - {"device_id", "certificate_id", "job_id"}
+    unknown = set(body) - {"device_id", "certificate_id"}
     if unknown:
         return jsonify({"error": f"Unsupported fields: {sorted(unknown)}"}), 400
 
@@ -1242,9 +1241,7 @@ def push_cert():
     if not device:
         return jsonify({"error": "Device not found"}), 404
     try:
-        result = deployment_service.deploy_certificate(
-            device, certificate_id, job_id=job_id
-        )
+        result = deployment_service.deploy_certificate(device, certificate_id)
     except (KeyError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
 
