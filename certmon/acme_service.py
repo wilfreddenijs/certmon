@@ -217,6 +217,12 @@ class ACMEOrderService:
         self.database.put_setting(self._setting_id(job_id), order)
         return {"status": "ready", "attempts": total_attempts}
 
+    def answer_challenges(self, job_id):
+        order = self._order(job_id)
+        client = self._client(order["environment"])
+        for challenge in order["dns_challenges"]:
+            client.answer_dns_challenge(challenge["challenge_url"])
+
     def finalize(self, job_id):
         order = self._order(job_id)
         client = self._client(order["environment"])
@@ -400,6 +406,13 @@ class NativeACMEOrderClient:
         if problem:
             result["problem"] = problem
         return result
+
+    def answer_dns_challenge(self, challenge_url):
+        from acme import messages
+
+        response = self.client._post_as_get(challenge_url)
+        challenge = messages.ChallengeBody.from_json(response.json())
+        self.client.answer_challenge(challenge, challenge.chall.response(self.key))
 
     def finalize_order(self, order_url, csr_pem):
         order = self._order_resource(order_url, csr_pem)

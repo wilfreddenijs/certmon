@@ -58,6 +58,7 @@ ALLOWED_TRANSITIONS = {
         RenewalState.FAILED,
     },
     RenewalState.CLEANUP_REQUIRED: {
+        RenewalState.ISSUED,
         RenewalState.CANCELLED,
         RenewalState.FAILED,
     },
