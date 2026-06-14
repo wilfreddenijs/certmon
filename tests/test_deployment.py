@@ -53,9 +53,46 @@ def test_push_route_requires_certificate_id_and_device_id_only(tmp_data_dir):
     assert response.get_json()["error"] == "certificate_id and device_id are required"
 
 
-def test_push_route_rejects_fields_other_than_certificate_and_device_ids(tmp_data_dir):
+def test_push_route_accepts_optional_job_id(tmp_data_dir):
     module = load_app(tmp_data_dir)
     client = module.app.test_client()
+    captured = {}
+
+    class FakeDeploymentService:
+        def deploy_certificate(self, device, certificate_id, *, job_id=None):
+            captured["device"] = device
+            captured["certificate_id"] = certificate_id
+            captured["job_id"] = job_id
+            return SimpleNamespace(
+                ok=False,
+                log=("manual",),
+                instructions="manual deployment",
+                public_artifacts={},
+                job=None,
+                verification=None,
+            )
+
+    module.save_data(
+        {
+            "manual_hosts": [],
+            "scan_ranges": [],
+            "certificates": {},
+            "renewals": [],
+            "upload_devices": [
+                {
+                    "id": "device-1",
+                    "name": "Device 1",
+                    "host": "device.local",
+                    "port": 443,
+                    "https": True,
+                    "device_type": "generic",
+                    "username": "admin",
+                    "password": "secret",
+                }
+            ],
+        }
+    )
+    module.deployment_service = FakeDeploymentService()
 
     response = client.post(
         "/api/upload/push",
@@ -66,8 +103,9 @@ def test_push_route_rejects_fields_other_than_certificate_and_device_ids(tmp_dat
         },
     )
 
-    assert response.status_code == 400
-    assert response.get_json()["error"] == "Unsupported fields: ['job_id']"
+    assert response.status_code == 200
+    assert captured["certificate_id"] == "cert-1"
+    assert captured["job_id"] == "job-1"
 
 
 def test_upload_ui_uses_certificate_ids_instead_of_browser_pem_state():
