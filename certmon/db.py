@@ -251,6 +251,14 @@ class Database:
             for row in rows
         ]
 
+    def record_event(self, event_type, details=None, *, job_id=None):
+        with self.transaction() as conn:
+            conn.execute(
+                "INSERT INTO events(job_id, event_type, details_json, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (job_id, event_type, json.dumps(details or {}), _utc_now()),
+            )
+
     def put_certificate(self, certificate_id, metadata):
         with self.transaction() as conn:
             conn.execute(

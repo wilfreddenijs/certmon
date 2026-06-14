@@ -22,8 +22,18 @@ from flask import Flask, render_template, request, jsonify, send_file, Response
 from certmon.config import resolve_data_dir
 from certmon.db import Database
 from certmon.artifacts import ArtifactStore
+from certmon.acme_service import (
+    ACMEAccountService,
+    ACMEOrderService,
+    NativeACMEAccountClient,
+    NativeACMEOrderClient,
+)
+from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
+from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
+from certmon.permissions import Permission, authorize
+from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
 from certmon.vault import Vault, WindowsDpapiProtector
 
 
@@ -69,12 +79,35 @@ vault = None
 artifact_store = None
 local_ca_service = None
 external_ca_service = None
+renewal_service = RenewalService(database)
+acme_account_service = None
+acme_order_service = None
+acme_orchestrator = None
 if sys.platform == "win32":
     vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
     vault.initialize()
     artifact_store = ArtifactStore(Path(data_dir()) / "certificates", vault)
     local_ca_service = LocalCAService(database, artifact_store)
     external_ca_service = ExternalCAService(database, artifact_store)
+    acme_account_service = ACMEAccountService(
+        database, vault, NativeACMEAccountClient
+    )
+    acme_order_service = ACMEOrderService(
+        database, acme_account_service, NativeACMEOrderClient
+    )
+    dns_providers = {"manual": ManualDNSProvider()}
+    try:
+        dns_providers["cloudflare"] = CloudflareDNSProvider.load(database, vault)
+    except CloudflareError:
+        pass
+    acme_orchestrator = ACMERenewalOrchestrator(
+        database,
+        renewal_service,
+        acme_account_service,
+        acme_order_service,
+        artifact_store,
+        dns_providers,
+    )
     if migration_source is not None:
         database.complete_legacy_secret_migration(migration_source, vault)
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -113,6 +146,31 @@ def save_data(data):
             {"device_id": device_id},
         )
     database.save_legacy_state(sanitized)
+
+
+def _safe_job(job):
+    allowed = {
+        "id",
+        "endpoint_host",
+        "endpoint_port",
+        "issuer_type",
+        "state",
+        "version",
+        "identifiers",
+        "profile",
+        "environment",
+        "dns_provider",
+        "certificate_id",
+        "error_code",
+        "error_message",
+        "created_at",
+        "updated_at",
+        "artifact_name",
+        "dns_records",
+        "visible",
+        "replaced",
+    }
+    return {key: value for key, value in job.items() if key in allowed}
 
 
 def get_cert_info(host, port=443, timeout=3):
@@ -340,47 +398,115 @@ def scan_progress_api():
 
 @app.route("/api/renew", methods=["POST"])
 def create_renewal():
-    data = load_data()
-    body = request.json
-    host = body.get("host")
-    port = body.get("port", 443)
-    method = body.get("method", "manual")
-    staging = body.get("staging", False)
-    acme_server = ACME_STAGING if staging else ACME_PROD
-
-    renewal = {
-        "id": len(data["renewals"]) + 1,
-        "host": host, "port": port, "method": method, "staging": staging,
-        "created": datetime.now(timezone.utc).isoformat(), "log": []
-    }
-
-    if method == "certbot":
-        renewal["command"] = f"certbot certonly --standalone -d {host} --server {acme_server} --non-interactive --agree-tos -m admin@{host}"
-        renewal["status"] = "ready"
-    elif method == "acme.sh":
-        renewal["command"] = f"acme.sh --issue -d {host} --standalone --server {acme_server}"
-        renewal["status"] = "ready"
-    else:
-        renewal["status"] = "manual"
-        renewal["command"] = None
-        renewal["log"].append("Manual renewal — use your CA's renewal process")
-
-    data["renewals"].append(renewal)
-    save_data(data)
-    return jsonify({"ok": True, "renewal": renewal})
+    authorize(Permission.ISSUE_CERTIFICATE)
+    body = request.get_json(silent=True) or {}
+    try:
+        job = renewal_service.create_job(
+            endpoint_host=body.get("endpoint_host") or body.get("host") or "",
+            endpoint_port=body.get("endpoint_port", body.get("port", 443)),
+            issuer_type=body.get("issuer_type") or "external_ca",
+            identifiers=body.get("identifiers") or [body.get("host")],
+            profile=body.get("profile") or "generic-rsa",
+            environment=body.get("environment"),
+            dns_provider=body.get("dns_provider"),
+        )
+        return jsonify(_safe_job(job)), 201
+    except (TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/renewals")
 def list_renewals():
-    return jsonify(load_data().get("renewals", []))
+    return jsonify([_safe_job(job) for job in database.list_jobs()])
 
 
-@app.route("/api/renewals/<int:renewal_id>", methods=["DELETE"])
-def delete_renewal(renewal_id):
-    data = load_data()
-    data["renewals"] = [r for r in data["renewals"] if r.get("id") != renewal_id]
-    save_data(data)
-    return jsonify({"ok": True})
+@app.route("/api/renewals/<job_id>", methods=["GET"])
+def renewal_detail(job_id):
+    job = database.get_job(job_id)
+    if job is None:
+        return jsonify({"error": "Not found"}), 404
+    result = _safe_job(job)
+    result["events"] = database.list_events(job_id)
+    if job["state"] == "awaiting_dns":
+        records = database.get_setting(f"acme-dns:{job_id}", [])
+        result["dns_records"] = [
+            {"fqdn": record["fqdn"], "value": record["value"]}
+            for record in records
+        ]
+    return jsonify(result)
+
+
+@app.route("/api/renewals/<job_id>/start", methods=["POST"])
+def start_renewal(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    job = database.get_job(job_id)
+    if job is None:
+        return jsonify({"error": "Not found"}), 404
+    body = request.get_json(silent=True) or {}
+    try:
+        if job["issuer_type"] == "acme":
+            if acme_orchestrator is None:
+                return jsonify({"error": "ACME service is unavailable"}), 503
+            result = acme_orchestrator.start_acme(
+                job_id,
+                email=body.get("email", ""),
+                terms_of_service_agreed=body.get("terms_of_service_agreed") is True,
+            )
+        elif job["issuer_type"] == "external_ca":
+            artifact_name = external_ca_service.create_csr_job(job_id)
+            result = {**database.get_job(job_id), "artifact_name": artifact_name}
+        elif job["issuer_type"] == "local_ca":
+            issuing = renewal_service.transition(
+                job_id, "draft", job["version"], "issuing"
+            )
+            issued = local_ca_service.issue(
+                identifiers=tuple(job["identifiers"]),
+                profile_name=job["profile"],
+                device_name=job["endpoint_host"],
+            )
+            result = renewal_service.transition(
+                job_id,
+                "issuing",
+                issuing["version"],
+                "issued",
+                {"certificate_id": issued["certificate_id"]},
+            )
+        else:
+            raise ValueError("Unknown issuer type")
+        return jsonify(_safe_job(result))
+    except StagingRequired as error:
+        return jsonify({"error": error.code, "action_url": error.action_url}), 409
+    except (KeyError, TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/renewals/<job_id>/manual-dns/continue", methods=["POST"])
+def continue_manual_dns(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        return jsonify(_safe_job(acme_orchestrator.continue_manual_dns(job_id)))
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/renewals/<job_id>/cancel", methods=["POST"])
+def cancel_renewal(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        job = database.get_job(job_id)
+        service = acme_orchestrator if job and job["issuer_type"] == "acme" else renewal_service
+        return jsonify(_safe_job(service.cancel(job_id)))
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/renewals/<job_id>/retry-cleanup", methods=["POST"])
+def retry_renewal_cleanup(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        return jsonify(_safe_job(acme_orchestrator.retry_cleanup(job_id)))
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/export/excel")
@@ -738,6 +864,88 @@ def external_ca_import_existing(job_id):
         return jsonify({"ok": True, "certificate_id": certificate_id})
     except (KeyError, TypeError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/credentials/cloudflare", methods=["GET"])
+def get_cloudflare_credentials():
+    authorize(Permission.MANAGE_DNS_CREDENTIALS)
+    config = database.get_setting(CloudflareDNSProvider.SETTING_ID)
+    return jsonify(
+        {
+            "configured": config is not None,
+            "zones": config.get("zones", []) if config else [],
+        }
+    )
+
+
+@app.route("/api/credentials/cloudflare", methods=["POST"])
+def create_cloudflare_credentials():
+    authorize(Permission.MANAGE_DNS_CREDENTIALS)
+    if vault is None:
+        return jsonify({"error": "Secure credential storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        CloudflareDNSProvider.configure(
+            database,
+            vault,
+            token=body.get("token", ""),
+            zones=body.get("zones") or [],
+        )
+        provider = CloudflareDNSProvider.load(database, vault)
+        if acme_orchestrator is not None:
+            acme_orchestrator.dns_providers["cloudflare"] = provider
+        config = database.get_setting(CloudflareDNSProvider.SETTING_ID)
+        return jsonify({"configured": True, "zones": config["zones"]}), 201
+    except (TypeError, ValueError, CloudflareError):
+        return jsonify({"error": "Cloudflare credentials are invalid"}), 400
+
+
+@app.route("/api/credentials/cloudflare", methods=["DELETE"])
+def delete_cloudflare_credentials():
+    authorize(Permission.MANAGE_DNS_CREDENTIALS)
+    database.delete_secret(CloudflareDNSProvider.SECRET_ID)
+    database.delete_setting(CloudflareDNSProvider.SETTING_ID)
+    if acme_orchestrator is not None:
+        acme_orchestrator.dns_providers.pop("cloudflare", None)
+    return "", 204
+
+
+@app.route("/api/certificates/<certificate_id>/public/<artifact_name>")
+def download_public_artifact(certificate_id, artifact_name):
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
+    allowed = {"certificate.pem", "chain.pem", "full-chain.pem", "request.csr"}
+    if artifact_name not in allowed or artifact_store is None:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        data = artifact_store.read_public(certificate_id, artifact_name)
+    except (FileNotFoundError, ValueError, PermissionError):
+        return jsonify({"error": "Not found"}), 404
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{certificate_id}-{artifact_name}"'
+    )
+    return response
+
+
+@app.route("/api/certificates/<certificate_id>/private/<artifact_name>")
+def download_private_artifact(certificate_id, artifact_name):
+    authorize(Permission.DOWNLOAD_PRIVATE_KEY)
+    if artifact_name not in {"private-key.pem", "combined.pem"} or artifact_store is None:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        with artifact_store.materialize_private(certificate_id, artifact_name) as path:
+            data = path.read_bytes()
+    except (FileNotFoundError, ValueError, PermissionError):
+        return jsonify({"error": "Not found"}), 404
+    database.record_event(
+        "private_artifact_downloaded",
+        {"certificate_id": certificate_id, "artifact_name": artifact_name},
+    )
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{certificate_id}-{artifact_name}"'
+    )
+    return response
 
 
 # ── Certificate Upload Module ─────────────────────────────────────────────────
