@@ -27,6 +27,8 @@ a = Analysis(
         'cryptography.hazmat.primitives', 'cryptography.x509',
         'cryptography.x509.oid',
         'openpyxl', 'openpyxl.styles', 'openpyxl.utils',
+        'acme', 'acme.client', 'acme.messages', 'acme.challenges',
+        'josepy', 'dns', 'dns.resolver',
         'pystray', '_pystray_win32',
         'PIL', 'PIL.Image', 'PIL.ImageDraw',
         'pkg_resources', 'pkg_resources.py2_warn',

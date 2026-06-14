@@ -346,6 +346,27 @@ class Database:
                 (payload,),
             )
 
+    def put_setting(self, key, value):
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO settings(key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (key, json.dumps(value)),
+            )
+
+    def get_setting(self, key, default=None):
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key=?", (key,)
+            ).fetchone()
+        return default if row is None else json.loads(row["value"])
+
+    def delete_setting(self, key):
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM settings WHERE key=?", (key,))
+
     def put_secret(self, secret_id, blob, metadata=None):
         now = _utc_now()
         with self.transaction() as conn:
