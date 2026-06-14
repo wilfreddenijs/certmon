@@ -410,6 +410,19 @@
   .renewal-status.pending { background: rgba(255,171,0,0.12); color: var(--warning); }
   .renewal-status.ready { background: rgba(0,230,118,0.12); color: var(--ok); }
   .renewal-status.manual { background: rgba(84,110,122,0.12); color: var(--muted); }
+  .renewal-status.awaiting_dns, .renewal-status.awaiting_external_ca, .renewal-status.cleanup_required { background: rgba(255,171,0,0.12); color: var(--warning); }
+  .renewal-status.issued, .renewal-status.deployed { background: rgba(0,230,118,0.12); color: var(--ok); }
+  .renewal-status.failed, .renewal-status.cancelled { background: rgba(255,82,82,0.12); color: var(--critical); }
+
+  .wizard-choice {
+    display: block;
+    padding: 9px 10px;
+    margin: 6px 0;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 12px;
+    cursor: pointer;
+  }
 
   .command-block {
     background: var(--bg);
@@ -813,24 +826,86 @@
 
 <!-- Renewal Modal -->
 <div class="modal-overlay" id="renewal-modal">
-  <div class="modal">
-    <div class="modal-title">⟳ Create Renewal</div>
-    <div id="modal-host-label" style="color:var(--muted);margin-bottom:16px;font-size:12px"></div>
-    <div class="form-group">
-      <label class="form-label">Method</label>
-      <select id="renewal-method">
-        <option value="certbot">Certbot (Let's Encrypt)</option>
-        <option value="acme.sh">acme.sh</option>
-        <option value="manual">Manual / Other CA</option>
-      </select>
-    </div>
-    <div class="form-group checkbox-row">
-      <input type="checkbox" id="staging-check" />
-      <label for="staging-check" style="font-size:12px">Use Let's Encrypt staging environment</label>
-    </div>
+  <div class="modal" style="width:680px;max-width:96vw;max-height:92vh;overflow:auto">
+    <div class="modal-title">⟳ Certificate Renewal Wizard</div>
+    <div id="renewal-wizard-status" style="color:var(--muted);margin-bottom:16px;font-size:12px">Step 1 of 4 · Endpoint and identifiers</div>
+
+    <section class="renewal-step" data-step="1">
+      <div style="display:grid;grid-template-columns:1fr 100px;gap:10px">
+        <div class="form-group">
+          <label class="form-label" for="renewal-endpoint-host">Endpoint host or IP</label>
+          <input id="renewal-endpoint-host" type="text" placeholder="192.168.1.20" style="width:100%" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="renewal-endpoint-port">Port</label>
+          <input id="renewal-endpoint-port" type="number" value="443" style="width:100%" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="renewal-identifiers">Certificate identifiers</label>
+        <textarea id="renewal-identifiers" rows="3" placeholder="device.example.com&#10;*.example.com" style="width:100%"></textarea>
+        <div style="font-size:11px;color:var(--muted);margin-top:5px">One DNS name or private IP per line. Public Let's Encrypt certificates require public DNS names.</div>
+      </div>
+    </section>
+
+    <section class="renewal-step" data-step="2" hidden>
+      <div class="form-label">Issuer</div>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="acme" checked onchange="updateRenewalOptions()" /> Let's Encrypt (public ACME)</label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="local_ca" onchange="updateRenewalOptions()" /> CertMon Local CA</label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="external_ca" onchange="updateRenewalOptions()" /> External CA or existing certificate</label>
+    </section>
+
+    <section class="renewal-step" data-step="3" hidden>
+      <div class="form-group">
+        <label class="form-label" for="renewal-profile">Certificate profile</label>
+        <select id="renewal-profile" style="width:100%">
+          <option value="extron-rsa">Extron compatible (RSA 2048)</option>
+          <option value="generic-rsa">Generic RSA 2048</option>
+          <option value="generic-ecdsa">Generic modern ECDSA P-256</option>
+        </select>
+      </div>
+      <div id="acme-options">
+        <div class="form-label">DNS validation</div>
+        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="manual" checked /> Manual DNS</label>
+        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="cloudflare" /> Cloudflare automation</label>
+        <div class="form-label" style="margin-top:12px">Environment</div>
+        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="staging" checked /> Staging (test first)</label>
+        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="production" /> Production</label>
+        <div class="form-group" style="margin-top:12px">
+          <label class="form-label" for="renewal-email">ACME contact email</label>
+          <input id="renewal-email" type="email" placeholder="admin@example.com" style="width:100%" />
+        </div>
+        <label class="wizard-choice"><input id="renewal-tos" type="checkbox" /> I accept the ACME provider Terms of Service</label>
+        <div style="font-size:11px;color:var(--warning);margin-top:8px">Production is enabled only after this exact identifier set succeeds in staging.</div>
+      </div>
+      <div id="external-ca-controls" hidden>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">After creating the job, download its CSR or import an existing signed certificate and key.</div>
+        <button class="btn btn-ghost" type="button">Download CSR</button>
+        <button class="btn btn-ghost" type="button">Import signed certificate</button>
+      </div>
+    </section>
+
+    <section class="renewal-step" data-step="4" hidden>
+      <div class="form-label">Review</div>
+      <div id="renewal-review" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;line-height:1.8"></div>
+    </section>
+
+    <section id="renewal-action-panel" hidden>
+      <div id="renewal-action-message" style="font-size:12px;margin-bottom:12px"></div>
+      <button class="btn" data-action="verify" onclick="renewalAction('verify')">Verify and continue</button>
+      <button class="btn btn-ghost" data-action="download-csr">Download CSR</button>
+      <button class="btn btn-ghost" data-action="import-cert">Import signed certificate</button>
+      <button class="btn" data-action="retry-cleanup" onclick="renewalAction('retry-cleanup')">Retry cleanup</button>
+      <button class="btn" data-action="deploy">Deploy now</button>
+      <button class="btn btn-ghost" data-action="keep">Keep for later</button>
+      <button class="btn btn-danger" data-action="cancel" onclick="renewalAction('cancel')">Cancel renewal</button>
+    </section>
+
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="submitRenewal()">Create Renewal</button>
+      <button class="btn btn-ghost" id="renewal-back" onclick="renewalStep(-1)" hidden>Back</button>
+      <button class="btn" id="renewal-next" onclick="renewalStep(1)">Next</button>
+      <button class="btn" id="renewal-submit" onclick="submitRenewal()" hidden>Review and start</button>
     </div>
   </div>
 </div>
@@ -838,6 +913,8 @@
 <script>
   let currentRenewalHost = null;
   let currentRenewalPort = null;
+  let currentRenewalStep = 1;
+  let currentRenewalJobId = null;
   let scanPollInterval = null;
 
   async function loadData() {
@@ -848,9 +925,13 @@
       const udRes = await fetch('/api/upload/devices');
       uploadDevices = await udRes.json();
     } catch (e) { /* keep existing uploadDevices */ }
+    let renewals = [];
+    try {
+      renewals = await (await fetch('/api/renewals')).json();
+    } catch (e) { /* show no renewal jobs */ }
     renderSidebar(data);
     renderCerts(data.certificates || {});
-    renderRenewals(data.renewals || []);
+    renderRenewals(renewals);
     updateStats(data.certificates || {});
   }
 
@@ -976,21 +1057,27 @@
       <div class="renewal-card">
         <div class="renewal-header">
           <div>
-            <div class="renewal-host">${r.host}:${r.port}</div>
-            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.method} · ${r.staging ? 'staging' : 'production'} · ${new Date(r.created).toLocaleDateString()}</div>
+            <div class="renewal-host">${r.endpoint_host}:${r.endpoint_port}</div>
+            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.issuer_type} · ${r.profile}${r.environment ? ` · ${r.environment}` : ''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px">
-            <span class="renewal-status ${r.status}">${r.status}</span>
-            <button class="btn btn-danger" onclick="deleteRenewal(${r.id})">✕</button>
+            <span class="renewal-status ${r.state}">${r.state.replaceAll('_',' ')}</span>
           </div>
         </div>
-        ${r.command ? `
-          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run this command on your server:</div>
-          <div class="command-block" onclick="copyCommand(this, '${escapeHtml(r.command)}')">${r.command}</div>
-        ` : ''}
-        ${r.log && r.log.length ? `<div style="font-size:11px;color:var(--muted);margin-top:8px">${r.log.join('<br>')}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${(r.identifiers || []).join(', ')}</div>
+        ${renewalStateActions(r)}
       </div>
     `).join('');
+  }
+
+  function renewalStateActions(r) {
+    if (r.state === 'awaiting_dns') return `<button class="btn" onclick="resumeRenewal('${r.id}','verify')">Verify and continue</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
+    if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a> <button class="btn" onclick="resumeRenewal('${r.id}','import-cert')">Import signed certificate</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
+    if (r.state === 'cleanup_required') return `<button class="btn" onclick="resumeRenewal('${r.id}','retry-cleanup')">Retry cleanup</button>`;
+    if (r.state === 'issued') return `<button class="btn">Deploy now</button> <button class="btn btn-ghost">Keep for later</button>`;
+    if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px">${r.error_message || 'Renewal failed'}</div>`;
+    if (r.state === 'draft') return `<button class="btn" onclick="resumeRenewal('${r.id}','start')">Start renewal</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
+    return '';
   }
 
   function escapeHtml(s) {
@@ -1068,7 +1155,15 @@
   function openModal(host, port) {
     currentRenewalHost = host;
     currentRenewalPort = port;
-    document.getElementById('modal-host-label').textContent = `${host}:${port}`;
+    currentRenewalStep = 1;
+    currentRenewalJobId = null;
+    document.getElementById('renewal-endpoint-host').value = host || '';
+    document.getElementById('renewal-endpoint-port').value = port || 443;
+    document.getElementById('renewal-identifiers').value = host && !/^\d+\.\d+\.\d+\.\d+$/.test(host) ? host : '';
+    document.getElementById('renewal-action-panel').hidden = true;
+    document.querySelectorAll('.renewal-step').forEach(step => step.hidden = Number(step.dataset.step) !== 1);
+    updateRenewalOptions();
+    updateRenewalNavigation();
     document.getElementById('renewal-modal').classList.add('open');
   }
 
@@ -1076,30 +1171,99 @@
     document.getElementById('renewal-modal').classList.remove('open');
   }
 
+  function renewalStep(delta) {
+    if (delta > 0 && currentRenewalStep === 1) {
+      const host = document.getElementById('renewal-endpoint-host').value.trim();
+      const identifiers = document.getElementById('renewal-identifiers').value.trim();
+      if (!host || !identifiers) { alert('Enter an endpoint and at least one certificate identifier.'); return; }
+    }
+    currentRenewalStep = Math.min(4, Math.max(1, currentRenewalStep + delta));
+    document.querySelectorAll('.renewal-step').forEach(step => step.hidden = Number(step.dataset.step) !== currentRenewalStep);
+    if (currentRenewalStep === 4) renderRenewalReview();
+    updateRenewalNavigation();
+  }
+
+  function updateRenewalNavigation() {
+    const labels = ['Endpoint and identifiers', 'Issuer', 'Profile and options', 'Review'];
+    document.getElementById('renewal-wizard-status').textContent = `Step ${currentRenewalStep} of 4 · ${labels[currentRenewalStep - 1]}`;
+    document.getElementById('renewal-back').hidden = currentRenewalStep === 1;
+    document.getElementById('renewal-next').hidden = currentRenewalStep === 4;
+    document.getElementById('renewal-submit').hidden = currentRenewalStep !== 4;
+  }
+
+  function selectedRenewalValue(name) {
+    return document.querySelector(`input[name="${name}"]:checked`)?.value;
+  }
+
+  function updateRenewalOptions() {
+    const issuer = selectedRenewalValue('renewal-issuer') || 'acme';
+    document.getElementById('acme-options').hidden = issuer !== 'acme';
+    document.getElementById('external-ca-controls').hidden = issuer !== 'external_ca';
+  }
+
+  function renewalDraft() {
+    const issuer = selectedRenewalValue('renewal-issuer');
+    return {
+      endpoint_host: document.getElementById('renewal-endpoint-host').value.trim(),
+      endpoint_port: Number(document.getElementById('renewal-endpoint-port').value) || 443,
+      identifiers: document.getElementById('renewal-identifiers').value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean),
+      issuer_type: issuer,
+      profile: document.getElementById('renewal-profile').value,
+      dns_provider: issuer === 'acme' ? selectedRenewalValue('renewal-dns') : null,
+      environment: issuer === 'acme' ? selectedRenewalValue('renewal-environment') : null
+    };
+  }
+
+  function renderRenewalReview() {
+    const draft = renewalDraft();
+    document.getElementById('renewal-review').innerHTML = `
+      <b>Endpoint:</b> ${draft.endpoint_host}:${draft.endpoint_port}<br>
+      <b>Identifiers:</b> ${draft.identifiers.join(', ')}<br>
+      <b>Issuer:</b> ${draft.issuer_type}<br>
+      <b>Profile:</b> ${draft.profile}<br>
+      ${draft.environment ? `<b>Environment:</b> ${draft.environment}<br><b>DNS:</b> ${draft.dns_provider}` : ''}`;
+  }
+
   async function submitRenewal() {
-    const method = document.getElementById('renewal-method').value;
-    const staging = document.getElementById('staging-check').checked;
-    await fetch('/api/renew', {
+    const draft = renewalDraft();
+    const createResponse = await fetch('/api/renew', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: currentRenewalHost, port: currentRenewalPort, method, staging })
+      body: JSON.stringify(draft)
     });
-    closeModal();
-    switchTab('renewals');
+    const job = await createResponse.json();
+    if (!createResponse.ok) { alert(job.error || 'Could not create renewal'); return; }
+    currentRenewalJobId = job.id;
+    const startBody = draft.issuer_type === 'acme' ? {
+      email: document.getElementById('renewal-email').value.trim(),
+      terms_of_service_agreed: document.getElementById('renewal-tos').checked
+    } : {};
+    const startResponse = await fetch(`/api/renewals/${job.id}/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(startBody)
+    });
+    const result = await startResponse.json();
+    if (!startResponse.ok) {
+      document.getElementById('renewal-action-panel').hidden = false;
+      document.getElementById('renewal-action-message').textContent = result.error === 'staging_required'
+        ? 'Production requires a successful staging certificate for these exact identifiers.'
+        : (result.error || 'Could not start renewal');
+      return;
+    }
+    closeModal(); switchTab('renewals'); loadData();
+  }
+
+  async function resumeRenewal(id, action) {
+    currentRenewalJobId = id;
+    if (action === 'import-cert') { alert('Use the External CA import form to upload the signed certificate.'); return; }
+    const route = action === 'verify' ? 'manual-dns/continue' : action === 'retry-cleanup' ? 'retry-cleanup' : action;
+    await fetch(`/api/renewals/${id}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'start' ? '{}' : undefined });
     loadData();
   }
 
-  async function deleteRenewal(id) {
-    await fetch(`/api/renewals/${id}`, { method: 'DELETE' });
-    loadData();
-  }
-
-  function copyCommand(el, cmd) {
-    navigator.clipboard.writeText(cmd).then(() => {
-      el.classList.add('copied');
-      const orig = el.innerHTML;
-      setTimeout(() => el.classList.remove('copied'), 1500);
-    });
+  async function renewalAction(action) {
+    if (!currentRenewalJobId) return;
+    await resumeRenewal(currentRenewalJobId, action);
+    closeModal(); switchTab('renewals');
   }
 
   function switchTab(name) {
