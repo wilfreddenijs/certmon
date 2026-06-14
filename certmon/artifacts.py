@@ -3,11 +3,15 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
 from certmon.vault import EncryptedBlob
+
+
+ARTIFACT_MUTATION_LOCK = threading.RLock()
 
 
 class PrivateArtifactError(PermissionError):
@@ -17,9 +21,10 @@ class PrivateArtifactError(PermissionError):
 class ArtifactStore:
     PRIVATE_NAMES = {"private-key.pem", "combined.pem"}
 
-    def __init__(self, root: Path, vault):
+    def __init__(self, root: Path, vault, *, mutation_lock=None):
         self.root = Path(root)
         self.vault = vault
+        self.mutation_lock = mutation_lock or ARTIFACT_MUTATION_LOCK
         self.root.mkdir(parents=True, exist_ok=True)
 
     def create_certificate_set(
@@ -28,6 +33,14 @@ class ArtifactStore:
         public_files,
         private_files,
         metadata,
+    ):
+        with self.mutation_lock:
+            return self._create_certificate_set(
+                certificate_id, public_files, private_files, metadata
+            )
+
+    def _create_certificate_set(
+        self, certificate_id, public_files, private_files, metadata
     ):
         target = self._certificate_dir(certificate_id)
         if target.exists():
@@ -60,7 +73,8 @@ class ArtifactStore:
         return self._certificate_dir(certificate_id).is_dir()
 
     def delete_certificate_set(self, certificate_id):
-        shutil.rmtree(self._certificate_dir(certificate_id), ignore_errors=True)
+        with self.mutation_lock:
+            shutil.rmtree(self._certificate_dir(certificate_id), ignore_errors=True)
 
     def read_public(self, certificate_id, name):
         self._validate_name(name)
