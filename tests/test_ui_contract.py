@@ -57,3 +57,14 @@ def test_private_material_is_not_kept_in_wizard_dom_state():
     assert "private-key.pem" not in wizard
     assert "key_pem" not in wizard
     assert "stored token" not in wizard.lower()
+
+
+def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
+    html = page()
+
+    assert 'id="push-certificate-select"' in html
+    assert 'id="cert-pem"' not in html
+    assert 'id="key-pem"' not in html
+    assert "certificate_id" in html
+    assert "cert_pem" not in html
+    assert "key_pem" not in html

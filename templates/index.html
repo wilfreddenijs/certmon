@@ -773,29 +773,19 @@
           <div id="upload-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
         </div>
 
-        <!-- Right: cert upload + push -->
+        <!-- Right: certificate selection + push -->
         <div>
-          <div class="section-title" style="margin-bottom:12px">Certificate Files</div>
+          <div class="section-title" style="margin-bottom:12px">Stored Certificates</div>
 
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
             <div class="form-group">
-              <label class="form-label">Certificate (.crt / .pem)</label>
-              <div id="cert-drop" class="cert-drop-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event,'cert')">
-                <div id="cert-drop-label">Drag & drop or <label for="cert-file-input" style="color:var(--accent);cursor:pointer;text-decoration:underline">browse</label></div>
-                <input type="file" id="cert-file-input" accept=".crt,.pem,.cer" style="display:none" onchange="handleFileSelect(event,'cert')"/>
-                <div id="cert-filename" style="color:var(--ok);font-size:11px;margin-top:4px"></div>
+              <label class="form-label">Certificate</label>
+              <select id="push-certificate-select" style="width:100%">
+                <option value="">- select a stored certificate -</option>
+              </select>
+              <div style="font-size:11px;color:var(--muted);margin-top:6px">
+                CertMon deploys by certificate ID. Private keys stay on the server and never cross the browser boundary.
               </div>
-              <textarea id="cert-pem" class="pem-area" placeholder="Or paste certificate PEM here&#10;-----BEGIN CERTIFICATE-----&#10;..."></textarea>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Private Key (.key / .pem)</label>
-              <div id="key-drop" class="cert-drop-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event,'key')">
-                <div id="key-drop-label">Drag & drop or <label for="key-file-input" style="color:var(--accent);cursor:pointer;text-decoration:underline">browse</label></div>
-                <input type="file" id="key-file-input" accept=".key,.pem" style="display:none" onchange="handleFileSelect(event,'key')"/>
-                <div id="key-filename" style="color:var(--ok);font-size:11px;margin-top:4px"></div>
-              </div>
-              <textarea id="key-pem" class="pem-area" placeholder="Or paste private key PEM here&#10;-----BEGIN PRIVATE KEY-----&#10;..."></textarea>
             </div>
 
             <div class="form-group">
@@ -812,8 +802,12 @@
           <div id="push-result" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
             <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:600;margin-bottom:10px" id="push-result-title"></div>
             <div id="push-log" style="font-size:11px;color:var(--muted);line-height:1.8;font-family:'JetBrains Mono',monospace"></div>
+            <div id="push-public-artifacts" style="display:none;margin-top:14px">
+              <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:6px">Public certificate downloads</div>
+              <div id="push-public-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            </div>
             <div id="push-instructions" style="display:none;margin-top:14px">
-              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required — follow these steps:</div>
+              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required - follow these steps:</div>
               <pre id="push-instructions-text" style="font-size:11px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre>
             </div>
           </div>
@@ -896,7 +890,7 @@
       <button class="btn btn-ghost" data-action="download-csr">Download CSR</button>
       <button class="btn btn-ghost" data-action="import-cert">Import signed certificate</button>
       <button class="btn" data-action="retry-cleanup" onclick="renewalAction('retry-cleanup')">Retry cleanup</button>
-      <button class="btn" data-action="deploy">Deploy now</button>
+      <button class="btn" data-action="deploy" onclick="renewalAction('deploy')">Deploy now</button>
       <button class="btn btn-ghost" data-action="keep">Keep for later</button>
       <button class="btn btn-danger" data-action="cancel" onclick="renewalAction('cancel')">Cancel renewal</button>
     </section>
@@ -1074,7 +1068,7 @@
     if (r.state === 'awaiting_dns') return `<button class="btn" onclick="resumeRenewal('${r.id}','verify')">Verify and continue</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a> <button class="btn" onclick="resumeRenewal('${r.id}','import-cert')">Import signed certificate</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'cleanup_required') return `<button class="btn" onclick="resumeRenewal('${r.id}','retry-cleanup')">Retry cleanup</button>`;
-    if (r.state === 'issued') return `<button class="btn">Deploy now</button> <button class="btn btn-ghost">Keep for later</button>`;
+    if (r.state === 'issued') return `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> <button class="btn btn-ghost" onclick="loadData()">Keep for later</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px">${r.error_message || 'Renewal failed'}</div>`;
     if (r.state === 'draft') return `<button class="btn" onclick="resumeRenewal('${r.id}','start')">Start renewal</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     return '';
@@ -1255,6 +1249,14 @@
   async function resumeRenewal(id, action) {
     currentRenewalJobId = id;
     if (action === 'import-cert') { alert('Use the External CA import form to upload the signed certificate.'); return; }
+    if (action === 'deploy') {
+      const detail = await (await fetch(`/api/renewals/${id}`)).json();
+      pendingDeployment = {
+        certificateId: detail.certificate_id || '',
+      };
+      switchTab('upload');
+      return;
+    }
     const route = action === 'verify' ? 'manual-dns/continue' : action === 'retry-cleanup' ? 'retry-cleanup' : action;
     await fetch(`/api/renewals/${id}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'start' ? '{}' : undefined });
     loadData();
@@ -1263,7 +1265,8 @@
   async function renewalAction(action) {
     if (!currentRenewalJobId) return;
     await resumeRenewal(currentRenewalJobId, action);
-    closeModal(); switchTab('renewals');
+    closeModal();
+    if (action !== 'deploy') switchTab('renewals');
   }
 
   function switchTab(name) {
@@ -1273,7 +1276,10 @@
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${name}`).classList.add('active');
     if (name === 'ca') loadCA();
-    if (name === 'upload') loadUploadDevices();
+    if (name === 'upload') {
+      loadUploadDevices();
+      loadAvailableCertificates();
+    }
   }
 
 
@@ -1456,7 +1462,9 @@
   // ── Upload Tab ──────────────────────────────────────────────────────────────
 
   let uploadDevices = [];
+  let availableCertificates = [];
   let selectedDeviceId = null;
+  let pendingDeployment = null;
 
   // Escape a string for safe use inside a single-quoted HTML attribute
   function escAttr(s) {
@@ -1509,7 +1517,7 @@
 
   // Called from the "⬆ Upload / Push" button on a cert card.
   // If a device is already saved for this host, skip the add-device form and
-  // jump straight to the cert-file drop area with that device pre-selected.
+  // jump straight to the certificate/device selectors with that device pre-selected.
   // Otherwise prefill the add-device form.
   async function sendToUpload(host, port, cn) {
     switchTab('upload');
@@ -1521,7 +1529,7 @@
       selectDevice(existing.id);
       const pushCard = document.getElementById('push-btn').closest('div[style*="border-radius:10px"]');
       flashCard(pushCard);
-      document.getElementById('cert-pem').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('push-certificate-select').scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
@@ -1549,6 +1557,14 @@
     uploadDevices = await res.json();
     renderUploadDevices();
     renderDeviceSelect();
+    applyPendingDeployment();
+  }
+
+  async function loadAvailableCertificates() {
+    const res = await fetch('/api/certificates');
+    availableCertificates = await res.json();
+    renderCertificateSelect();
+    applyPendingDeployment();
   }
 
   function renderUploadDevices() {
@@ -1574,6 +1590,28 @@
     const cur = sel.value;
     sel.innerHTML = '<option value="">— select a device —</option>' +
       uploadDevices.map(d => `<option value="${d.id}"${d.id === cur ? ' selected' : ''}>${d.name} (${d.host})</option>`).join('');
+  }
+
+  function renderCertificateSelect() {
+    const sel = document.getElementById('push-certificate-select');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— select a stored certificate —</option>' +
+      availableCertificates.map(c => {
+        const label = `${(c.identifiers || [c.certificate_id])[0]} · ${c.issuer_type} · ${c.certificate_id}`;
+        return `<option value="${c.certificate_id}"${c.certificate_id === cur ? ' selected' : ''}>${label}</option>`;
+      }).join('');
+  }
+
+  function applyPendingDeployment() {
+    if (!pendingDeployment) return;
+    if (pendingDeployment.deviceId) {
+      selectedDeviceId = pendingDeployment.deviceId;
+      document.getElementById('push-device-select').value = pendingDeployment.deviceId;
+      renderUploadDevices();
+    }
+    if (pendingDeployment.certificateId && document.getElementById('push-certificate-select')) {
+      document.getElementById('push-certificate-select').value = pendingDeployment.certificateId;
+    }
   }
 
   function selectDevice(id) {
@@ -1638,34 +1676,11 @@
     el.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
   }
 
-  function handleDrop(event, type) {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (file) readPemFile(file, type);
-    event.currentTarget.classList.remove('dragover');
-  }
-
-  function handleFileSelect(event, type) {
-    const file = event.target.files[0];
-    if (file) readPemFile(file, type);
-  }
-
-  function readPemFile(file, type) {
-    const reader = new FileReader();
-    reader.onload = e => {
-      document.getElementById(`${type}-pem`).value = e.target.result;
-      document.getElementById(`${type}-filename`).textContent = '✓ ' + file.name;
-    };
-    reader.readAsText(file);
-  }
-
   async function pushCert() {
-    const cert_pem = document.getElementById('cert-pem').value.trim();
-    const key_pem = document.getElementById('key-pem').value.trim();
+    const certificate_id = document.getElementById('push-certificate-select').value;
     const device_id = document.getElementById('push-device-select').value;
 
-    if (!cert_pem) { alert('Please provide a certificate (drag & drop or paste)'); return; }
-    if (!key_pem) { alert('Please provide a private key (drag & drop or paste)'); return; }
+    if (!certificate_id) { alert('Please select a stored certificate'); return; }
     if (!device_id) { alert('Please select a target device'); return; }
 
     const btn = document.getElementById('push-btn');
@@ -1675,7 +1690,10 @@
     const res = await fetch('/api/upload/push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_id, cert_pem, key_pem })
+      body: JSON.stringify({
+        device_id,
+        certificate_id,
+      })
     });
     const data = await res.json();
 
@@ -1685,13 +1703,27 @@
     const resultDiv = document.getElementById('push-result');
     const titleEl = document.getElementById('push-result-title');
     const logEl = document.getElementById('push-log');
+    const publicArtifactsDiv = document.getElementById('push-public-artifacts');
+    const publicArtifactsEl = document.getElementById('push-public-artifact-links');
     const instrDiv = document.getElementById('push-instructions');
     const instrText = document.getElementById('push-instructions-text');
 
     resultDiv.style.display = 'block';
     titleEl.style.color = data.ok ? 'var(--ok)' : 'var(--warning)';
-    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Automatic push did not succeed';
+    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Deployment needs attention';
     logEl.innerHTML = (data.log || []).map(l => `<div>${l}</div>`).join('');
+
+    const publicArtifacts = data.public_artifacts || {};
+    const publicEntries = Object.entries(publicArtifacts);
+    if (publicEntries.length) {
+      publicArtifactsDiv.style.display = 'block';
+      publicArtifactsEl.innerHTML = publicEntries.map(([name, url]) =>
+        `<a class="btn btn-ghost" href="${url}" download style="font-size:11px;padding:6px 10px">${name}</a>`
+      ).join('');
+    } else {
+      publicArtifactsDiv.style.display = 'none';
+      publicArtifactsEl.innerHTML = '';
+    }
 
     if (data.instructions) {
       instrDiv.style.display = 'block';
@@ -1700,18 +1732,19 @@
       instrDiv.style.display = 'none';
     }
 
+    if (data.ok) {
+      pendingDeployment = null;
+      loadData();
+    } else if (data.job && data.job.certificate_id) {
+      pendingDeployment = {
+        certificateId: data.job.certificate_id,
+        deviceId,
+      };
+      loadData();
+    }
+
     resultDiv.scrollIntoView({ behavior: 'smooth' });
   }
-
-  // Drag highlight
-  document.addEventListener('DOMContentLoaded', () => {
-    ['cert-drop','key-drop'].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('dragover', () => el.classList.add('dragover'));
-      el.addEventListener('dragleave', () => el.classList.remove('dragover'));
-    });
-  });
 
   // Initial load + auto-refresh every 60s
   loadData();

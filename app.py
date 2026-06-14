@@ -28,6 +28,7 @@ from certmon.acme_service import (
     NativeACMEAccountClient,
     NativeACMEOrderClient,
 )
+from certmon.deployment import DeploymentService, ExtronDeploymentAdapter
 from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
 from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
@@ -83,6 +84,7 @@ renewal_service = RenewalService(database)
 acme_account_service = None
 acme_order_service = None
 acme_orchestrator = None
+deployment_service = None
 if sys.platform == "win32":
     vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
     vault.initialize()
@@ -107,6 +109,12 @@ if sys.platform == "win32":
         acme_order_service,
         artifact_store,
         dns_providers,
+    )
+    deployment_service = DeploymentService(
+        database,
+        artifact_store,
+        renewal_service,
+        adapters={"extron": ExtronDeploymentAdapter()},
     )
     if migration_source is not None:
         database.complete_legacy_secret_migration(migration_source, vault)
@@ -927,6 +935,25 @@ def download_public_artifact(certificate_id, artifact_name):
     return response
 
 
+@app.route("/api/certificates")
+def list_deployable_certificates():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    certificates = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf":
+            continue
+        certificates.append(
+            {
+                "certificate_id": metadata["id"],
+                "identifiers": metadata.get("identifiers", []),
+                "issuer_type": metadata.get("issuer_type"),
+                "profile": metadata.get("profile"),
+                "not_after": metadata.get("not_after"),
+            }
+        )
+    return jsonify(certificates)
+
+
 @app.route("/api/certificates/<certificate_id>/private/<artifact_name>")
 def download_private_artifact(certificate_id, artifact_name):
     authorize(Permission.DOWNLOAD_PRIVATE_KEY)
@@ -1179,44 +1206,59 @@ def _generic_instructions(device):
 
 @app.route("/api/upload/push", methods=["POST"])
 def push_cert():
-    data = load_data()
-    body = request.json
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if deployment_service is None:
+        return jsonify({"error": "Secure deployment is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    prohibited = {
+        "cert_pem",
+        "key_pem",
+        "certificate_pem",
+        "private_key_pem",
+        "combined_pem",
+        "private_material",
+    }
+    if any(field in body for field in prohibited):
+        return (
+            jsonify(
+                {
+                    "error": "Private certificate material must not be sent to this API"
+                }
+            ),
+            400,
+        )
+
     device_id = body.get("device_id")
-    cert_pem = body.get("cert_pem", "")
-    key_pem = body.get("key_pem", "")
+    certificate_id = body.get("certificate_id")
+    if not device_id or not certificate_id:
+        return jsonify({"error": "certificate_id and device_id are required"}), 400
+    unknown = set(body) - {"device_id", "certificate_id"}
+    if unknown:
+        return jsonify({"error": f"Unsupported fields: {sorted(unknown)}"}), 400
 
-    if not device_id or not cert_pem or not key_pem:
-        return jsonify({"error": "device_id, cert_pem and key_pem are required"}), 400
-
+    data = load_data()
     device = next((d for d in data.get("upload_devices", []) if d["id"] == device_id), None)
     if not device:
         return jsonify({"error": "Device not found"}), 404
+    try:
+        result = deployment_service.deploy_certificate(device, certificate_id)
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
 
-    device_type = device.get("device_type", "generic")
-    log = []
-
-    if device_type in ("extron",):
-        success, log = _extron_push(
-            host=device["host"],
-            port=device.get("port", 80),
-            use_https=device.get("https", False),
-            username=device.get("username", "admin"),
-            password=device.get("password", "extron"),
-            cert_pem=cert_pem,
-            key_pem=key_pem,
-        )
-        instructions = None if success else _generic_instructions(device)
-    else:
-        success = False
-        instructions = _generic_instructions(device)
-        log.append(f"Device type '{device_type}' does not support automatic push.")
-        log.append("See manual instructions below.")
-
-    return jsonify({
-        "ok": success,
-        "log": log,
-        "instructions": instructions,
-    })
+    payload = {
+        "ok": result.ok,
+        "log": list(result.log),
+        "instructions": result.instructions,
+        "public_artifacts": result.public_artifacts,
+        "job": _safe_job(result.job) if result.job is not None else None,
+    }
+    if result.verification is not None:
+        payload["verification"] = {
+            "status": result.verification.status,
+            "expected_fingerprint": result.verification.expected_fingerprint,
+            "observed_fingerprint": result.verification.observed_fingerprint,
+        }
+    return jsonify(payload)
 
 
 @app.route("/api/upload/test", methods=["POST"])
