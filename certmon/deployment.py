@@ -249,6 +249,8 @@ class DeploymentService:
     def _record_event(self, job_id, device, certificate_id, adapter_name, result):
         details = {
             "device_id": device.get("id"),
+            "device_host": device.get("host"),
+            "device_port": device.get("port"),
             "device_type": device.get("device_type"),
             "certificate_id": certificate_id,
             "adapter": adapter_name,

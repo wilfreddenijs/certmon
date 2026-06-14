@@ -749,10 +749,10 @@
             <div class="form-group">
               <label class="form-label">Device Type</label>
               <select id="ud-type" style="width:100%">
+                <option value="generic">Generic / Manual</option>
                 <option value="extron">Extron (UCS 303, etc.)</option>
                 <option value="homeassistant">Home Assistant</option>
                 <option value="synology">Synology NAS</option>
-                <option value="generic">Generic / Manual</option>
               </select>
             </div>
             <div class="form-group">
@@ -1541,10 +1541,11 @@
     document.getElementById('ud-host').value = host;
     document.getElementById('ud-port').value = isHttps ? port : 80;
     document.getElementById('ud-https').checked = isHttps;
-    document.getElementById('ud-type').value = guessDeviceType(cn || host);
+    const guessedType = guessDeviceType(cn || host);
+    document.getElementById('ud-type').value = guessedType === 'extron' ? 'extron' : 'generic';
 
     // Prefill Extron default password as a convenience
-    if (guessDeviceType(cn || host) === 'extron' && !document.getElementById('ud-password').value) {
+    if (guessedType === 'extron' && !document.getElementById('ud-password').value) {
       document.getElementById('ud-password').value = 'extron';
     }
 

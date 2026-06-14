@@ -1,6 +1,7 @@
 import importlib
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from cryptography import x509
@@ -11,6 +12,8 @@ from cryptography.x509.oid import NameOID
 from certmon.db import Database
 from certmon.models import RenewalState
 from certmon.renewals import RenewalService
+
+HTML = Path(__file__).parents[1] / "templates" / "index.html"
 
 
 def load_app(tmp_data_dir):
@@ -65,6 +68,17 @@ def test_push_route_rejects_fields_other_than_certificate_and_device_ids(tmp_dat
 
     assert response.status_code == 400
     assert response.get_json()["error"] == "Unsupported fields: ['job_id']"
+
+
+def test_upload_ui_uses_certificate_ids_instead_of_browser_pem_state():
+    html = HTML.read_text(encoding="utf-8")
+
+    assert 'id="push-certificate-select"' in html
+    assert 'id="cert-pem"' not in html
+    assert 'id="key-pem"' not in html
+    assert "certificate_id," in html
+    assert "cert_pem" not in html
+    assert "key_pem" not in html
 
 
 class FakeArtifacts:
