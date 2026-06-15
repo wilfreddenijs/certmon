@@ -125,13 +125,21 @@ def _is_elevated():
 
 
 def connect_toolbelt(launch_if_needed=True, timeout=60):
-    import ctypes  # noqa: F401  (used by _is_elevated)
     app = Application(backend="uia")
-    try:
-        app.connect(title_re=".*Toolbelt.*", timeout=5)
-    except Exception:
-        # Toolbelt visible to Win32 but not UIA => almost always an integrity
-        # mismatch (Toolbelt elevated, this script not).
+    # Retry UIA connect: the window can be transiently UIA-unreachable while
+    # Toolbelt is busy (e.g. opening a heavy device page). Only conclude an
+    # elevation mismatch if it stays unreachable across all retries.
+    connected = False
+    for _ in range(8):
+        try:
+            app.connect(title_re=".*Toolbelt.*", timeout=2)
+            connected = True
+            break
+        except Exception:
+            time.sleep(1.5)
+    if not connected:
+        # Persistent UIA failure with a Win32 window present => integrity mismatch
+        # (Toolbelt elevated, this script not).
         if _win32_toolbelt_present():
             raise RuntimeError(
                 "Toolbelt is running but cannot be automated. This almost always "
@@ -141,7 +149,7 @@ def connect_toolbelt(launch_if_needed=True, timeout=60):
                 "(right-click > Run as administrator), OR start Toolbelt without "
                 "admin. [this script elevated=%s]" % _is_elevated())
         if not launch_if_needed:
-            raise
+            raise RuntimeError("Could not attach to Toolbelt.")
         if not os.path.exists(TOOLBELT_EXE):
             raise RuntimeError("Toolbelt.exe not found at %s" % TOOLBELT_EXE)
         log.info("Toolbelt not running — launching it (this is slow; "
@@ -190,6 +198,59 @@ def cy(rect):
     return (rect.top + rect.bottom) // 2
 
 
+_DEVICE_PASSWORD = None  # optional override; set from --device-password
+
+
+def _credentials_modal_present(win):
+    return any("provide credentials" in (c.window_text() or "").lower()
+               for c in win.descendants(control_type="Text"))
+
+
+def accept_credentials_prompt(win, ip, timeout=8):
+    """Managing an unauthenticated device pops an in-app 'Please provide
+    credentials for <ip>' modal. Username is 'admin'; the password is prefilled
+    with the factory default ('extron' on older units, the SERIAL NUMBER on new
+    units). We accept the prefilled value unless --device-password is given,
+    then verify the modal actually closed. Raises if credentials are rejected
+    so the device fails cleanly instead of hanging.
+
+    Returns False if no prompt appeared (already authenticated)."""
+    # Wait briefly for the modal to appear.
+    deadline = time.time() + timeout
+    while time.time() < deadline and not _credentials_modal_present(win):
+        time.sleep(POLL)
+    if not _credentials_modal_present(win):
+        return False  # device already authenticated this session
+
+    # Optionally override the prefilled password.
+    if _DEVICE_PASSWORD:
+        try:
+            import pywinauto.mouse as mouse
+            plabel = next(c.rectangle() for c in win.descendants(control_type="Text")
+                          if (c.window_text() or "").strip() == "Password")
+            mouse.click(coords=(plabel.left + 40, plabel.bottom + 18))
+            time.sleep(0.2)
+            win.type_keys("^a{BACKSPACE}", set_foreground=True)
+            win.type_keys(_DEVICE_PASSWORD, with_spaces=True, set_foreground=True)
+        except Exception:
+            pass
+
+    # Click Enter ONCE (never hammer it — risk of lockout).
+    for b in win.descendants(control_type="Button"):
+        if (b.window_text() or "").strip() == "Enter" and b.is_visible():
+            b.click_input()
+            break
+    time.sleep(2.5)
+
+    if _credentials_modal_present(win):
+        raise RuntimeError(
+            "credentials rejected for %s — the prefilled password is wrong. "
+            "Authenticate it once in Toolbelt (new units: password = serial "
+            "number), or pass --device-password." % ip)
+    log.info("[%s] accepted credentials prompt", ip)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Device selection + navigation  (task #2)
 # ---------------------------------------------------------------------------
@@ -230,6 +291,10 @@ def select_device(win, ip, timeout=T_MANAGE):
     if manage is None:
         raise RuntimeError("Manage button not found for %s" % ip)
     manage.click_input()
+
+    # An unauthenticated device shows a credentials modal that blocks the page —
+    # accept it (prefilled admin/extron) before anything else.
+    accept_credentials_prompt(win, ip)
 
     # Wait for the Utilities tab to be available, then click it
     def utilities_tab():
@@ -308,9 +373,19 @@ def set_cert_path(app, win, dots_btn, pem_path):
     (read-only) Browse path field."""
     if not os.path.exists(pem_path):
         raise RuntimeError("PEM not found: %s" % pem_path)
-    dots_btn.click_input()
 
-    handle = _find_open_dialog(T_DIALOG)
+    # Toolbelt must be the foreground window or the '...' click won't spawn the
+    # file dialog (after the previous device's dialog, focus can be elsewhere).
+    # Click, wait briefly, and retry once if no dialog appears.
+    handle = None
+    for attempt in range(2):
+        bring_to_front(win)
+        time.sleep(0.3)
+        dots_btn.click_input()
+        handle = _find_open_dialog(8 if attempt == 0 else T_DIALOG)
+        if handle is not None:
+            break
+        log.info("file dialog didn't open (attempt %d) — retrying", attempt + 1)
     if handle is None:
         raise RuntimeError("file-open dialog (#32770) did not appear")
 
@@ -577,7 +652,13 @@ def main():
                     help="seconds to pause between devices (default 2)")
     ap.add_argument("--force", action="store_true",
                     help="re-upload even if the device already serves this cert")
+    ap.add_argument("--device-password", default=None,
+                    help="device admin password for the credentials prompt "
+                         "(default: accept Toolbelt's prefilled value)")
     args = ap.parse_args()
+
+    global _DEVICE_PASSWORD
+    _DEVICE_PASSWORD = args.device_password
 
     setup_logging()
     if not args.device and not args.list:
@@ -628,8 +709,15 @@ def main():
         try:
             ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
         except Exception as e:
-            ok, msg = False, "ERROR: %s" % e
-            log.error("[%s] %s", ip, msg)
+            # Transient UI/window errors happen at scale — reconnect and retry once.
+            log.info("[%s] error (%s) — reconnecting and retrying once", ip, e)
+            try:
+                _close_stray_dialogs()
+                app, win = connect_toolbelt()
+                ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
+            except Exception as e2:
+                ok, msg = False, "ERROR: %s" % e2
+                log.error("[%s] %s", ip, msg)
         results.append((ip, ok, msg))
         time.sleep(args.settle)
 
