@@ -1192,6 +1192,7 @@
                 <a href="/api/ca/download/${c.filename}" download="${c.filename}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
                 ${c.key_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.key')}" download="${c.filename.replace('.crt','.key')}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Key</button></a>` : ''}
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
+                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this device's cert/key/pem" onclick="deleteIssued('${c.filename}','${c.cn}')">✕</button>
               </div>
             </div>`).join('')}
         </div>
@@ -1265,6 +1266,12 @@
     overlay.querySelector('#pp-copy').onclick = (e) => { navigator.clipboard.writeText(passphrase); e.target.textContent = 'Copied ✓'; };
     overlay.querySelector('#pp-close').onclick = () => overlay.remove();
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  }
+
+  async function deleteIssued(filename, cn) {
+    if (!confirm(`Delete the certificate for ${cn}?\nThis removes its .crt / .key / .pem from the CA folder (the device keeps any cert already installed).`)) return;
+    await fetch('/api/ca/issued/' + encodeURIComponent(filename), { method: 'DELETE' });
+    loadCA();
   }
 
   function showUploadGuide(cn) {

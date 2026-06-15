@@ -787,6 +787,26 @@ def ca_devices_txt():
     return response
 
 
+@app.route("/api/ca/issued/<filename>", methods=["DELETE"])
+def ca_delete_issued(filename):
+    """Delete an issued device cert and its companion files (.crt/.key/.pem,
+    plus an _encrypted.key if present)."""
+    safe = os.path.basename(filename)
+    if not safe.endswith(".crt") or safe == "certmon-ca.crt":
+        return jsonify({"error": "Invalid file"}), 400
+    stem = safe[:-4]
+    removed = []
+    for suffix in (".crt", ".key", ".pem", "_encrypted.key"):
+        p = os.path.join(CA_DIR, stem + suffix)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+                removed.append(os.path.basename(p))
+            except Exception:
+                pass
+    return jsonify({"ok": True, "removed": removed})
+
+
 @app.route("/api/ca/issued")
 def ca_issued():
     """List issued device certs."""

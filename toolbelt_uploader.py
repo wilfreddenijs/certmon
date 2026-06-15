@@ -419,12 +419,50 @@ def reachable(ip, port=4503, timeout=3):
         return False
 
 
-def upload_to_device(app, win, ip, pem_path, passphrase, commit):
+def _pem_cert_serial(pem_path):
+    """Serial number of the certificate inside a .pem (cert block is first)."""
+    from cryptography import x509
+    with open(pem_path, "rb") as f:
+        return x509.load_pem_x509_certificate(f.read()).serial_number
+
+
+def device_cert_serial(ip, port=443, timeout=4):
+    """Serial of the cert the device currently serves on its web port (443),
+    or None if unreachable / unreadable."""
+    import ssl
+    import socket
+    from cryptography import x509
+    try:
+        ctx = ssl._create_unverified_context()
+        raw = socket.create_connection((ip, port), timeout=timeout)
+        tls = ctx.wrap_socket(raw, server_hostname=ip)
+        der = tls.getpeercert(True)
+        tls.close()
+        return x509.load_der_x509_certificate(der).serial_number
+    except Exception:
+        return None
+
+
+def already_current(ip, pem_path):
+    """True only if we can confirm the device already serves this exact cert."""
+    try:
+        want = _pem_cert_serial(pem_path)
+    except Exception:
+        return False
+    have = device_cert_serial(ip)
+    return have is not None and have == want
+
+
+def upload_to_device(app, win, ip, pem_path, passphrase, commit, force=False):
     """Full per-device flow (assumes device is in the discovery list)."""
     if not reachable(ip):
         return False, "unreachable (port 4503 closed — offline or not routable)"
     if not os.path.exists(pem_path):
         return False, "no .pem at %s (issue it first or use --issue)" % pem_path
+    # Skip devices that already serve this exact cert (avoids needless reboots
+    # when re-running the full list). --force overrides.
+    if commit and not force and already_current(ip, pem_path):
+        return True, "already current — skipped (use --force to re-upload)"
     bring_to_front(win)
     select_device(win, ip)
     ctrls = find_ssl_controls(win)
@@ -496,6 +534,8 @@ def main():
                     help="CertMon base URL for --issue (default http://localhost:5000)")
     ap.add_argument("--settle", type=float, default=2.0,
                     help="seconds to pause between devices (default 2)")
+    ap.add_argument("--force", action="store_true",
+                    help="re-upload even if the device already serves this cert")
     args = ap.parse_args()
 
     setup_logging()
@@ -545,7 +585,7 @@ def main():
             pem = pem_override or pem_for_ip(ip)
 
         try:
-            ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit)
+            ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
         except Exception as e:
             ok, msg = False, "ERROR: %s" % e
             log.error("[%s] %s", ip, msg)
