@@ -19,8 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install flask cryptography openpyxl pystray pillow pyinstaller
+        run: pip install -r requirements.txt
 
       - name: Build EXE with PyInstaller
         run: |

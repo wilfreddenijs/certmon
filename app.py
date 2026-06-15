@@ -14,9 +14,29 @@ import ipaddress
 import io
 import base64
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response
+
+from certmon.config import resolve_data_dir
+from certmon.ca_migration import migrate_legacy_ca_if_present
+from certmon.db import Database
+from certmon.artifacts import ArtifactStore
+from certmon.acme_service import (
+    ACMEAccountService,
+    ACMEOrderService,
+    NativeACMEAccountClient,
+    NativeACMEOrderClient,
+)
+from certmon.deployment import DeploymentService, ExtronDeploymentAdapter
+from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
+from certmon.dns.manual import ManualDNSProvider
+from certmon.external_ca import ExternalCAService
+from certmon.local_ca import LocalCAService
+from certmon.permissions import Permission, authorize
+from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
+from certmon.vault import Vault, WindowsDpapiProtector
 
 
 def resource_path(relative):
@@ -26,16 +46,83 @@ def resource_path(relative):
 
 
 def data_dir():
-    """Writable directory next to the .exe (or script)."""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    """Return CertMon's writable server data directory."""
+    path = resolve_data_dir(
+        frozen=getattr(sys, "frozen", False),
+        executable=Path(sys.executable),
+        source_dir=Path(__file__).resolve().parent,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
 
 
 app = Flask(__name__, template_folder=resource_path("templates"))
 
 # Persistent storage
 DATA_FILE = os.path.join(data_dir(), "certmon_data.json")
+DB_FILE = os.path.join(data_dir(), "certmon.db")
+database = Database(Path(DB_FILE))
+database.initialize()
+legacy_base = (
+    Path(sys.executable).parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent
+)
+legacy_data_file = legacy_base / "certmon_data.json"
+migration_source = None
+for migration_source in (Path(DATA_FILE), legacy_data_file):
+    if migration_source.exists():
+        database.migrate_legacy_nonsecrets(migration_source)
+        break
+else:
+    migration_source = None
+
+vault = None
+artifact_store = None
+local_ca_service = None
+external_ca_service = None
+renewal_service = RenewalService(database)
+acme_account_service = None
+acme_order_service = None
+acme_orchestrator = None
+deployment_service = None
+if sys.platform == "win32":
+    vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
+    vault.initialize()
+    artifact_store = ArtifactStore(Path(data_dir()) / "certificates", vault)
+    migrate_legacy_ca_if_present(
+        artifact_store,
+        (Path(r"C:\CertMon\CA"), Path(data_dir()) / "CA"),
+    )
+    local_ca_service = LocalCAService(database, artifact_store)
+    external_ca_service = ExternalCAService(database, artifact_store)
+    acme_account_service = ACMEAccountService(
+        database, vault, NativeACMEAccountClient
+    )
+    acme_order_service = ACMEOrderService(
+        database, acme_account_service, NativeACMEOrderClient
+    )
+    dns_providers = {"manual": ManualDNSProvider()}
+    try:
+        dns_providers["cloudflare"] = CloudflareDNSProvider.load(database, vault)
+    except CloudflareError:
+        pass
+    acme_orchestrator = ACMERenewalOrchestrator(
+        database,
+        renewal_service,
+        acme_account_service,
+        acme_order_service,
+        artifact_store,
+        dns_providers,
+    )
+    deployment_service = DeploymentService(
+        database,
+        artifact_store,
+        renewal_service,
+        adapters={"extron": ExtronDeploymentAdapter()},
+    )
+    if migration_source is not None:
+        database.complete_legacy_secret_migration(migration_source, vault)
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
 ACME_PROD = "https://acme-v02.api.letsencrypt.org/directory"
 
@@ -45,15 +132,58 @@ scan_progress = {"running": False, "progress": 0, "total": 0, "current": ""}
 
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE) as f:
-            return json.load(f)
-    return {"manual_hosts": [], "scan_ranges": [], "certificates": {}, "renewals": [], "upload_devices": []}
+    data = database.load_legacy_state()
+    if vault is not None:
+        for device in data.get("upload_devices", []):
+            device_id = device.get("id") or f"legacy:{device.get('host')}"
+            blob = database.get_secret(f"device-password:{device_id}")
+            if blob is not None:
+                device["password"] = vault.decrypt(
+                    blob, purpose="device-password"
+                ).decode("utf-8")
+    return data
 
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    sanitized = json.loads(json.dumps(data))
+    for device in sanitized.get("upload_devices", []):
+        password = device.pop("password", None)
+        if password is None:
+            continue
+        if vault is None:
+            raise RuntimeError("Secure credential storage is unavailable")
+        device_id = device.get("id") or f"legacy:{device.get('host')}"
+        database.put_secret(
+            f"device-password:{device_id}",
+            vault.encrypt(password.encode("utf-8"), purpose="device-password"),
+            {"device_id": device_id},
+        )
+    database.save_legacy_state(sanitized)
+
+
+def _safe_job(job):
+    allowed = {
+        "id",
+        "endpoint_host",
+        "endpoint_port",
+        "issuer_type",
+        "state",
+        "version",
+        "identifiers",
+        "profile",
+        "environment",
+        "dns_provider",
+        "certificate_id",
+        "error_code",
+        "error_message",
+        "created_at",
+        "updated_at",
+        "artifact_name",
+        "dns_records",
+        "visible",
+        "replaced",
+    }
+    return {key: value for key, value in job.items() if key in allowed}
 
 
 def get_cert_info(host, port=443, timeout=3):
@@ -281,47 +411,115 @@ def scan_progress_api():
 
 @app.route("/api/renew", methods=["POST"])
 def create_renewal():
-    data = load_data()
-    body = request.json
-    host = body.get("host")
-    port = body.get("port", 443)
-    method = body.get("method", "manual")
-    staging = body.get("staging", False)
-    acme_server = ACME_STAGING if staging else ACME_PROD
-
-    renewal = {
-        "id": len(data["renewals"]) + 1,
-        "host": host, "port": port, "method": method, "staging": staging,
-        "created": datetime.now(timezone.utc).isoformat(), "log": []
-    }
-
-    if method == "certbot":
-        renewal["command"] = f"certbot certonly --standalone -d {host} --server {acme_server} --non-interactive --agree-tos -m admin@{host}"
-        renewal["status"] = "ready"
-    elif method == "acme.sh":
-        renewal["command"] = f"acme.sh --issue -d {host} --standalone --server {acme_server}"
-        renewal["status"] = "ready"
-    else:
-        renewal["status"] = "manual"
-        renewal["command"] = None
-        renewal["log"].append("Manual renewal — use your CA's renewal process")
-
-    data["renewals"].append(renewal)
-    save_data(data)
-    return jsonify({"ok": True, "renewal": renewal})
+    authorize(Permission.ISSUE_CERTIFICATE)
+    body = request.get_json(silent=True) or {}
+    try:
+        job = renewal_service.create_job(
+            endpoint_host=body.get("endpoint_host") or body.get("host") or "",
+            endpoint_port=body.get("endpoint_port", body.get("port", 443)),
+            issuer_type=body.get("issuer_type") or "external_ca",
+            identifiers=body.get("identifiers") or [body.get("host")],
+            profile=body.get("profile") or "generic-rsa",
+            environment=body.get("environment"),
+            dns_provider=body.get("dns_provider"),
+        )
+        return jsonify(_safe_job(job)), 201
+    except (TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/renewals")
 def list_renewals():
-    return jsonify(load_data().get("renewals", []))
+    return jsonify([_safe_job(job) for job in database.list_jobs()])
 
 
-@app.route("/api/renewals/<int:renewal_id>", methods=["DELETE"])
-def delete_renewal(renewal_id):
-    data = load_data()
-    data["renewals"] = [r for r in data["renewals"] if r.get("id") != renewal_id]
-    save_data(data)
-    return jsonify({"ok": True})
+@app.route("/api/renewals/<job_id>", methods=["GET"])
+def renewal_detail(job_id):
+    job = database.get_job(job_id)
+    if job is None:
+        return jsonify({"error": "Not found"}), 404
+    result = _safe_job(job)
+    result["events"] = database.list_events(job_id)
+    if job["state"] == "awaiting_dns":
+        records = database.get_setting(f"acme-dns:{job_id}", [])
+        result["dns_records"] = [
+            {"fqdn": record["fqdn"], "value": record["value"]}
+            for record in records
+        ]
+    return jsonify(result)
+
+
+@app.route("/api/renewals/<job_id>/start", methods=["POST"])
+def start_renewal(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    job = database.get_job(job_id)
+    if job is None:
+        return jsonify({"error": "Not found"}), 404
+    body = request.get_json(silent=True) or {}
+    try:
+        if job["issuer_type"] == "acme":
+            if acme_orchestrator is None:
+                return jsonify({"error": "ACME service is unavailable"}), 503
+            result = acme_orchestrator.start_acme(
+                job_id,
+                email=body.get("email", ""),
+                terms_of_service_agreed=body.get("terms_of_service_agreed") is True,
+            )
+        elif job["issuer_type"] == "external_ca":
+            artifact_name = external_ca_service.create_csr_job(job_id)
+            result = {**database.get_job(job_id), "artifact_name": artifact_name}
+        elif job["issuer_type"] == "local_ca":
+            issuing = renewal_service.transition(
+                job_id, "draft", job["version"], "issuing"
+            )
+            issued = local_ca_service.issue(
+                identifiers=tuple(job["identifiers"]),
+                profile_name=job["profile"],
+                device_name=job["endpoint_host"],
+            )
+            result = renewal_service.transition(
+                job_id,
+                "issuing",
+                issuing["version"],
+                "issued",
+                {"certificate_id": issued["certificate_id"]},
+            )
+        else:
+            raise ValueError("Unknown issuer type")
+        return jsonify(_safe_job(result))
+    except StagingRequired as error:
+        return jsonify({"error": error.code, "action_url": error.action_url}), 409
+    except (KeyError, TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/renewals/<job_id>/manual-dns/continue", methods=["POST"])
+def continue_manual_dns(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        return jsonify(_safe_job(acme_orchestrator.continue_manual_dns(job_id)))
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/renewals/<job_id>/cancel", methods=["POST"])
+def cancel_renewal(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        job = database.get_job(job_id)
+        service = acme_orchestrator if job and job["issuer_type"] == "acme" else renewal_service
+        return jsonify(_safe_job(service.cancel(job_id)))
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/renewals/<job_id>/retry-cleanup", methods=["POST"])
+def retry_renewal_cleanup(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        return jsonify(_safe_job(acme_orchestrator.retry_cleanup(job_id)))
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/export/excel")
@@ -457,37 +655,11 @@ def export_excel():
 # CA Management
 # ─────────────────────────────────────────────
 
-CA_DIR = r"C:\CertMon\CA" if sys.platform == "win32" else os.path.join(data_dir(), "CA")
-CA_KEY_FILE = os.path.join(CA_DIR, "certmon-ca.key")
-CA_CERT_FILE = os.path.join(CA_DIR, "certmon-ca.crt")
-
-
 def ca_exists():
-    return os.path.exists(CA_KEY_FILE) and os.path.exists(CA_CERT_FILE)
-
-
-def load_ca():
-    from cryptography.hazmat.primitives.serialization import load_pem_private_key
-    from cryptography import x509
-    with open(CA_KEY_FILE, "rb") as f:
-        key = load_pem_private_key(f.read(), password=None)
-    with open(CA_CERT_FILE, "rb") as f:
-        cert = x509.load_pem_x509_certificate(f.read())
-    return key, cert
-
-
-def _authority_key_id(ca_cert):
-    """Build authorityKeyIdentifier=keyid,issuer for a leaf cert (Extron profile)."""
-    from cryptography import x509
-    try:
-        ski = ca_cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
-        return x509.AuthorityKeyIdentifier(
-            key_identifier=ski.digest,
-            authority_cert_issuer=[x509.DirectoryName(ca_cert.subject)],
-            authority_cert_serial_number=ca_cert.serial_number,
-        )
-    except Exception:
-        return x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key())
+    return bool(
+        artifact_store
+        and artifact_store.has_certificate(LocalCAService.CA_CERTIFICATE_ID)
+    )
 
 
 @app.route("/api/ca/status")
@@ -495,20 +667,23 @@ def ca_status():
     if not ca_exists():
         return jsonify({"exists": False})
     try:
-        _, cert = load_ca()
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        cert = x509.load_pem_x509_certificate(
+            artifact_store.read_public(
+                LocalCAService.CA_CERTIFICATE_ID, "certificate.pem"
+            )
+        )
         now = datetime.now(timezone.utc)
         days = (cert.not_valid_after_utc - now).days
-        try:
-            cn = cert.subject.get_attributes_for_oid(
-                __import__('cryptography').x509.NameOID.COMMON_NAME)[0].value
-        except Exception:
-            cn = "CertMon CA"
+        cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
         return jsonify({
             "exists": True,
             "cn": cn,
             "not_after": cert.not_valid_after_utc.isoformat(),
             "days_remaining": days,
-            "ca_cert_path": CA_CERT_FILE,
+            "certificate_id": LocalCAService.CA_CERTIFICATE_ID,
         })
     except Exception as e:
         return jsonify({"exists": False, "error": str(e)})
@@ -516,57 +691,12 @@ def ca_status():
 
 @app.route("/api/ca/generate", methods=["POST"])
 def ca_generate():
+    if local_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     if ca_exists():
         return jsonify({"error": "CA already exists. Delete existing CA files first."}), 400
     try:
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-        import datetime as dt
-
-        os.makedirs(CA_DIR, exist_ok=True)
-
-        # Generate CA key
-        key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-
-        # CA certificate — valid 10 years
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "CertMon Local CA"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CertMon"),
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "NL"),
-        ])
-        now_utc = dt.datetime.now(dt.timezone.utc)
-        cert = (
-            x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(issuer)
-            .public_key(key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now_utc)
-            .not_valid_after(now_utc + dt.timedelta(days=3650))
-            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-            .add_extension(x509.KeyUsage(
-                digital_signature=True, key_cert_sign=True, crl_sign=True,
-                content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False,
-                encipher_only=False, decipher_only=False), critical=True)
-            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-            .sign(key, hashes.SHA256())
-        )
-
-        # Save key
-        with open(CA_KEY_FILE, "wb") as f:
-            f.write(key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.NoEncryption()
-            ))
-        # Save cert
-        with open(CA_CERT_FILE, "wb") as f:
-            f.write(cert.public_bytes(serialization.Encoding.PEM))
-
-        return jsonify({"ok": True, "ca_cert_path": CA_CERT_FILE, "ca_dir": CA_DIR})
+        return jsonify({"ok": True, **local_ca_service.generate_ca()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -576,20 +706,26 @@ def ca_install():
     """Install CA cert into Windows trust store."""
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
+    if sys.platform != "win32":
+        return jsonify({
+            "ok": True,
+            "method": "manual",
+            "message": "Download the CA certificate and install it in your OS trust store.",
+        })
     try:
-        if sys.platform == "win32":
-            import subprocess
-            result = subprocess.run(
-                ["certutil", "-addstore", "-user", "Root", CA_CERT_FILE],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                return jsonify({"ok": True, "method": "certutil", "output": result.stdout})
-            else:
-                return jsonify({"error": result.stderr or result.stdout}), 500
-        else:
-            return jsonify({"ok": True, "method": "manual",
-                            "message": f"Copy {CA_CERT_FILE} to your browser/OS trust store manually."})
+        certificate_path = (
+            artifact_store.root
+            / LocalCAService.CA_CERTIFICATE_ID
+            / "certificate.pem"
+        )
+        result = subprocess.run(
+            ["certutil", "-addstore", "-user", "Root", str(certificate_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return jsonify({"ok": True, "method": "certutil", "output": result.stdout})
+        return jsonify({"error": result.stderr or result.stdout}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -599,9 +735,9 @@ def ca_download_cert():
     """Download the CA certificate for manual installation."""
     if not ca_exists():
         return jsonify({"error": "No CA found"}), 404
-    from flask import Response
-    with open(CA_CERT_FILE, "rb") as f:
-        data = f.read()
+    data = artifact_store.read_public(
+        LocalCAService.CA_CERTIFICATE_ID, "certificate.pem"
+    )
     response = Response(data, status=200, mimetype="application/x-pem-file")
     response.headers["Content-Disposition"] = 'attachment; filename="certmon-ca.crt"'
     return response
@@ -612,176 +748,235 @@ def ca_issue():
     """Issue a device certificate signed by the local CA."""
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
+    if local_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     try:
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.x509 import IPAddress, DNSName as CryptoDNSName
-        import ipaddress as ipmod
-        import datetime as dt
-
-        import secrets
-        import string
-
-        body = request.json
-        ip = body.get("ip", "").strip()
-        hostname = body.get("hostname", "").strip()
-        device_name = body.get("name", ip or hostname)
-
-        # Optional private-key passphrase (some devices, e.g. Extron Toolbelt,
-        # require an encrypted key). Either supplied or generated on request.
-        passphrase = (body.get("passphrase") or "").strip()
-        if not passphrase and body.get("generate_passphrase"):
-            alphabet = string.ascii_letters + string.digits
-            passphrase = "".join(secrets.choice(alphabet) for _ in range(24))
-
-        if not ip and not hostname:
+        body = request.get_json(silent=True) or {}
+        ip = (body.get("ip") or "").strip()
+        hostname = (body.get("hostname") or "").strip()
+        identifiers = tuple(value for value in (hostname, ip) if value)
+        if not identifiers:
             return jsonify({"error": "Provide at least an IP or hostname"}), 400
-
-        ca_key, ca_cert = load_ca()
-
-        # Generate device key
-        dev_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-        # Build SANs
-        sans = []
-        if ip:
-            try:
-                sans.append(IPAddress(ipmod.ip_address(ip)))
-            except ValueError:
-                pass
-        if hostname:
-            sans.append(CryptoDNSName(hostname))
-        if not sans:
-            return jsonify({"error": "Could not parse IP or hostname"}), 400
-
-        cn = hostname or ip
-        now_utc = dt.datetime.now(dt.timezone.utc)
-
-        cert = (
-            x509.CertificateBuilder()
-            .subject_name(x509.Name([
-                x509.NameAttribute(NameOID.COMMON_NAME, cn),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CertMon"),
-            ]))
-            .issuer_name(ca_cert.subject)
-            .public_key(dev_key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now_utc)
-            .not_valid_after(now_utc + dt.timedelta(days=825))
-            .add_extension(x509.SubjectAlternativeName(sans), critical=False)
-            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-            # Match Extron's documented profile: digitalSignature, nonRepudiation,
-            # keyEncipherment, dataEncipherment
-            .add_extension(x509.KeyUsage(
-                digital_signature=True, content_commitment=True,
-                key_encipherment=True, data_encipherment=True,
-                key_agreement=False, key_cert_sign=False,
-                crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
-            .add_extension(x509.ExtendedKeyUsage([
-                x509.ExtendedKeyUsageOID.SERVER_AUTH
-            ]), critical=False)
-            .add_extension(_authority_key_id(ca_cert), critical=False)
-            .sign(ca_key, hashes.SHA256())
+        result = local_ca_service.issue(
+            identifiers=identifiers,
+            profile_name=body.get("profile") or "extron-rsa",
+            device_name=body.get("name") or hostname or ip,
         )
-
-        cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-        plain_key_pem = dev_key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption()
-        ).decode()
-        if passphrase:
-            key_pem = dev_key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.BestAvailableEncryption(passphrase.encode())
-            ).decode()
-        else:
-            key_pem = plain_key_pem
-
-        # Combined PEM for Extron Toolbelt (Utilities tab): certificate first,
-        # then the UNENCRYPTED private key. See Extron "Create Signed Certificate".
-        combined_pem = (cert_pem if cert_pem.endswith("\n") else cert_pem + "\n") + plain_key_pem
-
-        # Save to CA dir
-        safe_name = (hostname or ip).replace(".", "_").replace(":", "_")
-        cert_path = os.path.join(CA_DIR, f"{safe_name}.crt")
-        key_path = os.path.join(CA_DIR, f"{safe_name}.key")
-        pem_path = os.path.join(CA_DIR, f"{safe_name}.pem")
-        with open(cert_path, "w") as f:
-            f.write(cert_pem)
-        with open(key_path, "w") as f:
-            f.write(key_pem)
-        with open(pem_path, "w") as f:
-            f.write(combined_pem)
-
-        return jsonify({
-            "ok": True,
-            "cert_pem": cert_pem,
-            "key_pem": key_pem,
-            "cert_path": cert_path,
-            "key_path": key_path,
-            "pem_path": pem_path,
-            "cn": cn,
-            "encrypted": bool(passphrase),
-            "passphrase": passphrase or None,
-            "not_after": cert.not_valid_after_utc.isoformat(),
-        })
+        return jsonify({"ok": True, "cn": hostname or ip, **result})
+    except (KeyError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/ca/issued")
 def ca_issued():
     """List issued device certs."""
-    if not os.path.exists(CA_DIR):
+    if artifact_store is None:
         return jsonify([])
-    from cryptography import x509
-    certs = []
-    for fname in os.listdir(CA_DIR):
-        if fname.endswith(".crt") and fname != "certmon-ca.crt":
-            try:
-                with open(os.path.join(CA_DIR, fname), "rb") as f:
-                    cert = x509.load_pem_x509_certificate(f.read())
-                now = datetime.now(timezone.utc)
-                days = (cert.not_valid_after_utc - now).days
-                cn = cert.subject.get_attributes_for_oid(
-                    x509.NameOID.COMMON_NAME)[0].value
-                key_file = os.path.join(CA_DIR, fname.replace(".crt", ".key"))
-                pem_file = os.path.join(CA_DIR, fname.replace(".crt", ".pem"))
-                certs.append({
-                    "filename": fname,
-                    "cn": cn,
-                    "not_after": cert.not_valid_after_utc.isoformat(),
-                    "days_remaining": days,
-                    "cert_path": os.path.join(CA_DIR, fname),
-                    "key_path": key_file if os.path.exists(key_file) else None,
-                    "pem_path": pem_file if os.path.exists(pem_file) else None,
-                })
-            except Exception:
-                pass
-    return jsonify(certs)
+    now = datetime.now(timezone.utc)
+    certificates = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf" or metadata.get("issuer_type") != "local_ca":
+            continue
+        not_after = datetime.fromisoformat(metadata["not_after"])
+        certificates.append({
+            "certificate_id": metadata["id"],
+            "cn": metadata.get("identifiers", [metadata["id"]])[0],
+            "not_after": metadata["not_after"],
+            "days_remaining": (not_after - now).days,
+            "profile": metadata.get("profile"),
+        })
+    return jsonify(certificates)
 
 
-@app.route("/api/ca/download/<filename>")
-def ca_download_file(filename):
-    """Download a specific cert or key file."""
-    # Security: only allow files from CA_DIR, no path traversal
-    safe = os.path.basename(filename)
-    full_path = os.path.join(CA_DIR, safe)
-    if not os.path.exists(full_path):
+@app.route("/api/ca/download/<certificate_id>")
+def ca_download_file(certificate_id):
+    """Download a public device certificate. Private artifacts stay server-side."""
+    if artifact_store is None or not artifact_store.has_certificate(certificate_id):
         return jsonify({"error": "Not found"}), 404
-    if not (safe.endswith(".crt") or safe.endswith(".key") or safe.endswith(".pem")):
-        return jsonify({"error": "Invalid file type"}), 400
-    from flask import Response
-    with open(full_path, "rb") as f:
-        data = f.read()
-    mime = "application/x-pem-file"
-    response = Response(data, status=200, mimetype=mime)
-    response.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
+    try:
+        data = artifact_store.read_public(certificate_id, "certificate.pem")
+    except (FileNotFoundError, ValueError):
+        return jsonify({"error": "Not found"}), 404
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = f'attachment; filename="{certificate_id}.crt"'
+    return response
+
+
+@app.route("/api/external-ca/trust-anchors", methods=["POST"])
+def external_ca_import_trust_anchor():
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        trust_anchor_id = external_ca_service.import_trust_anchor(
+            body.get("trust_anchor_id", "").strip(),
+            body.get("certificate_pem", "").encode("utf-8"),
+        )
+        return jsonify({"ok": True, "trust_anchor_id": trust_anchor_id})
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/renewals/<job_id>/external/csr", methods=["POST"])
+def external_ca_create_csr(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    try:
+        artifact_name = external_ca_service.create_csr_job(job_id)
+        return jsonify({"ok": True, "artifact_name": artifact_name})
+    except (KeyError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/renewals/<job_id>/external/csr", methods=["GET"])
+def external_ca_download_csr(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    try:
+        data = external_ca_service.read_csr(job_id)
+    except (FileNotFoundError, KeyError, ValueError):
+        return jsonify({"error": "CSR not found"}), 404
+    response = Response(data, status=200, mimetype="application/pkcs10")
+    response.headers["Content-Disposition"] = f'attachment; filename="{job_id}.csr"'
+    return response
+
+
+@app.route("/api/renewals/<job_id>/external/complete", methods=["POST"])
+def external_ca_complete(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        certificate_id = external_ca_service.complete_csr_job(
+            job_id,
+            body.get("certificate_pem", "").encode("utf-8"),
+            (body.get("chain_pem") or "").encode("utf-8") or None,
+            body.get("trust_anchor_id"),
+        )
+        return jsonify({"ok": True, "certificate_id": certificate_id})
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/renewals/<job_id>/external/import", methods=["POST"])
+def external_ca_import_existing(job_id):
+    if external_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        certificate_id = external_ca_service.import_existing(
+            job_id,
+            body.get("certificate_pem", "").encode("utf-8"),
+            (body.get("chain_pem") or "").encode("utf-8") or None,
+            body.get("private_key_pem", "").encode("utf-8"),
+            body.get("passphrase"),
+            body.get("trust_anchor_id"),
+        )
+        return jsonify({"ok": True, "certificate_id": certificate_id})
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/credentials/cloudflare", methods=["GET"])
+def get_cloudflare_credentials():
+    authorize(Permission.MANAGE_DNS_CREDENTIALS)
+    config = database.get_setting(CloudflareDNSProvider.SETTING_ID)
+    return jsonify(
+        {
+            "configured": config is not None,
+            "zones": config.get("zones", []) if config else [],
+        }
+    )
+
+
+@app.route("/api/credentials/cloudflare", methods=["POST"])
+def create_cloudflare_credentials():
+    authorize(Permission.MANAGE_DNS_CREDENTIALS)
+    if vault is None:
+        return jsonify({"error": "Secure credential storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        CloudflareDNSProvider.configure(
+            database,
+            vault,
+            token=body.get("token", ""),
+            zones=body.get("zones") or [],
+        )
+        provider = CloudflareDNSProvider.load(database, vault)
+        if acme_orchestrator is not None:
+            acme_orchestrator.dns_providers["cloudflare"] = provider
+        config = database.get_setting(CloudflareDNSProvider.SETTING_ID)
+        return jsonify({"configured": True, "zones": config["zones"]}), 201
+    except (TypeError, ValueError, CloudflareError):
+        return jsonify({"error": "Cloudflare credentials are invalid"}), 400
+
+
+@app.route("/api/credentials/cloudflare", methods=["DELETE"])
+def delete_cloudflare_credentials():
+    authorize(Permission.MANAGE_DNS_CREDENTIALS)
+    database.delete_secret(CloudflareDNSProvider.SECRET_ID)
+    database.delete_setting(CloudflareDNSProvider.SETTING_ID)
+    if acme_orchestrator is not None:
+        acme_orchestrator.dns_providers.pop("cloudflare", None)
+    return "", 204
+
+
+@app.route("/api/certificates/<certificate_id>/public/<artifact_name>")
+def download_public_artifact(certificate_id, artifact_name):
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
+    allowed = {"certificate.pem", "chain.pem", "full-chain.pem", "request.csr"}
+    if artifact_name not in allowed or artifact_store is None:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        data = artifact_store.read_public(certificate_id, artifact_name)
+    except (FileNotFoundError, ValueError, PermissionError):
+        return jsonify({"error": "Not found"}), 404
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{certificate_id}-{artifact_name}"'
+    )
+    return response
+
+
+@app.route("/api/certificates")
+def list_deployable_certificates():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    certificates = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf":
+            continue
+        certificates.append(
+            {
+                "certificate_id": metadata["id"],
+                "identifiers": metadata.get("identifiers", []),
+                "issuer_type": metadata.get("issuer_type"),
+                "profile": metadata.get("profile"),
+                "not_after": metadata.get("not_after"),
+            }
+        )
+    return jsonify(certificates)
+
+
+@app.route("/api/certificates/<certificate_id>/private/<artifact_name>")
+def download_private_artifact(certificate_id, artifact_name):
+    authorize(Permission.DOWNLOAD_PRIVATE_KEY)
+    if artifact_name not in {"private-key.pem", "combined.pem"} or artifact_store is None:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        with artifact_store.materialize_private(certificate_id, artifact_name) as path:
+            data = path.read_bytes()
+    except (FileNotFoundError, ValueError, PermissionError):
+        return jsonify({"error": "Not found"}), 404
+    database.record_event(
+        "private_artifact_downloaded",
+        {"certificate_id": certificate_id, "artifact_name": artifact_name},
+    )
+    response = Response(data, status=200, mimetype="application/x-pem-file")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{certificate_id}-{artifact_name}"'
+    )
     return response
 
 
@@ -1016,44 +1211,59 @@ def _generic_instructions(device):
 
 @app.route("/api/upload/push", methods=["POST"])
 def push_cert():
-    data = load_data()
-    body = request.json
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if deployment_service is None:
+        return jsonify({"error": "Secure deployment is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    prohibited = {
+        "cert_pem",
+        "key_pem",
+        "certificate_pem",
+        "private_key_pem",
+        "combined_pem",
+        "private_material",
+    }
+    if any(field in body for field in prohibited):
+        return (
+            jsonify(
+                {
+                    "error": "Private certificate material must not be sent to this API"
+                }
+            ),
+            400,
+        )
+
     device_id = body.get("device_id")
-    cert_pem = body.get("cert_pem", "")
-    key_pem = body.get("key_pem", "")
+    certificate_id = body.get("certificate_id")
+    if not device_id or not certificate_id:
+        return jsonify({"error": "certificate_id and device_id are required"}), 400
+    unknown = set(body) - {"device_id", "certificate_id"}
+    if unknown:
+        return jsonify({"error": f"Unsupported fields: {sorted(unknown)}"}), 400
 
-    if not device_id or not cert_pem or not key_pem:
-        return jsonify({"error": "device_id, cert_pem and key_pem are required"}), 400
-
+    data = load_data()
     device = next((d for d in data.get("upload_devices", []) if d["id"] == device_id), None)
     if not device:
         return jsonify({"error": "Device not found"}), 404
+    try:
+        result = deployment_service.deploy_certificate(device, certificate_id)
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
 
-    device_type = device.get("device_type", "generic")
-    log = []
-
-    if device_type in ("extron",):
-        success, log = _extron_push(
-            host=device["host"],
-            port=device.get("port", 80),
-            use_https=device.get("https", False),
-            username=device.get("username", "admin"),
-            password=device.get("password", "extron"),
-            cert_pem=cert_pem,
-            key_pem=key_pem,
-        )
-        instructions = None if success else _generic_instructions(device)
-    else:
-        success = False
-        instructions = _generic_instructions(device)
-        log.append(f"Device type '{device_type}' does not support automatic push.")
-        log.append("See manual instructions below.")
-
-    return jsonify({
-        "ok": success,
-        "log": log,
-        "instructions": instructions,
-    })
+    payload = {
+        "ok": result.ok,
+        "log": list(result.log),
+        "instructions": result.instructions,
+        "public_artifacts": result.public_artifacts,
+        "job": _safe_job(result.job) if result.job is not None else None,
+    }
+    if result.verification is not None:
+        payload["verification"] = {
+            "status": result.verification.status,
+            "expected_fingerprint": result.verification.expected_fingerprint,
+            "observed_fingerprint": result.verification.observed_fingerprint,
+        }
+    return jsonify(payload)
 
 
 @app.route("/api/upload/test", methods=["POST"])

@@ -67,13 +67,27 @@ def start_flask(port):
         log_wz = logging.getLogger("werkzeug")
         log_wz.setLevel(logging.ERROR)
 
-        from app import app, data_dir
-        log(f"app imported OK, data_dir={data_dir()}")
-        os.makedirs(data_dir(), exist_ok=True)
-        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+        app_module = initialize_application()
+        log(f"app initialized OK, data_dir={app_module.data_dir()}")
+        app_module.app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         log(f"FLASK ERROR: {e}")
         log(traceback.format_exc())
+
+
+def initialize_application():
+    """Initialize persistent services and recover jobs before serving requests."""
+    import app as app_module
+
+    os.makedirs(app_module.data_dir(), exist_ok=True)
+    app_module.database.initialize()
+    if app_module.vault is not None:
+        app_module.vault.initialize()
+    if app_module.acme_order_service is not None:
+        app_module.renewal_service.recover_interrupted_jobs(
+            app_module.acme_order_service
+        )
+    return app_module
 
 
 def make_tray_icon(port):
