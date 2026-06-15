@@ -87,6 +87,19 @@ class LegacyCAMigrator:
         return CAMigrationResult("local-ca", tuple(imported), backup_path)
 
 
+def migrate_legacy_ca_if_present(artifact_store, legacy_directories):
+    if artifact_store.has_certificate("local-ca"):
+        return None
+    for legacy_dir in legacy_directories:
+        legacy_dir = Path(legacy_dir)
+        if (
+            (legacy_dir / "certmon-ca.crt").is_file()
+            and (legacy_dir / "certmon-ca.key").is_file()
+        ):
+            return LegacyCAMigrator(legacy_dir, artifact_store).migrate()
+    return None
+
+
 def _load_matching_pair(cert_pem, key_pem):
     cert = x509.load_pem_x509_certificate(cert_pem)
     key = serialization.load_pem_private_key(key_pem, password=None)

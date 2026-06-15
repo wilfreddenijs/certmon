@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response
 
 from certmon.config import resolve_data_dir
+from certmon.ca_migration import migrate_legacy_ca_if_present
 from certmon.db import Database
 from certmon.artifacts import ArtifactStore
 from certmon.acme_service import (
@@ -89,6 +90,10 @@ if sys.platform == "win32":
     vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
     vault.initialize()
     artifact_store = ArtifactStore(Path(data_dir()) / "certificates", vault)
+    migrate_legacy_ca_if_present(
+        artifact_store,
+        (Path(r"C:\CertMon\CA"), Path(data_dir()) / "CA"),
+    )
     local_ca_service = LocalCAService(database, artifact_store)
     external_ca_service = ExternalCAService(database, artifact_store)
     acme_account_service = ACMEAccountService(

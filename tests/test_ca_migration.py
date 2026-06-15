@@ -6,7 +6,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 
 from certmon.artifacts import ArtifactStore
-from certmon.ca_migration import LegacyCAMigrator
+from certmon.ca_migration import LegacyCAMigrator, migrate_legacy_ca_if_present
 from certmon.vault import MemoryKeyProtector, Vault
 
 
@@ -92,3 +92,43 @@ def test_rejects_mismatched_certificate_and_key(tmp_path):
         assert "does not match" in str(exc)
     else:
         raise AssertionError("Expected mismatched key rejection")
+
+
+def test_migrates_first_existing_legacy_ca_directory(tmp_path):
+    missing = tmp_path / "missing-ca"
+    legacy = tmp_path / "legacy-ca"
+    legacy.mkdir()
+    ca_key = ed25519.Ed25519PrivateKey.from_private_bytes(b"e" * 32)
+    ca_cert = _certificate("CertMon Local CA", ca_key)
+    (legacy / "certmon-ca.crt").write_bytes(
+        ca_cert.public_bytes(serialization.Encoding.PEM)
+    )
+    _write_key(legacy / "certmon-ca.key", ca_key)
+    vault = Vault(tmp_path / "vault", MemoryKeyProtector())
+    vault.initialize()
+    store = ArtifactStore(tmp_path / "certificates", vault)
+
+    result = migrate_legacy_ca_if_present(store, (missing, legacy))
+
+    assert result is not None
+    assert result.ca_certificate_id == "local-ca"
+    assert store.has_certificate("local-ca")
+
+
+def test_legacy_ca_discovery_does_nothing_after_migration(tmp_path):
+    legacy = tmp_path / "legacy-ca"
+    legacy.mkdir()
+    vault = Vault(tmp_path / "vault", MemoryKeyProtector())
+    vault.initialize()
+    store = ArtifactStore(tmp_path / "certificates", vault)
+    store.create_certificate_set(
+        "local-ca",
+        {"certificate.pem": b"existing"},
+        {"private-key.pem": b"existing-key"},
+        {},
+    )
+
+    result = migrate_legacy_ca_if_present(store, (legacy,))
+
+    assert result is None
+    assert store.read_public("local-ca", "certificate.pem") == b"existing"
