@@ -1176,7 +1176,10 @@
 
     const issuedSection = issued.length ? `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
-        <div class="section-title" style="margin-bottom:14px">Issued Device Certificates</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="section-title" style="margin-bottom:0">Issued Device Certificates (${issued.length})</div>
+          <a href="/api/ca/devices-txt" download="devices.txt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" title="Download IPs of all devices with a .pem — feed to toolbelt_uploader.py --list">⬇ devices.txt</button></a>
+        </div>
         <div style="display:flex;flex-direction:column;gap:10px">
           ${issued.map(c => `
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">

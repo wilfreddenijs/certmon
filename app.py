@@ -476,6 +476,26 @@ def load_ca():
     return key, cert
 
 
+def _device_id_from_cert(cert):
+    """The identifier (IP, else hostname, else CN) used to reach/upload a device.
+    Round-trips with the .pem filename via <id>.replace('.', '_')."""
+    from cryptography import x509
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        ips = san.get_values_for_type(x509.IPAddress)
+        if ips:
+            return str(ips[0])
+        dns = san.get_values_for_type(x509.DNSName)
+        if dns:
+            return dns[0]
+    except Exception:
+        pass
+    try:
+        return cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
+    except Exception:
+        return None
+
+
 def _authority_key_id(ca_cert):
     """Build authorityKeyIdentifier=keyid,issuer for a leaf cert (Extron profile)."""
     from cryptography import x509
@@ -732,6 +752,32 @@ def ca_issue():
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/ca/devices-txt")
+def ca_devices_txt():
+    """Plain-text list of device IPs/hostnames that have an issued .pem —
+    ready to feed to toolbelt_uploader.py --list devices.txt."""
+    ids = []
+    if os.path.exists(CA_DIR):
+        from cryptography import x509
+        for fname in sorted(os.listdir(CA_DIR)):
+            if fname.endswith(".crt") and fname != "certmon-ca.crt":
+                pem = os.path.join(CA_DIR, fname.replace(".crt", ".pem"))
+                if not os.path.exists(pem):
+                    continue  # only devices that actually have a .pem
+                try:
+                    with open(os.path.join(CA_DIR, fname), "rb") as f:
+                        cert = x509.load_pem_x509_certificate(f.read())
+                    did = _device_id_from_cert(cert)
+                    if did and did not in ids:
+                        ids.append(did)
+                except Exception:
+                    pass
+    body = "\n".join(ids) + ("\n" if ids else "")
+    response = Response(body, status=200, mimetype="text/plain")
+    response.headers["Content-Disposition"] = 'attachment; filename="devices.txt"'
+    return response
 
 
 @app.route("/api/ca/issued")
