@@ -103,9 +103,23 @@ def connect_toolbelt(launch_if_needed=True, timeout=60):
             raise
         if not os.path.exists(TOOLBELT_EXE):
             raise RuntimeError("Toolbelt.exe not found at %s" % TOOLBELT_EXE)
-        log.info("Launching Toolbelt...")
+        log.info("Toolbelt not running — launching it (this is slow; "
+                 "for reliability open Toolbelt yourself before running)...")
         Application(backend="uia").start(TOOLBELT_EXE)
-        app.connect(title_re=".*Toolbelt.*", timeout=timeout)
+        # Toolbelt loads slowly and shows a splash first — poll patiently.
+        deadline = time.time() + max(timeout, 90)
+        connected = False
+        while time.time() < deadline:
+            try:
+                app.connect(title_re=".*Toolbelt.*", timeout=3)
+                connected = True
+                break
+            except Exception:
+                time.sleep(2)
+        if not connected:
+            raise RuntimeError(
+                "Could not attach to Toolbelt after launch. Open Toolbelt manually "
+                "(wait for the device list), then re-run.")
     win = app.window(title_re=".*Toolbelt.*", top_level_only=True)
     win.wait("visible", timeout=timeout)
     bring_to_front(win)
@@ -393,8 +407,24 @@ def click_apply_and_confirm(win, apply_btn, timeout=T_APPLY):
     return False, "no confirmation/error detected (timeout)"
 
 
+def reachable(ip, port=4503, timeout=3):
+    """Fast TCP check of the management/SFTP port — skip offline/unroutable
+    devices instead of waiting ~25s for Manage to fail."""
+    import socket
+    try:
+        s = socket.create_connection((ip, port), timeout=timeout)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
 def upload_to_device(app, win, ip, pem_path, passphrase, commit):
     """Full per-device flow (assumes device is in the discovery list)."""
+    if not reachable(ip):
+        return False, "unreachable (port 4503 closed — offline or not routable)"
+    if not os.path.exists(pem_path):
+        return False, "no .pem at %s (issue it first or use --issue)" % pem_path
     bring_to_front(win)
     select_device(win, ip)
     ctrls = find_ssl_controls(win)
