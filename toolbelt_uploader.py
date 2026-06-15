@@ -50,6 +50,9 @@ USAGE
   # Batch, really upload:
   py toolbelt_uploader.py --list devices.txt --commit
 
+  # Full pipeline: issue each cert via CertMon, then upload (CertMon running):
+  py toolbelt_uploader.py --list devices.txt --issue --commit
+
 The .pem for an IP is taken from C:\\CertMon\\CA\\<ip_with_underscores>.pem
 (what CertMon's Local CA tab writes). Override with --pem for single-device mode.
 """
@@ -275,24 +278,37 @@ def set_cert_path(app, win, dots_btn, pem_path):
         raise RuntimeError("filename field not found in open dialog")
     fn.set_edit_text(pem_path)
     time.sleep(0.3)
-    # Click Open (button title is usually "&Open"); fall back to Enter.
+    # Submit the dialog with a REAL mouse click on Open (win32 BM_CLICK messages
+    # don't reliably dismiss the shell dialog); fall back to Enter.
+    submitted = False
     try:
-        ob = dlg.child_window(title_re="&?Open", class_name="Button")
+        ob = dlg.child_window(title="&Open", class_name="Button")
         if ob.exists():
-            ob.click()
-        else:
-            fn.type_keys("{ENTER}")
+            try:
+                ob.set_focus()
+            except Exception:
+                pass
+            ob.click_input()
+            submitted = True
     except Exception:
+        submitted = False
+    if not submitted:
+        try:
+            dlg.set_focus()
+        except Exception:
+            pass
         fn.type_keys("{ENTER}")
 
-    # Wait for the dialog to close
-    deadline = time.time() + 8
+    # Wait for the dialog to close — if it doesn't, the path wasn't accepted.
+    deadline = time.time() + 10
     from pywinauto import findwindows
     while time.time() < deadline:
         if not findwindows.find_windows(class_name="#32770"):
             break
         time.sleep(POLL)
-    time.sleep(0.5)
+    else:
+        raise RuntimeError("file dialog did not close after selecting the .pem (Open not accepted)")
+    time.sleep(0.6)
 
 
 def set_passphrase(pass_edit, passphrase):
@@ -308,43 +324,73 @@ def set_passphrase(pass_edit, passphrase):
         pass_edit.type_keys(safe, with_spaces=True, set_foreground=True)
 
 
-def click_apply_and_confirm(win, apply_btn, timeout=T_APPLY):
-    """Click Apply and confirm the reboot prompt; wait for success/failure text."""
-    apply_btn.click_input()
-    time.sleep(1.0)
-    # Confirm dialog: "Are you sure you want to reboot?" -> Yes/OK
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        for w in Desktop(backend="uia").windows():
-            txt = (w.window_text() or "")
-            if "reboot" in txt.lower() or "are you sure" in txt.lower():
-                for b in w.descendants(control_type="Button"):
-                    if (b.window_text() or "").strip() in ("Yes", "OK", "&Yes"):
-                        b.click_input()
-                        break
-                break
-        # also check inline confirm buttons inside main window
-        time.sleep(POLL)
-        break  # confirm dialog handling is best-effort; many builds auto-proceed
+FAIL_HINTS = ("not correct", "do not match", "not valid", "does not follow security",
+              "invalid passphrase", "application failed")
 
-    # Wait for a result message
-    deadline = time.time() + timeout
+
+def _msgbox(handle):
+    """Return (full_text, yes_or_ok_button_or_None) for a #32770 dialog."""
+    dlg = Application(backend="win32").connect(handle=handle).window(handle=handle)
+    txt = dlg.window_text() or ""
+    for c in dlg.descendants():
+        try:
+            txt += " " + (c.window_text() or "")
+        except Exception:
+            pass
+    btn = None
+    for title in ("&Yes", "Yes", "&OK", "OK"):
+        b = dlg.child_window(title=title, class_name="Button")
+        if b.exists():
+            btn = b
+            break
+    return txt, btn
+
+
+def click_apply_and_confirm(win, apply_btn, timeout=T_APPLY):
+    """Click Apply, then decide the outcome:
+
+    Toolbelt validates the cert/key/passphrase FIRST. If invalid it shows an
+    error; if valid it shows a reboot confirmation. So:
+      * an error message (#32770 or inline)  -> FAILURE
+      * a reboot confirmation                -> SUCCESS (cert accepted) -> click Yes
+    """
+    from pywinauto import findwindows
+    apply_btn.click_input()
+
+    deadline = time.time() + min(timeout, 60)
     while time.time() < deadline:
-        texts = [(c.window_text() or "").strip() for c in win.descendants(control_type="Text")]
-        joined = " | ".join(texts)
-        low = joined.lower()
-        if "successful" in low or "uploaded successfully" in low:
-            return True, "success"
-        if "failed" in low or "not correct" in low or "do not match" in low or "not valid" in low \
-           or "does not follow security" in low:
-            # pull the specific message
-            for t in texts:
-                tl = t.lower()
-                if "fail" in tl or "not correct" in tl or "do not match" in tl or "not valid" in tl or "security" in tl:
-                    return False, t
-            return False, "failed (unspecified)"
-        time.sleep(1.0)
-    return False, "timeout waiting for result"
+        # (1) a #32770 dialog appeared — error or reboot-confirm?
+        handles = findwindows.find_windows(class_name="#32770")
+        for h in handles:
+            try:
+                txt, btn = _msgbox(h)
+            except Exception:
+                continue
+            low = txt.lower()
+            if any(fh in low for fh in FAIL_HINTS):
+                # dismiss and report the error
+                if btn:
+                    try: btn.click_input()
+                    except Exception: pass
+                return False, txt.strip()[:120] or "upload rejected"
+            if btn is not None:
+                # no error text + a Yes/OK => reboot confirmation => accepted
+                try: btn.click_input()
+                except Exception: pass
+                log.info("cert accepted; confirmed reboot")
+                return True, "uploaded; device rebooting"
+
+        # (2) inline (non-dialog) messages
+        inline = " ".join((c.window_text() or "") for c in win.descendants(control_type="Text"))
+        low = inline.lower()
+        if "uploaded successfully" in low or "certificate was uploaded successfully" in low:
+            return True, "uploaded successfully"
+        for fh in ("do not match", "not correct", "not valid anymore", "does not follow security", "invalid passphrase"):
+            if fh in low:
+                return False, fh
+        time.sleep(POLL)
+
+    return False, "no confirmation/error detected (timeout)"
 
 
 def upload_to_device(app, win, ip, pem_path, passphrase, commit):
@@ -371,6 +417,41 @@ def pem_for_ip(ip):
     return os.path.join(CA_DIR, ip.replace(".", "_").replace(":", "_") + ".pem")
 
 
+def certmon_issue(ip, certmon_url, passphrase=""):
+    """Ask a running CertMon to issue (or re-issue) the device cert and write its
+    .pem. Returns the pem path. Requires the CertMon CA to already exist."""
+    import json
+    import urllib.request
+    body = json.dumps({"ip": ip, "passphrase": passphrase}).encode()
+    req = urllib.request.Request(certmon_url.rstrip("/") + "/api/ca/issue",
+                                 data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = json.loads(r.read().decode())
+    if not data.get("ok"):
+        raise RuntimeError("CertMon issue failed: %s" % data.get("error"))
+    return data.get("pem_path") or pem_for_ip(ip)
+
+
+def _close_stray_dialogs():
+    """Dismiss any leftover #32770 file/confirm dialog before the next device."""
+    from pywinauto import findwindows
+    for h in findwindows.find_windows(class_name="#32770"):
+        try:
+            Application(backend="win32").connect(handle=h).window(handle=h).type_keys("{ESC}")
+        except Exception:
+            pass
+
+
+def ensure_connection(app, win):
+    """Reconnect if Toolbelt was closed/restarted between devices."""
+    try:
+        _ = win.window_text()
+        return app, win
+    except Exception:
+        log.info("Toolbelt connection lost — reconnecting...")
+        return connect_toolbelt()
+
+
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Drive Toolbelt to upload CertMon .pem certs to Extron devices.")
@@ -379,6 +460,12 @@ def main():
     ap.add_argument("--pem", help="explicit .pem path (single-device mode)")
     ap.add_argument("--passphrase", default="", help="key passphrase (blank for combined .pem)")
     ap.add_argument("--commit", action="store_true", help="actually click Apply (otherwise dry-run)")
+    ap.add_argument("--issue", action="store_true",
+                    help="issue each cert via a running CertMon before uploading")
+    ap.add_argument("--certmon-url", default="http://localhost:5000",
+                    help="CertMon base URL for --issue (default http://localhost:5000)")
+    ap.add_argument("--settle", type=float, default=2.0,
+                    help="seconds to pause between devices (default 2)")
     args = ap.parse_args()
 
     setup_logging()
@@ -392,18 +479,35 @@ def main():
         with open(args.list) as f:
             devices += [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
 
-    log.info("=== Toolbelt uploader: %d device(s), commit=%s ===", len(devices), args.commit)
+    log.info("=== Toolbelt uploader: %d device(s), commit=%s, issue=%s ===",
+             len(devices), args.commit, args.issue)
     app, win = connect_toolbelt()
 
     results = []
-    for ip in devices:
-        pem = args.pem if (args.pem and args.device) else pem_for_ip(ip)
+    for idx, ip in enumerate(devices, 1):
+        log.info("--- (%d/%d) %s ---", idx, len(devices), ip)
+        app, win = ensure_connection(app, win)
+        _close_stray_dialogs()
+
+        # Resolve / issue the .pem for this device
+        if args.issue:
+            try:
+                pem = certmon_issue(ip, args.certmon_url, args.passphrase)
+                log.info("[%s] issued cert -> %s", ip, pem)
+            except Exception as e:
+                results.append((ip, False, "issue failed: %s" % e))
+                log.error("[%s] issue failed: %s", ip, e)
+                continue
+        else:
+            pem = args.pem if (args.pem and args.device) else pem_for_ip(ip)
+
         try:
             ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit)
         except Exception as e:
             ok, msg = False, "ERROR: %s" % e
             log.error("[%s] %s", ip, msg)
         results.append((ip, ok, msg))
+        time.sleep(args.settle)
 
     log.info("=== SUMMARY ===")
     for ip, ok, msg in results:
