@@ -756,25 +756,32 @@ def ca_issue():
 
 @app.route("/api/ca/devices-txt")
 def ca_devices_txt():
-    """Plain-text list of device IPs/hostnames that have an issued .pem —
-    ready to feed to toolbelt_uploader.py --list devices.txt."""
-    ids = []
+    """List of `ip,pemfile` for every issued device cert that has a .pem —
+    ready to feed to toolbelt_uploader.py --list devices.txt.
+
+    Two columns so each device maps to its EXACT .pem regardless of whether the
+    cert was named by IP or hostname. Column 1 (the IP/host) is what Toolbelt
+    selects by; column 2 is the cert to upload. One line per issued cert."""
+    lines = []
     if os.path.exists(CA_DIR):
         from cryptography import x509
         for fname in sorted(os.listdir(CA_DIR)):
             if fname.endswith(".crt") and fname != "certmon-ca.crt":
-                pem = os.path.join(CA_DIR, fname.replace(".crt", ".pem"))
-                if not os.path.exists(pem):
+                pem_name = fname[:-4] + ".pem"
+                if not os.path.exists(os.path.join(CA_DIR, pem_name)):
                     continue  # only devices that actually have a .pem
                 try:
                     with open(os.path.join(CA_DIR, fname), "rb") as f:
                         cert = x509.load_pem_x509_certificate(f.read())
-                    did = _device_id_from_cert(cert)
-                    if did and did not in ids:
-                        ids.append(did)
+                    selector = _device_id_from_cert(cert)  # IP preferred, else host/CN
+                    if not selector:
+                        continue
+                    line = "%s,%s" % (selector, pem_name)
+                    if line not in lines:
+                        lines.append(line)
                 except Exception:
                     pass
-    body = "\n".join(ids) + ("\n" if ids else "")
+    body = "\n".join(lines) + ("\n" if lines else "")
     response = Response(body, status=200, mimetype="text/plain")
     response.headers["Content-Disposition"] = 'attachment; filename="devices.txt"'
     return response

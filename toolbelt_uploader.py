@@ -502,19 +502,32 @@ def main():
     if not args.device and not args.list:
         ap.error("provide --device or --list")
 
+    # Each device is (selector, pem_override). devices.txt lines are either
+    # "ip" or "ip,pemfile" (CertMon's CA tab exports the 2-column form so a
+    # hostname-named cert still maps to the right device).
     devices = []
     if args.device:
-        devices.append(args.device.strip())
+        devices.append((args.device.strip(), args.pem))
     if args.list:
         with open(args.list) as f:
-            devices += [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            for ln in f:
+                ln = ln.strip()
+                if not ln or ln.startswith("#"):
+                    continue
+                if "," in ln:
+                    sel, pemname = ln.split(",", 1)
+                    sel, pemname = sel.strip(), pemname.strip()
+                    pem_path = pemname if os.path.isabs(pemname) else os.path.join(CA_DIR, pemname)
+                    devices.append((sel, pem_path))
+                else:
+                    devices.append((ln, None))
 
     log.info("=== Toolbelt uploader: %d device(s), commit=%s, issue=%s ===",
              len(devices), args.commit, args.issue)
     app, win = connect_toolbelt()
 
     results = []
-    for idx, ip in enumerate(devices, 1):
+    for idx, (ip, pem_override) in enumerate(devices, 1):
         log.info("--- (%d/%d) %s ---", idx, len(devices), ip)
         app, win = ensure_connection(app, win)
         _close_stray_dialogs()
@@ -529,7 +542,7 @@ def main():
                 log.error("[%s] issue failed: %s", ip, e)
                 continue
         else:
-            pem = args.pem if (args.pem and args.device) else pem_for_ip(ip)
+            pem = pem_override or pem_for_ip(ip)
 
         try:
             ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit)
