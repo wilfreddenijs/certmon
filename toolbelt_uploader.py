@@ -60,6 +60,7 @@ The .pem for an IP is taken from C:\\CertMon\\CA\\<ip_with_underscores>.pem
 import os
 import sys
 import time
+import ctypes
 import argparse
 import logging
 
@@ -94,11 +95,51 @@ def setup_logging():
 # ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
+def _win32_toolbelt_present():
+    """True if a top-level window titled 'Toolbelt' exists at the Win32 level
+    (even when UIA can't attach — e.g. an elevation/integrity mismatch)."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = [False]
+    EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    def cb(hwnd, lparam):
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            if buf.value.strip().lower() == "toolbelt":
+                found[0] = True
+        return True
+
+    user32.EnumWindows(EnumProc(cb), 0)
+    return found[0]
+
+
+def _is_elevated():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def connect_toolbelt(launch_if_needed=True, timeout=60):
+    import ctypes  # noqa: F401  (used by _is_elevated)
     app = Application(backend="uia")
     try:
         app.connect(title_re=".*Toolbelt.*", timeout=5)
     except Exception:
+        # Toolbelt visible to Win32 but not UIA => almost always an integrity
+        # mismatch (Toolbelt elevated, this script not).
+        if _win32_toolbelt_present():
+            raise RuntimeError(
+                "Toolbelt is running but cannot be automated. This almost always "
+                "means Toolbelt is running as Administrator while this script is "
+                "not (Windows blocks lower-integrity automation of an elevated "
+                "app). Fix: run this script from an elevated PowerShell "
+                "(right-click > Run as administrator), OR start Toolbelt without "
+                "admin. [this script elevated=%s]" % _is_elevated())
         if not launch_if_needed:
             raise
         if not os.path.exists(TOOLBELT_EXE):
