@@ -1162,7 +1162,7 @@
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
           <div>
-            <div class="form-label">Key passphrase (required for Extron Toolbelt)</div>
+            <div class="form-label">Key passphrase (optional — leave blank for Toolbelt .pem)</div>
             <input type="text" id="issue-passphrase" placeholder="leave blank = unencrypted key" style="width:280px" />
           </div>
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding-bottom:9px;cursor:pointer">
@@ -1288,14 +1288,17 @@
         <b>Generic web-UI alternative:</b> some devices instead take the <b>.crt</b> as
         the certificate and <b>.key</b> as the private key in their SSL/TLS settings.`
     };
-    const modal = document.createElement('div');
-    modal.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
-    modal.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:500px;max-width:95vw">
+    const overlay = document.createElement('div');
+    overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:500px;max-width:95vw">
       <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:16px">📋 Upload Guide</div>
       <div style="font-size:13px;line-height:1.8;color:var(--text)">${guides.default}</div>
-      <button class="btn" style="margin-top:20px" onclick="this.closest('div[style]').remove()">Close</button>
+      <button class="btn" id="ug-close" style="margin-top:20px">Close</button>
     </div>`;
-    document.body.appendChild(modal);
+    document.body.appendChild(overlay);
+    // Remove the whole overlay (not just the inner card, which left a black screen)
+    overlay.querySelector('#ug-close').onclick = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   }
 
   // (switchTab handles all tabs directly above — no wrapper needed)
@@ -1345,8 +1348,9 @@
       ip: isIp(host) ? host : '',
       hostname: (cn && cn !== host && !isIp(cn)) ? cn : (isIp(host) ? '' : host)
     };
-    switchTab('ca');           // triggers loadCA(); renderCA() will call applyCAPrefill
-    setTimeout(applyCAPrefill, 60);  // fallback if the form is already present
+    switchTab('ca');  // triggers loadCA() -> renderCA() applies the prefill once the
+                      // form is (re)built. No early timeout: it would fill the stale
+                      // form and clear the pending value before renderCA wipes it.
   }
 
   // Applies a pending prefill once the issue form exists. If the CA hasn't been
