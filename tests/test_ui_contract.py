@@ -70,6 +70,14 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "key_pem" not in html
 
 
+def test_renewal_resume_actions_surface_errors_inline():
+    html = page()
+
+    assert "renewal-action-result-" in html
+    assert "response.ok" in html
+    assert "Could not verify renewal" in html
+
+
 def test_template_contains_no_mojibake_sequences():
     html = page()
 

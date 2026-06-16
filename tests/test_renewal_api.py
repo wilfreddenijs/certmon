@@ -77,6 +77,18 @@ def test_manual_continue_cancel_and_cleanup_routes(tmp_data_dir, monkeypatch):
     assert client.post("/api/renewals/job-1/retry-cleanup").get_json()["state"] == "issued"
 
 
+def test_manual_continue_reports_acme_unavailable(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, "acme_orchestrator", None)
+
+    response = module.app.test_client().post(
+        "/api/renewals/job-1/manual-dns/continue"
+    )
+
+    assert response.status_code == 503
+    assert response.get_json() == {"error": "ACME service is unavailable"}
+
+
 class FakeArtifacts:
     def read_public(self, certificate_id, name):
         if name == "private-key.pem":

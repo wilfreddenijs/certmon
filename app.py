@@ -496,6 +496,8 @@ def start_renewal(job_id):
 @app.route("/api/renewals/<job_id>/manual-dns/continue", methods=["POST"])
 def continue_manual_dns(job_id):
     authorize(Permission.ISSUE_CERTIFICATE)
+    if acme_orchestrator is None:
+        return jsonify({"error": "ACME service is unavailable"}), 503
     try:
         return jsonify(_safe_job(acme_orchestrator.continue_manual_dns(job_id)))
     except (KeyError, ValueError) as error:

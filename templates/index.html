@@ -1060,6 +1060,7 @@
         </div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${(r.identifiers || []).join(', ')}</div>
         ${renewalStateActions(r)}
+        <div id="renewal-action-result-${r.id}" style="font-size:12px;margin-top:10px;color:var(--muted)"></div>
       </div>
     `).join('');
   }
@@ -1258,7 +1259,36 @@
       return;
     }
     const route = action === 'verify' ? 'manual-dns/continue' : action === 'retry-cleanup' ? 'retry-cleanup' : action;
-    await fetch(`/api/renewals/${id}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'start' ? '{}' : undefined });
+    const statusEl = document.getElementById(`renewal-action-result-${id}`);
+    if (statusEl) {
+      statusEl.style.color = 'var(--muted)';
+      statusEl.textContent = action === 'verify' ? 'Verifying DNS and continuing...' : 'Working...';
+    }
+    const response = await fetch(`/api/renewals/${id}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'start' ? '{}' : undefined });
+    const text = await response.text();
+    let result = {};
+    try {
+      result = text ? JSON.parse(text) : {};
+    } catch (e) {
+      result = { error: text || response.statusText };
+    }
+    if (!response.ok) {
+      const message = result.error || `Could not verify renewal (${response.status})`;
+      if (statusEl) {
+        statusEl.style.color = 'var(--critical)';
+        statusEl.textContent = message;
+      } else {
+        alert(message);
+      }
+      return;
+    }
+    if (result.state === 'failed' || result.state === 'cleanup_required') {
+      const message = result.error_message || result.error_code || 'Renewal needs attention';
+      if (statusEl) {
+        statusEl.style.color = result.state === 'failed' ? 'var(--critical)' : 'var(--warning)';
+        statusEl.textContent = message;
+      }
+    }
     loadData();
   }
 
