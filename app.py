@@ -662,6 +662,11 @@ def ca_exists():
     )
 
 
+def _certificate_selector(metadata):
+    identifiers = metadata.get("identifiers") or []
+    return identifiers[0] if identifiers else metadata.get("id")
+
+
 @app.route("/api/ca/status")
 def ca_status():
     if not ca_exists():
@@ -767,6 +772,44 @@ def ca_issue():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ca/devices-txt")
+def ca_devices_txt():
+    """List of `ip,pemfile` for every issued device cert that has a .pem —
+    ready to feed to toolbelt_uploader.py --list devices.txt.
+
+    Two columns so each device maps to its EXACT .pem regardless of whether the
+    cert was named by IP or hostname. Column 1 (the IP/host) is what Toolbelt
+    selects by; column 2 is the cert to upload. One line per issued cert."""
+    lines = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf" or metadata.get("issuer_type") != "local_ca":
+            continue
+        selector = _certificate_selector(metadata)
+        if selector:
+            lines.append(f"{selector},{metadata['id']}")
+    body = "\n".join(lines) + ("\n" if lines else "")
+    response = Response(body, status=200, mimetype="text/plain")
+    response.headers["Content-Disposition"] = 'attachment; filename="devices.txt"'
+    return response
+
+
+@app.route("/api/ca/issued/<certificate_id>", methods=["DELETE"])
+def ca_delete_issued(certificate_id):
+    """Delete an issued device cert and its companion files (.crt/.key/.pem,
+    plus an _encrypted.key if present)."""
+    metadata = database.get_certificate(certificate_id)
+    if (
+        metadata is None
+        or metadata.get("kind") != "leaf"
+        or metadata.get("issuer_type") != "local_ca"
+    ):
+        return jsonify({"error": "Not found"}), 404
+    if artifact_store is not None:
+        artifact_store.delete_certificate_set(certificate_id)
+    database.delete_certificate(certificate_id)
+    return jsonify({"ok": True, "removed": [certificate_id]})
 
 
 @app.route("/api/ca/issued")
