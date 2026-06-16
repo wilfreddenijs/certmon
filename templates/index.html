@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CertMon â€” TLS Certificate Monitor</title>
+<title>CertMon — TLS Certificate Monitor</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -662,7 +662,7 @@
       </div>
       <div class="range-list" id="range-list"></div>
       <button class="btn btn-scan" id="scan-btn" onclick="startScan()" style="margin-top:10px">
-        â–¶ Scan Network
+        ▶ Scan Network
       </button>
       <div id="scan-progress" style="display:none">
         <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
@@ -675,7 +675,7 @@
       <div class="section-title">Status Legend</div>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
         <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--ok)"></div> OK (47+ days)</div>
-        <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--warning)"></div> Warning (20â€“47 days)</div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--warning)"></div> Warning (20–47 days)</div>
         <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--critical)"></div> Critical (&lt;20 days)</div>
         <div style="display:flex;align-items:center;gap:8px"><div class="stat-dot" style="background:var(--expired)"></div> Expired</div>
       </div>
@@ -689,11 +689,11 @@
       <div style="display:flex">
         <div class="tab active" onclick="switchTab('certs')">Certificates</div>
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
-        <div class="tab" onclick="switchTab('ca')">ðŸ” Local CA</div>
-        <div class="tab" onclick="switchTab('upload')">â¬† Upload</div>
+        <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
+        <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
       </div>
       <a href="/api/export/excel" download>
-        <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">â¬‡ Export Excel</button>
+        <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
       </a>
     </div>
 
@@ -765,7 +765,7 @@
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn" style="flex:1" onclick="addUploadDevice()">+ Add Device</button>
-              <button class="btn btn-ghost" style="padding:8px 12px" onclick="testUploadDevice()" title="Test connection">âŸ³ Test</button>
+              <button class="btn btn-ghost" style="padding:8px 12px" onclick="testUploadDevice()" title="Test connection">⟳ Test</button>
             </div>
             <div id="ud-test-result" style="font-size:11px;margin-top:8px;display:none"></div>
           </div>
@@ -791,11 +791,11 @@
             <div class="form-group">
               <label class="form-label">Push to Device</label>
               <select id="push-device-select" style="width:100%">
-                <option value="">â€” select a device â€”</option>
+                <option value="">— select a device —</option>
               </select>
             </div>
 
-            <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">â¬† Push Certificate to Device</button>
+            <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">⬆ Push Certificate to Device</button>
           </div>
 
           <!-- Push log / result -->
@@ -807,7 +807,7 @@
               <div id="push-public-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             </div>
             <div id="push-instructions" style="display:none;margin-top:14px">
-              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">âš  Manual upload required - follow these steps:</div>
+              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required - follow these steps:</div>
               <pre id="push-instructions-text" style="font-size:11px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre>
             </div>
           </div>
@@ -821,8 +821,8 @@
 <!-- Renewal Modal -->
 <div class="modal-overlay" id="renewal-modal">
   <div class="modal" style="width:680px;max-width:96vw;max-height:92vh;overflow:auto">
-    <div class="modal-title">âŸ³ Certificate Renewal Wizard</div>
-    <div id="renewal-wizard-status" style="color:var(--muted);margin-bottom:16px;font-size:12px">Step 1 of 4 Â· Endpoint and identifiers</div>
+    <div class="modal-title">⟳ Certificate Renewal Wizard</div>
+    <div id="renewal-wizard-status" style="color:var(--muted);margin-bottom:16px;font-size:12px">Step 1 of 4 · Endpoint and identifiers</div>
 
     <section class="renewal-step" data-step="1">
       <div style="display:grid;grid-template-columns:1fr 100px;gap:10px">
@@ -936,7 +936,7 @@
     (data.manual_hosts || []).forEach(h => {
       const d = document.createElement('div');
       d.className = 'list-item';
-      d.innerHTML = `<span>${h.host}:${h.port}</span><button class="btn btn-danger" onclick="removeHost('${h.host}',${h.port})">âœ•</button>`;
+      d.innerHTML = `<span>${h.host}:${h.port}</span><button class="btn btn-danger" onclick="removeHost('${h.host}',${h.port})">✕</button>`;
       hl.appendChild(d);
     });
 
@@ -946,7 +946,7 @@
     (data.scan_ranges || []).forEach(r => {
       const d = document.createElement('div');
       d.className = 'list-item';
-      d.innerHTML = `<span>${r}</span><button class="btn btn-danger" onclick="removeRange('${r}')">âœ•</button>`;
+      d.innerHTML = `<span>${r}</span><button class="btn btn-danger" onclick="removeRange('${r}')">✕</button>`;
       rl.appendChild(d);
     });
   }
@@ -999,7 +999,7 @@
       const canRenew = ['warning', 'critical', 'expired'].includes(c.status);
       const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
       const hasDevice = (uploadDevices || []).some(d => d.host === c.host);
-      const uploadLabel = hasDevice ? 'â¬† Push' : 'â¬† Upload';
+      const uploadLabel = hasDevice ? '⬆ Push' : '⬆ Upload';
       const uploadTitle = hasDevice ? 'Push a cert to this saved device' : 'Add this device to the Upload tab';
 
       return `
@@ -1030,11 +1030,11 @@
             <div class="days-fill" style="width:${barW}%;background:${color}"></div>
           </div>
           <div class="cert-actions">
-            <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">â†» Refresh</button>
-            ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">âŸ³ Renew</button>` : ''}
+            <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
+            ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
             <button class="btn btn-upload" title="${uploadTitle}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${uploadLabel}</button>
-            <button class="btn btn-ca" title="Issue a CA-signed cert for this device (prefills the Local CA tab)" onclick="sendToCA('${c.host}','${escAttr(c.cn || '')}')">ðŸ” CA</button>
-            <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">âœ•</button>
+            <button class="btn btn-ca" title="Issue a CA-signed cert for this device (prefills the Local CA tab)" onclick="sendToCA('${c.host}','${escAttr(c.cn || '')}')">🔐 CA</button>
+            <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
           </div>
         </div>
       `;
@@ -1052,7 +1052,7 @@
         <div class="renewal-header">
           <div>
             <div class="renewal-host">${r.endpoint_host}:${r.endpoint_port}</div>
-            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.issuer_type} Â· ${r.profile}${r.environment ? ` Â· ${r.environment}` : ''}</div>
+            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.issuer_type} · ${r.profile}${r.environment ? ` · ${r.environment}` : ''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px">
             <span class="renewal-status ${r.state}">${r.state.replaceAll('_',' ')}</span>
@@ -1179,7 +1179,7 @@
 
   function updateRenewalNavigation() {
     const labels = ['Endpoint and identifiers', 'Issuer', 'Profile and options', 'Review'];
-    document.getElementById('renewal-wizard-status').textContent = `Step ${currentRenewalStep} of 4 Â· ${labels[currentRenewalStep - 1]}`;
+    document.getElementById('renewal-wizard-status').textContent = `Step ${currentRenewalStep} of 4 · ${labels[currentRenewalStep - 1]}`;
     document.getElementById('renewal-back').hidden = currentRenewalStep === 1;
     document.getElementById('renewal-next').hidden = currentRenewalStep === 4;
     document.getElementById('renewal-submit').hidden = currentRenewalStep !== 4;
@@ -1283,7 +1283,7 @@
   }
 
 
-  // â”€â”€ CA Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── CA Management ──────────────────────────────────────────────
 
   async function loadCA() {
     const res = await fetch('/api/ca/status');
@@ -1300,20 +1300,20 @@
         <div class="cert-header">
           <div>
             <div class="cert-host">${ca.cn}</div>
-            <div class="cert-port">Local Certificate Authority Â· expires ${new Date(ca.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</div>
+            <div class="cert-port">Local Certificate Authority · expires ${new Date(ca.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</div>
           </div>
           <div class="status-badge ok">${ca.days_remaining} days</div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">â¬‡ Install in Windows</button>
-          <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">â¬‡ Download CA cert</button></a>
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
+          <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
         </div>
         <div id="ca-install-result" style="margin-top:10px;font-size:12px"></div>
       </div>` : `
       <div class="cert-card error" style="margin-bottom:20px;padding:24px">
         <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">No Local CA yet</div>
-        <div style="color:var(--muted);font-size:13px;margin-bottom:16px">Generate a local CA once â€” then install it in Windows so all browsers trust your device certificates.</div>
-        <button class="btn" onclick="generateCA()">âš¡ Generate Local CA</button>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:16px">Generate a local CA once — then install it in Windows so all browsers trust your device certificates.</div>
+        <button class="btn" onclick="generateCA()">⚡ Generate Local CA</button>
         <div id="ca-generate-result" style="margin-top:12px;font-size:12px"></div>
       </div>`;
 
@@ -1349,19 +1349,19 @@
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
           <div class="section-title" style="margin-bottom:0">Issued Device Certificates (${issued.length})</div>
-          <a href="/api/ca/devices-txt" download="devices.txt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" title="Download IPs of all devices with a .pem â€” feed to toolbelt_uploader.py --list">â¬‡ devices.txt</button></a>
+          <a href="/api/ca/devices-txt" download="devices.txt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" title="Download IPs of all devices with a .pem — feed to toolbelt_uploader.py --list">⬇ devices.txt</button></a>
         </div>
         <div style="display:flex;flex-direction:column;gap:10px">
           ${issued.map(c => `
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
               <div>
                 <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:600">${c.cn}</div>
-                <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} Â· ${c.days_remaining} days</div>
+                <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${c.days_remaining} days</div>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <a href="/api/ca/download/${c.certificate_id}" download="${c.certificate_id}.crt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">â¬‡ Cert</button></a>
-                <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">ðŸ“‹ Upload Guide</button>
-                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">âœ•</button>
+                <a href="/api/ca/download/${c.certificate_id}" download="${c.certificate_id}.crt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
+                <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
+                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
               </div>
             </div>`).join('')}
         </div>
@@ -1376,10 +1376,10 @@
     const res = await fetch('/api/ca/generate', {method:'POST'});
     const data = await res.json();
     if (data.ok) {
-      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">âœ“ CA created in encrypted server storage</span>`;
+      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">✓ CA created in encrypted server storage</span>`;
       setTimeout(loadCA, 800);
     } else {
-      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--critical)">âœ• ${data.error}</span>`;
+      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
     }
   }
 
@@ -1388,9 +1388,9 @@
     const res = await fetch('/api/ca/install', {method:'POST'});
     const data = await res.json();
     if (data.ok) {
-      document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--ok)">âœ“ Installed! Restart your browser for changes to take effect.</span>`;
+      document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--ok)">✓ Installed! Restart your browser for changes to take effect.</span>`;
     } else {
-      document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--critical)">âœ• ${data.error} â€” try running CertMon as Administrator.</span>`;
+      document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error} — try running CertMon as Administrator.</span>`;
     }
   }
 
@@ -1403,10 +1403,10 @@
     const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname, profile})});
     const data = await res.json();
     if (data.ok) {
-      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">âœ“ Certificate issued for ${data.cn} Â· expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Stored securely as ${data.certificate_id}</span>`;
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Stored securely as ${data.certificate_id}</span>`;
       setTimeout(loadCA, 500);
     } else {
-      document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">âœ• ${data.error}</span>`;
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
     }
   }
 
@@ -1414,7 +1414,7 @@
     const overlay = document.createElement('div');
     overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
     overlay.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:480px;max-width:95vw">
-      <div style="font-size:13px;color:var(--muted);margin-bottom:16px">The private key for <b style="color:var(--text)">${cn}</b> was encrypted. Enter this passphrase in Extron Toolbelt â€” and save it now, it won't be shown again.</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px">The private key for <b style="color:var(--text)">${cn}</b> was encrypted. Enter this passphrase in Extron Toolbelt — and save it now, it won't be shown again.</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
         <code style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:14px;color:var(--accent);word-break:break-all">${passphrase}</code>
         <button class="btn" id="pp-copy" style="padding:8px 14px">Copy</button>
@@ -1422,7 +1422,7 @@
       <button class="btn btn-ghost" id="pp-close">Close</button>
     </div>`;
     document.body.appendChild(overlay);
-    overlay.querySelector('#pp-copy').onclick = (e) => { navigator.clipboard.writeText(passphrase); e.target.textContent = 'Copied âœ“'; };
+    overlay.querySelector('#pp-copy').onclick = (e) => { navigator.clipboard.writeText(passphrase); e.target.textContent = 'Copied ✓'; };
     overlay.querySelector('#pp-close').onclick = () => overlay.remove();
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   }
@@ -1435,22 +1435,22 @@
 
   function showUploadGuide(cn) {
     const guides = {
-      default: `<b>Extron (Toolbelt) â€” recommended for ${cn}:</b><br><br>
-        1. Download the <b>â¬‡ PEM (Extron)</b> file (certificate + key combined)<br>
-        2. Open <b>Extron Toolbelt</b> â†’ <b>Utilities</b> tab<br>
+      default: `<b>Extron (Toolbelt) — recommended for ${cn}:</b><br><br>
+        1. Download the <b>⬇ PEM (Extron)</b> file (certificate + key combined)<br>
+        2. Open <b>Extron Toolbelt</b> → <b>Utilities</b> tab<br>
         3. Load the <b>.pem</b> file onto the controller<br>
         4. The device reboots / restarts its web server<br><br>
         This single .pem is the format Extron documents (cert block first, then the
         unencrypted key) and avoids the passphrase prompt entirely.<br><br>
         <b>Make sure the CA is installed in Windows</b> (button at the top) so the
-        browser trusts the device â€” then browse to https://${cn} with no warning.<br><br>
+        browser trusts the device — then browse to https://${cn} with no warning.<br><br>
         <b>Generic web-UI alternative:</b> some devices instead take the <b>.crt</b> as
         the certificate and <b>.key</b> as the private key in their SSL/TLS settings.`
     };
     const overlay = document.createElement('div');
     overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
     overlay.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:500px;max-width:95vw">
-      <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:16px">ðŸ“‹ Upload Guide</div>
+      <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:16px">📋 Upload Guide</div>
       <div style="font-size:13px;line-height:1.8;color:var(--text)">${guides.default}</div>
       <button class="btn" id="ug-close" style="margin-top:20px">Close</button>
     </div>`;
@@ -1460,7 +1460,7 @@
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   }
 
-  // (switchTab handles all tabs directly above â€” no wrapper needed)
+  // (switchTab handles all tabs directly above — no wrapper needed)
 
   // Enter key support
   document.getElementById('host-input').addEventListener('keydown', e => { if (e.key === 'Enter') addHost(); });
@@ -1471,7 +1471,7 @@
     if (e.target === document.getElementById('renewal-modal')) closeModal();
   });
 
-  // â”€â”€ Upload Tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Upload Tab ──────────────────────────────────────────────────────────────
 
   let uploadDevices = [];
   let availableCertificates = [];
@@ -1499,11 +1499,11 @@
     setTimeout(() => { el.style.boxShadow = 'none'; }, 1100);
   }
 
-  // â”€â”€ CA prefill from a cert card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── CA prefill from a cert card ──────────────────────────────────────────────
   let pendingCAPrefill = null;
   const isIp = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s || '');
 
-  // "ðŸ” CA" button on a cert card â€” jump to Local CA tab and prefill the issue form
+  // "🔐 CA" button on a cert card — jump to Local CA tab and prefill the issue form
   function sendToCA(host, cn) {
     pendingCAPrefill = {
       ip: isIp(host) ? host : '',
@@ -1520,7 +1520,7 @@
     if (!pendingCAPrefill) return;
     const ipEl = document.getElementById('issue-ip');
     const hnEl = document.getElementById('issue-hostname');
-    if (!ipEl || !hnEl) return;  // no CA yet â€” keep pending until renderCA shows the form
+    if (!ipEl || !hnEl) return;  // no CA yet — keep pending until renderCA shows the form
     ipEl.value = pendingCAPrefill.ip || '';
     hnEl.value = pendingCAPrefill.hostname || '';
     flashCard(ipEl.closest('div[style*="border-radius:10px"]'));
@@ -1528,7 +1528,7 @@
     pendingCAPrefill = null;
   }
 
-  // Called from the "â¬† Upload / Push" button on a cert card.
+  // Called from the "⬆ Upload / Push" button on a cert card.
   // If a device is already saved for this host, skip the add-device form and
   // jump straight to the certificate/device selectors with that device pre-selected.
   // Otherwise prefill the add-device form.
@@ -1538,7 +1538,7 @@
 
     const existing = uploadDevices.find(d => d.host === host);
     if (existing) {
-      // Saved device â€” go straight to push
+      // Saved device — go straight to push
       selectDevice(existing.id);
       const pushCard = document.getElementById('push-btn').closest('div[style*="border-radius:10px"]');
       flashCard(pushCard);
@@ -1546,7 +1546,7 @@
       return;
     }
 
-    // No saved device â€” prefill the add-device form.
+    // No saved device — prefill the add-device form.
     // Cert was found on `port`; device web UI is usually 80/443.
     const isHttps = (port === 443 || port === 8443 || port === 4443 || port === 9443);
 
@@ -1584,7 +1584,7 @@
   function renderUploadDevices() {
     const list = document.getElementById('upload-device-list');
     if (!uploadDevices.length) {
-      list.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px">No devices yet â€” add one above.</div>';
+      list.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px">No devices yet — add one above.</div>';
       return;
     }
     list.innerHTML = uploadDevices.map(d => `
@@ -1594,7 +1594,7 @@
           <div style="font-size:11px;color:var(--muted);margin-top:2px">${d.host}:${d.port} ${d.https ? '(HTTPS)' : '(HTTP)'}</div>
         </div>
         <span class="device-type-badge">${d.device_type}</span>
-        <button class="btn btn-danger" style="flex-shrink:0" onclick="event.stopPropagation();removeUploadDevice('${d.id}')">âœ•</button>
+        <button class="btn btn-danger" style="flex-shrink:0" onclick="event.stopPropagation();removeUploadDevice('${d.id}')">✕</button>
       </div>
     `).join('');
   }
@@ -1602,16 +1602,16 @@
   function renderDeviceSelect() {
     const sel = document.getElementById('push-device-select');
     const cur = sel.value;
-    sel.innerHTML = '<option value="">â€” select a device â€”</option>' +
+    sel.innerHTML = '<option value="">— select a device —</option>' +
       uploadDevices.map(d => `<option value="${d.id}"${d.id === cur ? ' selected' : ''}>${d.name} (${d.host})</option>`).join('');
   }
 
   function renderCertificateSelect() {
     const sel = document.getElementById('push-certificate-select');
     const cur = sel.value;
-    sel.innerHTML = '<option value="">â€” select a stored certificate â€”</option>' +
+    sel.innerHTML = '<option value="">— select a stored certificate —</option>' +
       availableCertificates.map(c => {
-        const label = `${(c.identifiers || [c.certificate_id])[0]} Â· ${c.issuer_type} Â· ${c.certificate_id}`;
+        const label = `${(c.identifiers || [c.certificate_id])[0]} · ${c.issuer_type} · ${c.certificate_id}`;
         return `<option value="${c.certificate_id}"${c.certificate_id === cur ? ' selected' : ''}>${label}</option>`;
       }).join('');
   }
@@ -1687,7 +1687,7 @@
     });
     const data = await res.json();
     el.style.color = data.ok ? 'var(--ok)' : 'var(--critical)';
-    el.textContent = (data.ok ? 'âœ“ ' : 'âœ— ') + data.message;
+    el.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
   }
 
   async function pushCert() {
@@ -1699,7 +1699,7 @@
 
     const btn = document.getElementById('push-btn');
     btn.disabled = true;
-    btn.textContent = 'âŸ³ Pushing...';
+    btn.textContent = '⟳ Pushing...';
 
     const res = await fetch('/api/upload/push', {
       method: 'POST',
@@ -1712,7 +1712,7 @@
     const data = await res.json();
 
     btn.disabled = false;
-    btn.textContent = 'â¬† Push Certificate to Device';
+    btn.textContent = '⬆ Push Certificate to Device';
 
     const resultDiv = document.getElementById('push-result');
     const titleEl = document.getElementById('push-result-title');
@@ -1724,7 +1724,7 @@
 
     resultDiv.style.display = 'block';
     titleEl.style.color = data.ok ? 'var(--ok)' : 'var(--warning)';
-    titleEl.textContent = data.ok ? 'âœ“ Certificate pushed successfully' : 'âš  Deployment needs attention';
+    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Deployment needs attention';
     logEl.innerHTML = (data.log || []).map(l => `<div>${l}</div>`).join('');
 
     const publicArtifacts = data.public_artifacts || {};

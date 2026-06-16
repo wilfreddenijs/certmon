@@ -68,3 +68,10 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "certificate_id" in html
     assert "cert_pem" not in html
     assert "key_pem" not in html
+
+
+def test_template_contains_no_mojibake_sequences():
+    html = page()
+
+    for broken in ("â", "ðŸ", "Ã", "Â", "�"):
+        assert broken not in html
