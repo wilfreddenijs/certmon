@@ -78,6 +78,14 @@ def test_renewal_resume_actions_surface_errors_inline():
     assert "Could not verify renewal" in html
 
 
+def test_cancelled_and_failed_renewals_can_be_deleted_from_list():
+    html = page()
+
+    assert "Delete entry" in html
+    assert "deleteRenewal(" in html
+    assert "method: 'DELETE'" in html
+
+
 def test_template_contains_no_mojibake_sequences():
     html = page()
 

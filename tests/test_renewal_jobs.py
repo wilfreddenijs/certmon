@@ -90,6 +90,38 @@ def test_cancellation_is_idempotent(tmp_path):
     assert repeated["state"] == "cancelled"
 
 
+def test_delete_terminal_job_removes_cancelled_job_and_events(tmp_path):
+    db, service = make_service(tmp_path)
+    job = service.create_job(
+        endpoint_host="device.local",
+        endpoint_port=443,
+        issuer_type="external_ca",
+        identifiers=["device.local"],
+        profile="generic-rsa",
+    )
+    cancelled = service.cancel(job["id"])
+
+    removed = service.delete_terminal_job(cancelled["id"])
+
+    assert removed["state"] == "cancelled"
+    assert db.get_job(job["id"]) is None
+    assert db.list_events(job["id"]) == []
+
+
+def test_delete_terminal_job_rejects_active_job(tmp_path):
+    _, service = make_service(tmp_path)
+    job = service.create_job(
+        endpoint_host="device.local",
+        endpoint_port=443,
+        issuer_type="acme",
+        identifiers=["device.example.com"],
+        profile="generic-rsa",
+    )
+
+    with pytest.raises(ValueError, match="cancelled or failed"):
+        service.delete_terminal_job(job["id"])
+
+
 def test_recovery_leaves_paused_jobs_and_reconciles_active_acme_job(tmp_path):
     db, service = make_service(tmp_path)
     paused = service.create_job(

@@ -235,6 +235,12 @@ class Database:
             ).fetchall()
         return [self.get_job(row["id"]) for row in rows]
 
+    def delete_job(self, job_id):
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM events WHERE job_id=?", (job_id,))
+            cursor = conn.execute("DELETE FROM renewal_jobs WHERE id=?", (job_id,))
+        return cursor.rowcount == 1
+
     def list_events(self, job_id):
         with self.connect() as conn:
             rows = conn.execute(

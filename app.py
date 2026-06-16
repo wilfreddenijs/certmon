@@ -515,6 +515,18 @@ def cancel_renewal(job_id):
         return jsonify({"error": str(error)}), 400
 
 
+@app.route("/api/renewals/<job_id>", methods=["DELETE"])
+def delete_renewal(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    try:
+        renewal_service.delete_terminal_job(job_id)
+        return "", 204
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+
 @app.route("/api/renewals/<job_id>/retry-cleanup", methods=["POST"])
 def retry_renewal_cleanup(job_id):
     authorize(Permission.ISSUE_CERTIFICATE)

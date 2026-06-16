@@ -125,6 +125,19 @@ class RenewalService:
             RenewalState.CANCELLED,
         )
 
+    def delete_terminal_job(self, job_id):
+        authorize(Permission.ISSUE_CERTIFICATE)
+        job = self.database.get_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        if job["state"] not in {
+            RenewalState.CANCELLED.value,
+            RenewalState.FAILED.value,
+        }:
+            raise ValueError("Only cancelled or failed renewal entries can be deleted")
+        self.database.delete_job(job_id)
+        return job
+
     def recover_interrupted_jobs(self, acme_service):
         paused = {
             RenewalState.AWAITING_DNS.value,

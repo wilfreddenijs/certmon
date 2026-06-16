@@ -89,6 +89,45 @@ def test_manual_continue_reports_acme_unavailable(tmp_data_dir, monkeypatch):
     assert response.get_json() == {"error": "ACME service is unavailable"}
 
 
+def test_delete_cancelled_renewal_entry(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+    client = module.app.test_client()
+    created = client.post(
+        "/api/renew",
+        json={
+            "endpoint_host": "device.local",
+            "issuer_type": "external_ca",
+            "identifiers": ["device.local"],
+            "profile": "generic-rsa",
+        },
+    ).get_json()
+    client.post(f"/api/renewals/{created['id']}/cancel")
+
+    response = client.delete(f"/api/renewals/{created['id']}")
+
+    assert response.status_code == 204
+    assert client.get("/api/renewals").get_json() == []
+
+
+def test_delete_active_renewal_entry_is_rejected(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+    client = module.app.test_client()
+    created = client.post(
+        "/api/renew",
+        json={
+            "endpoint_host": "device.local",
+            "issuer_type": "external_ca",
+            "identifiers": ["device.local"],
+            "profile": "generic-rsa",
+        },
+    ).get_json()
+
+    response = client.delete(f"/api/renewals/{created['id']}")
+
+    assert response.status_code == 400
+    assert "cancelled or failed" in response.get_json()["error"]
+
+
 class FakeArtifacts:
     def read_public(self, certificate_id, name):
         if name == "private-key.pem":
