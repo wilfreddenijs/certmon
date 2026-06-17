@@ -1059,10 +1059,26 @@
           </div>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${(r.identifiers || []).join(', ')}</div>
+        ${renewalDnsRecords(r)}
         ${renewalStateActions(r)}
         <div id="renewal-action-result-${r.id}" style="font-size:12px;margin-top:10px;color:var(--muted)"></div>
       </div>
     `).join('');
+  }
+
+  function renewalDnsRecords(r) {
+    if (r.state !== 'awaiting_dns' || !(r.dns_records || []).length) return '';
+    return `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin:10px 0;font-size:12px">
+      <div style="font-weight:700;color:var(--accent);margin-bottom:8px">DNS TXT challenge</div>
+      ${(r.dns_records || []).map(record => `
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:8px;margin-bottom:6px">
+          <span style="color:var(--muted)">Type</span><code>TXT</code>
+          <span style="color:var(--muted)">Name</span><code>${record.fqdn}</code>
+          <span style="color:var(--muted)">Value</span><code style="word-break:break-all">${record.value}</code>
+        </div>
+      `).join('')}
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">Create this TXT record at your DNS provider, wait for propagation, then click Verify and continue.</div>
+    </div>`;
   }
 
   function renewalStateActions(r) {
@@ -1271,10 +1287,10 @@
     try {
       result = text ? JSON.parse(text) : {};
     } catch (e) {
-      result = { error: text || response.statusText };
+      result = { error: friendlyResponseError(text, response.statusText) };
     }
     if (!response.ok) {
-      const message = result.error || `Could not verify renewal (${response.status})`;
+      const message = result.error || friendlyResponseError(text, `Could not verify renewal (${response.status})`);
       if (statusEl) {
         statusEl.style.color = 'var(--critical)';
         statusEl.textContent = message;
@@ -1291,6 +1307,13 @@
       }
     }
     loadData();
+  }
+
+  function friendlyResponseError(text, fallback) {
+    const clean = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!clean) return fallback || 'Request failed';
+    if (clean.toLowerCase().includes('internal server error')) return 'Server error while continuing the renewal. Check the DNS TXT record and try again, or restart CertMon if it persists.';
+    return clean;
   }
 
   async function deleteRenewal(id) {

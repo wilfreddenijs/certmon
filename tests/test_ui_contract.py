@@ -76,6 +76,7 @@ def test_renewal_resume_actions_surface_errors_inline():
     assert "renewal-action-result-" in html
     assert "response.ok" in html
     assert "Could not verify renewal" in html
+    assert "friendlyResponseError" in html
 
 
 def test_cancelled_and_failed_renewals_can_be_deleted_from_list():
@@ -84,6 +85,15 @@ def test_cancelled_and_failed_renewals_can_be_deleted_from_list():
     assert "Delete entry" in html
     assert "deleteRenewal(" in html
     assert "method: 'DELETE'" in html
+
+
+def test_awaiting_dns_renewals_show_dns_challenge_records():
+    html = page()
+
+    assert "DNS TXT challenge" in html
+    assert "renewalDnsRecords" in html
+    assert "record.fqdn" in html
+    assert "record.value" in html
 
 
 def test_template_contains_no_mojibake_sequences():

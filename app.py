@@ -186,6 +186,17 @@ def _safe_job(job):
     return {key: value for key, value in job.items() if key in allowed}
 
 
+def _safe_job_with_dns(job):
+    result = _safe_job(job)
+    if job["state"] == "awaiting_dns":
+        records = database.get_setting(f"acme-dns:{job['id']}", [])
+        result["dns_records"] = [
+            {"fqdn": record["fqdn"], "value": record["value"]}
+            for record in records
+        ]
+    return result
+
+
 def get_cert_info(host, port=443, timeout=3):
     try:
         ctx = ssl.create_default_context()
@@ -430,7 +441,7 @@ def create_renewal():
 
 @app.route("/api/renewals")
 def list_renewals():
-    return jsonify([_safe_job(job) for job in database.list_jobs()])
+    return jsonify([_safe_job_with_dns(job) for job in database.list_jobs()])
 
 
 @app.route("/api/renewals/<job_id>", methods=["GET"])
@@ -438,14 +449,8 @@ def renewal_detail(job_id):
     job = database.get_job(job_id)
     if job is None:
         return jsonify({"error": "Not found"}), 404
-    result = _safe_job(job)
+    result = _safe_job_with_dns(job)
     result["events"] = database.list_events(job_id)
-    if job["state"] == "awaiting_dns":
-        records = database.get_setting(f"acme-dns:{job_id}", [])
-        result["dns_records"] = [
-            {"fqdn": record["fqdn"], "value": record["value"]}
-            for record in records
-        ]
     return jsonify(result)
 
 
@@ -502,6 +507,8 @@ def continue_manual_dns(job_id):
         return jsonify(_safe_job(acme_orchestrator.continue_manual_dns(job_id)))
     except (KeyError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"error": f"Could not continue renewal: {error}"}), 500
 
 
 @app.route("/api/renewals/<job_id>/cancel", methods=["POST"])

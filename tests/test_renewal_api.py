@@ -53,6 +53,36 @@ def test_job_list_and_detail_are_sanitized(tmp_data_dir):
     assert "passphrase" not in serialized
 
 
+def test_awaiting_dns_list_includes_challenge_records(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+    client = module.app.test_client()
+    created = client.post(
+        "/api/renew",
+        json={
+            "endpoint_host": "192.168.0.43",
+            "endpoint_port": 443,
+            "issuer_type": "acme",
+            "identifiers": ["wilfred.denijs.com"],
+            "profile": "generic-rsa",
+            "environment": "staging",
+            "dns_provider": "manual",
+        },
+    ).get_json()
+    module.renewal_service.transition(
+        created["id"], "draft", created["version"], "awaiting_dns"
+    )
+    module.database.put_setting(
+        f"acme-dns:{created['id']}",
+        [{"fqdn": "_acme-challenge.wilfred.denijs.com", "value": "txt-token"}],
+    )
+
+    listing = client.get("/api/renewals").get_json()
+
+    assert listing[0]["dns_records"] == [
+        {"fqdn": "_acme-challenge.wilfred.denijs.com", "value": "txt-token"}
+    ]
+
+
 class FakeOrchestrator:
     def continue_manual_dns(self, job_id):
         return {"id": job_id, "state": "issued", "certificate_id": "cert-1"}
