@@ -7,6 +7,7 @@ from certmon.acme_service import (
     ACMEOrderService,
     parse_retry_after,
     translate_acme_problem,
+    _acme_client_deadline,
     _status_name,
 )
 from certmon.db import Database
@@ -138,6 +139,13 @@ def test_finalize_returns_downloaded_certificate_chain(tmp_path):
         "chain_pem": b"chain",
     }
     assert client.finalized == [("https://acme.test/order/1", b"csr")]
+
+
+def test_native_acme_deadline_is_timezone_naive_for_client_compatibility():
+    deadline = _acme_client_deadline()
+
+    assert deadline.tzinfo is None
+    assert deadline > datetime.now()
 
 
 def test_reconcile_uses_persisted_order_url_after_restart(tmp_path):

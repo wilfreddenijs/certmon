@@ -416,9 +416,7 @@ class NativeACMEOrderClient:
 
     def finalize_order(self, order_url, csr_pem):
         order = self._order_resource(order_url, csr_pem)
-        finalized = self.client.finalize_order(
-            order, datetime.now(timezone.utc) + timedelta(seconds=90)
-        )
+        finalized = self.client.finalize_order(order, _acme_client_deadline())
         blocks = re.findall(
             r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----\s*",
             finalized.fullchain_pem or "",
@@ -464,3 +462,7 @@ def _authorization_problem(body):
 
 def _status_name(status):
     return getattr(status, "name", str(status))
+
+
+def _acme_client_deadline(seconds=90):
+    return datetime.now() + timedelta(seconds=seconds)
