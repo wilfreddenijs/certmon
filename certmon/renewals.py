@@ -18,6 +18,12 @@ class IdentifierError(ValueError):
     pass
 
 
+class CertificateValidationError(ValueError):
+    def __init__(self, errors):
+        self.errors = tuple(errors)
+        super().__init__(",".join(self.errors))
+
+
 class StagingRequired(RuntimeError):
     code = "staging_required"
 
@@ -307,6 +313,27 @@ class ACMERenewalOrchestrator:
                 target,
                 {"error_code": error.code, "error_message": message},
             )
+        except CertificateValidationError as error:
+            cleanup = self._provider(job).cleanup(presented)
+            current = self.database.get_job(job["id"])
+            target = (
+                RenewalState.CLEANUP_REQUIRED
+                if cleanup.errors
+                else RenewalState.FAILED
+            )
+            return self.renewals.transition(
+                job["id"],
+                RenewalState(current["state"]),
+                current["version"],
+                target,
+                {
+                    "error_code": "acme_certificate_invalid",
+                    "error_message": (
+                        "Certificate validation failed: "
+                        + ", ".join(error.errors)
+                    ),
+                },
+            )
         except Exception:
             cleanup = self._provider(job).cleanup(presented)
             current = self.database.get_job(job["id"])
@@ -372,7 +399,7 @@ class ACMERenewalOrchestrator:
             expected_identifiers=job["identifiers"],
         )
         if not validation.cryptographically_valid:
-            raise ValueError(",".join(validation.errors))
+            raise CertificateValidationError(validation.errors)
         certificate_id = str(uuid.uuid4())
         chain = result.get("chain_pem") or b""
         metadata = {

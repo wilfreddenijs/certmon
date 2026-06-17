@@ -352,6 +352,42 @@ def test_invalid_certificate_response_fails_without_leaking_details(tmp_path):
     assert "not a certificate" not in database.get_job(job["id"])["error_message"]
 
 
+def test_certificate_validation_failure_records_safe_reason(tmp_path):
+    database, _, renewals, _, orders, _, orchestrator = make_services(tmp_path)
+    job = create_job(renewals)
+    orchestrator.start_acme(
+        job["id"], email="admin@example.com", terms_of_service_agreed=True
+    )
+    original_finalize = orders.finalize
+
+    def finalize_with_wrong_identifier(job_id):
+        result = original_finalize(job_id)
+        mismatched = renewals.create_job(
+            endpoint_host="other.example.com",
+            endpoint_port=443,
+            issuer_type="acme",
+            identifiers=["other.example.com"],
+            profile="generic-rsa",
+            environment="staging",
+            dns_provider="manual",
+        )
+        orders.create_order(
+            mismatched["id"], orchestrator._ensure_pending_key_and_csr(mismatched)
+        )
+        return original_finalize(mismatched["id"]) | {"chain_pem": result["chain_pem"]}
+
+    orders.finalize = finalize_with_wrong_identifier
+
+    result = orchestrator.continue_manual_dns(job["id"])
+
+    assert result["state"] == "failed"
+    failed = database.get_job(job["id"])
+    assert failed["error_code"] == "acme_certificate_invalid"
+    assert failed["error_message"] == (
+        "Certificate validation failed: private_key_mismatch, identifier_mismatch"
+    )
+
+
 def make_ca():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = datetime.now(timezone.utc)
