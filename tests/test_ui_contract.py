@@ -70,6 +70,15 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "key_pem" not in html
 
 
+def test_deployment_result_offers_private_key_download_without_storing_key_material():
+    html = page()
+
+    assert 'id="push-private-artifacts"' in html
+    assert 'id="push-private-artifact-links"' in html
+    assert "/api/certificates/${certificate_id}/private/private-key.pem" in html
+    assert "privateKeyPem" not in html
+
+
 def test_renewal_resume_actions_surface_errors_inline():
     html = page()
 

@@ -806,6 +806,11 @@
               <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:6px">Public certificate downloads</div>
               <div id="push-public-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             </div>
+            <div id="push-private-artifacts" style="display:none;margin-top:14px">
+              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">Private key download</div>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Keep this file secret. Download it only when a device requires manual certificate import.</div>
+              <div id="push-private-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            </div>
             <div id="push-instructions" style="display:none;margin-top:14px">
               <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required - follow these steps:</div>
               <pre id="push-instructions-text" style="font-size:11px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre>
@@ -1790,6 +1795,8 @@
     const logEl = document.getElementById('push-log');
     const publicArtifactsDiv = document.getElementById('push-public-artifacts');
     const publicArtifactsEl = document.getElementById('push-public-artifact-links');
+    const privateArtifactsDiv = document.getElementById('push-private-artifacts');
+    const privateArtifactsEl = document.getElementById('push-private-artifact-links');
     const instrDiv = document.getElementById('push-instructions');
     const instrText = document.getElementById('push-instructions-text');
 
@@ -1808,6 +1815,15 @@
     } else {
       publicArtifactsDiv.style.display = 'none';
       publicArtifactsEl.innerHTML = '';
+    }
+
+    if (data.instructions && certificate_id) {
+      privateArtifactsDiv.style.display = 'block';
+      privateArtifactsEl.innerHTML =
+        `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
+    } else {
+      privateArtifactsDiv.style.display = 'none';
+      privateArtifactsEl.innerHTML = '';
     }
 
     if (data.instructions) {
