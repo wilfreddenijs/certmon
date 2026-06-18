@@ -879,8 +879,7 @@
       </div>
       <div id="external-ca-controls" hidden>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px">After creating the job, download its CSR or import an existing signed certificate and key.</div>
-        <button class="btn btn-ghost" type="button">Download CSR</button>
-        <button class="btn btn-ghost" type="button">Import signed certificate</button>
+        <div style="font-size:11px;color:var(--muted)">The CSR and import actions become available after the renewal job is created.</div>
       </div>
     </section>
 
@@ -893,7 +892,7 @@
       <div id="renewal-action-message" style="font-size:12px;margin-bottom:12px"></div>
       <button class="btn" data-action="verify" onclick="renewalAction('verify')">Verify and continue</button>
       <button class="btn btn-ghost" data-action="download-csr">Download CSR</button>
-      <button class="btn btn-ghost" data-action="import-cert">Import signed certificate</button>
+      <button class="btn btn-ghost" data-action="import-cert" onclick="openExternalImport(currentRenewalJobId)">Import signed certificate</button>
       <button class="btn" data-action="retry-cleanup" onclick="renewalAction('retry-cleanup')">Retry cleanup</button>
       <button class="btn" data-action="deploy" onclick="renewalAction('deploy')">Deploy now</button>
       <button class="btn btn-ghost" data-action="keep">Keep for later</button>
@@ -905,6 +904,48 @@
       <button class="btn btn-ghost" id="renewal-back" onclick="renewalStep(-1)" hidden>Back</button>
       <button class="btn" id="renewal-next" onclick="renewalStep(1)">Next</button>
       <button class="btn" id="renewal-submit" onclick="submitRenewal()" hidden>Review and start</button>
+    </div>
+  </div>
+</div>
+
+<!-- External CA certificate import -->
+<div class="modal-overlay" id="external-import-modal">
+  <div class="modal" style="width:620px;max-width:96vw;max-height:92vh;overflow:auto">
+    <div class="modal-title">Import External CA certificate</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Complete the generated CSR, or import an existing certificate together with its private key.</div>
+    <div class="form-group">
+      <label class="form-label" for="external-import-mode">Import type</label>
+      <select id="external-import-mode" style="width:100%" onchange="updateExternalImportMode()">
+        <option value="complete">Signed certificate for the generated CSR</option>
+        <option value="existing">Existing certificate and private key</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="external-certificate-file">Leaf certificate PEM</label>
+      <input id="external-certificate-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="external-chain-file">Certificate chain PEM (optional)</label>
+      <input id="external-chain-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
+    </div>
+    <div id="external-private-key-fields" hidden>
+      <div class="form-group">
+        <label class="form-label" for="external-private-key-file">Private key PEM</label>
+        <input id="external-private-key-file" type="file" accept=".pem,.key,application/x-pem-file" style="width:100%" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="external-passphrase">Private key passphrase (optional)</label>
+        <input id="external-passphrase" type="password" autocomplete="off" style="width:100%" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="external-trust-anchor">Trust anchor ID (optional)</label>
+      <input id="external-trust-anchor" type="text" autocomplete="off" style="width:100%" />
+    </div>
+    <div id="external-import-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:8px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" type="button" onclick="closeExternalImport()">Cancel</button>
+      <button class="btn" id="external-import-submit" type="button" onclick="submitExternalImport()">Import certificate</button>
     </div>
   </div>
 </div>
@@ -1271,7 +1312,7 @@
 
   async function resumeRenewal(id, action) {
     currentRenewalJobId = id;
-    if (action === 'import-cert') { alert('Use the External CA import form to upload the signed certificate.'); return; }
+    if (action === 'import-cert') { openExternalImport(id); return; }
     if (action === 'deploy') {
       const detail = await (await fetch(`/api/renewals/${id}`)).json();
       pendingDeployment = {
@@ -1343,6 +1384,75 @@
     await resumeRenewal(currentRenewalJobId, action);
     closeModal();
     if (action !== 'deploy') switchTab('renewals');
+  }
+
+  function openExternalImport(jobId) {
+    if (!jobId) return;
+    currentRenewalJobId = jobId;
+    document.getElementById('external-import-mode').value = 'complete';
+    ['external-certificate-file', 'external-chain-file', 'external-private-key-file'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('external-passphrase').value = '';
+    document.getElementById('external-trust-anchor').value = '';
+    document.getElementById('external-import-error').textContent = '';
+    updateExternalImportMode();
+    document.getElementById('external-import-modal').classList.add('open');
+  }
+
+  function closeExternalImport() {
+    document.getElementById('external-import-modal').classList.remove('open');
+  }
+
+  function updateExternalImportMode() {
+    const existing = document.getElementById('external-import-mode').value === 'existing';
+    document.getElementById('external-private-key-fields').hidden = !existing;
+  }
+
+  async function readPemFile(id, required) {
+    const file = document.getElementById(id).files[0];
+    if (!file) {
+      if (required) throw new Error('Select all required PEM files.');
+      return '';
+    }
+    return await file.text();
+  }
+
+  async function submitExternalImport() {
+    const errorEl = document.getElementById('external-import-error');
+    const submit = document.getElementById('external-import-submit');
+    const existing = document.getElementById('external-import-mode').value === 'existing';
+    errorEl.textContent = '';
+    submit.disabled = true;
+    try {
+      const body = {
+        certificate_pem: await readPemFile('external-certificate-file', true),
+        chain_pem: await readPemFile('external-chain-file', false),
+        trust_anchor_id: document.getElementById('external-trust-anchor').value.trim() || null
+      };
+      if (existing) {
+        body.private_key_pem = await readPemFile('external-private-key-file', true);
+        body.passphrase = document.getElementById('external-passphrase').value || null;
+      }
+      const action = existing ? 'import' : 'complete';
+      const response = await fetch(`/api/renewals/${currentRenewalJobId}/external/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Certificate import failed.');
+      closeExternalImport();
+      closeModal();
+      switchTab('renewals');
+      loadData();
+    } catch (error) {
+      errorEl.textContent = error.message
+        .replace('key_mismatch', 'The private key does not match this certificate.')
+        .replace('identifier_mismatch', 'The certificate identifiers do not match this renewal.');
+    } finally {
+      submit.disabled = false;
+    }
   }
 
   function switchTab(name) {

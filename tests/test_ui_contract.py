@@ -52,7 +52,9 @@ def test_legacy_command_selectors_are_removed():
 
 
 def test_private_material_is_not_kept_in_wizard_dom_state():
-    wizard = page().split('id="renewal-modal"', 1)[1].split("<script>", 1)[0]
+    wizard = page().split('id="renewal-modal"', 1)[1].split(
+        "<!-- External CA certificate import -->", 1
+    )[0]
 
     assert "private-key.pem" not in wizard
     assert "key_pem" not in wizard
@@ -61,13 +63,31 @@ def test_private_material_is_not_kept_in_wizard_dom_state():
 
 def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     html = page()
+    push_function = html.split("async function pushCert()", 1)[1]
 
     assert 'id="push-certificate-select"' in html
     assert 'id="cert-pem"' not in html
     assert 'id="key-pem"' not in html
     assert "certificate_id" in html
-    assert "cert_pem" not in html
-    assert "key_pem" not in html
+    assert "cert_pem" not in push_function
+    assert "key_pem" not in push_function
+
+
+def test_external_ca_import_form_submits_generated_and_existing_certificates():
+    html = page()
+
+    for required in (
+        'id="external-import-modal"',
+        'id="external-certificate-file"',
+        'id="external-chain-file"',
+        'id="external-private-key-file"',
+        'id="external-passphrase"',
+        'id="external-trust-anchor"',
+        "openExternalImport(id)",
+        "external/${action}",
+    ):
+        assert required in html
+    assert "Use the External CA import form" not in html
 
 
 def test_deployment_result_offers_private_key_download_without_storing_key_material():

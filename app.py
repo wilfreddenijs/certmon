@@ -36,7 +36,7 @@ from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
 from certmon.permissions import Permission, authorize
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
-from certmon.vault import Vault, WindowsDpapiProtector
+from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
 
 
 def resource_path(relative):
@@ -77,22 +77,31 @@ for migration_source in (Path(DATA_FILE), legacy_data_file):
 else:
     migration_source = None
 
-vault = None
-artifact_store = None
-local_ca_service = None
-external_ca_service = None
-renewal_service = RenewalService(database)
-acme_account_service = None
-acme_order_service = None
-acme_orchestrator = None
-deployment_service = None
-if sys.platform == "win32":
-    vault = Vault(Path(data_dir()) / "secrets", WindowsDpapiProtector())
+def bootstrap_services(
+    database,
+    root,
+    *,
+    key_protector=None,
+    deployment_adapters=None,
+):
+    """Build the secure services once, with injectable test/dev dependencies."""
+    if key_protector is None:
+        if sys.platform == "win32":
+            key_protector = WindowsDpapiProtector()
+        elif os.environ.get("CERTMON_DATA_DIR"):
+            # Non-Windows test/dev runs use an isolated data directory. The memory
+            # protector is deliberately never selected for the packaged app.
+            key_protector = MemoryKeyProtector()
+        else:
+            return {}
+
+    root = Path(root)
+    vault = Vault(root / "secrets", key_protector)
     vault.initialize()
-    artifact_store = ArtifactStore(Path(data_dir()) / "certificates", vault)
+    artifact_store = ArtifactStore(root / "certificates", vault)
     migrate_legacy_ca_if_present(
         artifact_store,
-        (Path(r"C:\CertMon\CA"), Path(data_dir()) / "CA"),
+        (Path(r"C:\CertMon\CA"), root / "CA"),
     )
     local_ca_service = LocalCAService(database, artifact_store)
     external_ca_service = ExternalCAService(database, artifact_store)
@@ -119,10 +128,38 @@ if sys.platform == "win32":
         database,
         artifact_store,
         renewal_service,
-        adapters={"extron": ExtronDeploymentAdapter()},
+        adapters=(
+            {"extron": ExtronDeploymentAdapter()}
+            if deployment_adapters is None
+            else deployment_adapters
+        ),
     )
-    if migration_source is not None:
-        database.complete_legacy_secret_migration(migration_source, vault)
+    return {
+        "vault": vault,
+        "artifact_store": artifact_store,
+        "local_ca_service": local_ca_service,
+        "external_ca_service": external_ca_service,
+        "renewal_service": renewal_service,
+        "acme_account_service": acme_account_service,
+        "acme_order_service": acme_order_service,
+        "acme_orchestrator": acme_orchestrator,
+        "deployment_service": deployment_service,
+    }
+
+
+vault = None
+artifact_store = None
+local_ca_service = None
+external_ca_service = None
+renewal_service = RenewalService(database)
+acme_account_service = None
+acme_order_service = None
+acme_orchestrator = None
+deployment_service = None
+_services = bootstrap_services(database, data_dir())
+globals().update(_services)
+if migration_source is not None and vault is not None:
+    database.complete_legacy_secret_migration(migration_source, vault)
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
 ACME_PROD = "https://acme-v02.api.letsencrypt.org/directory"
 
@@ -870,6 +907,7 @@ def ca_download_file(certificate_id):
 
 @app.route("/api/external-ca/trust-anchors", methods=["POST"])
 def external_ca_import_trust_anchor():
+    authorize(Permission.ISSUE_CERTIFICATE)
     if external_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     body = request.get_json(silent=True) or {}
@@ -885,6 +923,7 @@ def external_ca_import_trust_anchor():
 
 @app.route("/api/renewals/<job_id>/external/csr", methods=["POST"])
 def external_ca_create_csr(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
     if external_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     try:
@@ -896,6 +935,7 @@ def external_ca_create_csr(job_id):
 
 @app.route("/api/renewals/<job_id>/external/csr", methods=["GET"])
 def external_ca_download_csr(job_id):
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
     if external_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     try:
@@ -909,6 +949,7 @@ def external_ca_download_csr(job_id):
 
 @app.route("/api/renewals/<job_id>/external/complete", methods=["POST"])
 def external_ca_complete(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
     if external_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     body = request.get_json(silent=True) or {}
@@ -926,6 +967,7 @@ def external_ca_complete(job_id):
 
 @app.route("/api/renewals/<job_id>/external/import", methods=["POST"])
 def external_ca_import_existing(job_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
     if external_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     body = request.get_json(silent=True) or {}

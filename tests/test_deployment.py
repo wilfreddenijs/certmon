@@ -70,15 +70,66 @@ def test_push_route_rejects_fields_other_than_certificate_and_device_ids(tmp_dat
     assert response.get_json()["error"] == "Unsupported fields: ['job_id']"
 
 
+def test_push_route_uses_injected_server_side_deployment_service(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+
+    class FakeDeploymentService:
+        def deploy_certificate(self, device, certificate_id):
+            assert device["id"] == "device-1"
+            assert certificate_id == "cert-1"
+            return SimpleNamespace(
+                ok=True,
+                log=("upload ok",),
+                instructions=None,
+                public_artifacts={"certificate.pem": "/public/cert-1/certificate.pem"},
+                job=None,
+                verification=SimpleNamespace(
+                    status="verified",
+                    expected_fingerprint="ab" * 32,
+                    observed_fingerprint="ab" * 32,
+                ),
+            )
+
+    monkeypatch.setattr(module, "deployment_service", FakeDeploymentService())
+    monkeypatch.setattr(
+        module,
+        "load_data",
+        lambda: {"upload_devices": [{"id": "device-1", "device_type": "extron"}]},
+    )
+
+    response = module.app.test_client().post(
+        "/api/upload/push",
+        json={"device_id": "device-1", "certificate_id": "cert-1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["verification"]["status"] == "verified"
+    assert "private" not in repr(payload).lower()
+
+
+def test_non_windows_test_bootstrap_initializes_secure_services(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+
+    assert module.vault is not None
+    assert module.artifact_store is not None
+    assert module.external_ca_service is not None
+    assert module.deployment_service is not None
+
+
 def test_upload_ui_uses_certificate_ids_instead_of_browser_pem_state():
     html = HTML.read_text(encoding="utf-8")
+    push_function = html.split("async function pushCert()", 1)[1]
 
     assert 'id="push-certificate-select"' in html
     assert 'id="cert-pem"' not in html
     assert 'id="key-pem"' not in html
     assert "certificate_id," in html
-    assert "cert_pem" not in html
-    assert "key_pem" not in html
+    assert "cert_pem" not in push_function
+    assert "key_pem" not in push_function
 
 
 class FakeArtifacts:
