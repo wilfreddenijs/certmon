@@ -457,7 +457,13 @@ def export_excel():
 # CA Management
 # ─────────────────────────────────────────────
 
-CA_DIR = r"C:\CertMon\CA" if sys.platform == "win32" else os.path.join(data_dir(), "CA")
+# CA storage lives under %ProgramData%\CertMon\CA on Windows (the standard
+# location). The old C:\CertMon\CA path is deprecated — not used for
+# compatibility anymore; generate/re-issue at the new location.
+if sys.platform == "win32":
+    CA_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "CertMon", "CA")
+else:
+    CA_DIR = os.path.join(data_dir(), "CA")
 CA_KEY_FILE = os.path.join(CA_DIR, "certmon-ca.key")
 CA_CERT_FILE = os.path.join(CA_DIR, "certmon-ca.crt")
 
