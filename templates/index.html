@@ -956,6 +956,7 @@
   let currentRenewalStep = 1;
   let currentRenewalJobId = null;
   let scanPollInterval = null;
+  const renewalActionResults = {};
 
   async function loadData() {
     const res = await fetch('/api/data');
@@ -1090,9 +1091,14 @@
   function renderRenewals(renewals) {
     const list = document.getElementById('renewal-list');
     if (!renewals.length) {
+      Object.keys(renewalActionResults).forEach(id => delete renewalActionResults[id]);
       list.innerHTML = `<div class="empty-state"><h3>No renewals yet</h3><p>Click "Renew" on a certificate card to create a renewal task.</p></div>`;
       return;
     }
+    const renewalIds = new Set(renewals.map(r => r.id));
+    Object.keys(renewalActionResults).forEach(id => {
+      if (!renewalIds.has(id)) delete renewalActionResults[id];
+    });
     list.innerHTML = renewals.slice().reverse().map(r => `
       <div class="renewal-card">
         <div class="renewal-header">
@@ -1107,9 +1113,14 @@
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${(r.identifiers || []).join(', ')}</div>
         ${renewalDnsRecords(r)}
         ${renewalStateActions(r)}
-        <div id="renewal-action-result-${r.id}" style="font-size:12px;margin-top:10px;color:var(--muted)"></div>
+        ${renewalActionResultMarkup(r.id)}
       </div>
     `).join('');
+  }
+
+  function renewalActionResultMarkup(id) {
+    const result = renewalActionResults[id] || { text: '', color: 'var(--muted)' };
+    return `<div id="renewal-action-result-${id}" style="font-size:12px;margin-top:10px;color:${result.color}">${escapeHtml(result.text)}</div>`;
   }
 
   function renewalDnsRecords(r) {
@@ -1139,7 +1150,7 @@
   }
 
   function escapeHtml(s) {
-    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   async function addHost() {
@@ -1324,8 +1335,7 @@
     const route = action === 'verify' ? 'manual-dns/continue' : action === 'retry-cleanup' ? 'retry-cleanup' : action;
     const statusEl = document.getElementById(`renewal-action-result-${id}`);
     if (statusEl) {
-      statusEl.style.color = 'var(--muted)';
-      statusEl.textContent = action === 'verify' ? 'Verifying DNS and continuing...' : 'Working...';
+      setRenewalActionResult(id, action === 'verify' ? 'Verifying DNS and continuing...' : 'Working...', 'var(--muted)');
     }
     const response = await fetch(`/api/renewals/${id}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'start' ? '{}' : undefined });
     const text = await response.text();
@@ -1338,8 +1348,7 @@
     if (!response.ok) {
       const message = result.error || friendlyResponseError(text, `Could not verify renewal (${response.status})`);
       if (statusEl) {
-        statusEl.style.color = 'var(--critical)';
-        statusEl.textContent = message;
+        setRenewalActionResult(id, message, 'var(--critical)');
       } else {
         alert(message);
       }
@@ -1348,18 +1357,26 @@
     if (result.state === 'failed' || result.state === 'cleanup_required') {
       const message = result.error_message || result.error_code || 'Renewal needs attention';
       if (statusEl) {
-        statusEl.style.color = result.state === 'failed' ? 'var(--critical)' : 'var(--warning)';
-        statusEl.textContent = message;
+        setRenewalActionResult(id, message, result.state === 'failed' ? 'var(--critical)' : 'var(--warning)');
       }
     }
     if (action === 'verify' && result.state === 'awaiting_dns' && result.visible === false) {
       if (statusEl) {
-        statusEl.style.color = 'var(--warning)';
-        statusEl.textContent = dnsTxtMismatchMessage(result.dns_records || []);
+        setRenewalActionResult(id, dnsTxtMismatchMessage(result.dns_records || []), 'var(--warning)');
       }
       return;
     }
+    delete renewalActionResults[id];
     loadData();
+  }
+
+  function setRenewalActionResult(id, text, color) {
+    renewalActionResults[id] = { text, color };
+    const statusEl = document.getElementById(`renewal-action-result-${id}`);
+    if (statusEl) {
+      statusEl.style.color = color;
+      statusEl.textContent = text;
+    }
   }
 
   function dnsTxtMismatchMessage(records) {
