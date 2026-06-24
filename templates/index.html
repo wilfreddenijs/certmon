@@ -1352,7 +1352,21 @@
         statusEl.textContent = message;
       }
     }
+    if (action === 'verify' && result.state === 'awaiting_dns' && result.visible === false) {
+      if (statusEl) {
+        statusEl.style.color = 'var(--warning)';
+        statusEl.textContent = dnsTxtMismatchMessage(result.dns_records || []);
+      }
+      return;
+    }
     loadData();
+  }
+
+  function dnsTxtMismatchMessage(records) {
+    const expected = records.map(record => `${record.fqdn} = ${record.value}`).join('; ');
+    return expected
+      ? `DNS TXT record is not visible yet or does not match. Expected TXT: ${expected}`
+      : 'DNS TXT record is not visible yet or does not match. Check the challenge value at your DNS provider and try again.';
   }
 
   function friendlyResponseError(text, fallback) {

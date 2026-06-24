@@ -108,6 +108,15 @@ def test_renewal_resume_actions_surface_errors_inline():
     assert "friendlyResponseError" in html
 
 
+def test_manual_dns_verify_mismatch_surfaces_inline_warning():
+    html = page()
+
+    assert "result.visible === false" in html
+    assert "dnsTxtMismatchMessage" in html
+    assert "DNS TXT record is not visible yet or does not match" in html
+    assert "Expected TXT:" in html
+
+
 def test_cancelled_and_failed_renewals_can_be_deleted_from_list():
     html = page()
 
