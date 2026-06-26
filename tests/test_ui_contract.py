@@ -162,6 +162,15 @@ def test_deployment_result_offers_private_key_download_without_storing_key_mater
     assert "privateKeyPem" not in html
 
 
+def test_local_ca_extron_pem_download_uses_private_combined_artifact():
+    html = page()
+
+    assert "PEM (Extron)" in html
+    assert "/api/certificates/${c.certificate_id}/private/combined.pem" in html
+    assert "/api/ca/download/${c.certificate_id}" in html
+    assert "Extron PEM contains certificate and private key" in html
+
+
 def test_renewal_resume_actions_surface_errors_inline():
     html = page()
 

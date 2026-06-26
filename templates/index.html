@@ -1652,6 +1652,7 @@
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <a href="/api/ca/download/${c.certificate_id}" download="${c.certificate_id}.crt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
+                <a href="/api/certificates/${c.certificate_id}/private/combined.pem" download="${c.certificate_id}-extron.pem"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
                 <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
               </div>
