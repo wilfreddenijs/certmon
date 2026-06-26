@@ -26,6 +26,47 @@ def test_database_enables_wal_foreign_keys_and_schema(tmp_path):
         "secrets",
         "events",
     } <= tables
+    with db.connect() as conn:
+        renewal_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(renewal_jobs)")
+        }
+    assert "metadata_json" in renewal_columns
+
+
+def test_initialize_migrates_existing_renewal_jobs_metadata_column(tmp_path):
+    path = tmp_path / "certmon.db"
+    db = Database(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with db.connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE renewal_jobs (
+                id TEXT PRIMARY KEY,
+                endpoint_host TEXT NOT NULL,
+                endpoint_port INTEGER NOT NULL,
+                issuer_type TEXT NOT NULL,
+                state TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 0,
+                identifiers_json TEXT NOT NULL,
+                profile TEXT NOT NULL,
+                environment TEXT,
+                dns_provider TEXT,
+                certificate_id TEXT,
+                error_code TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+    db.initialize()
+
+    with db.connect() as conn:
+        renewal_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(renewal_jobs)")
+        }
+    assert "metadata_json" in renewal_columns
 
 
 def test_transaction_rolls_back_all_changes(tmp_path):

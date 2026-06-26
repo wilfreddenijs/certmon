@@ -64,6 +64,7 @@ class Database:
                     certificate_id TEXT REFERENCES certificates(id),
                     error_code TEXT,
                     error_message TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -90,6 +91,20 @@ class Database:
                 "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
                 (1, _utc_now()),
             )
+            self._ensure_column(
+                conn,
+                "renewal_jobs",
+                "metadata_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+
+    def _ensure_column(self, conn, table, column, definition):
+        columns = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @contextmanager
     def transaction(self):
