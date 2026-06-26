@@ -87,6 +87,7 @@ class RenewalService:
         profile,
         environment=None,
         dns_provider=None,
+        metadata=None,
     ):
         authorize(Permission.ISSUE_CERTIFICATE)
         normalized = normalize_identifiers(
@@ -103,6 +104,7 @@ class RenewalService:
             profile=profile,
             environment=environment,
             dns_provider=dns_provider,
+            metadata=metadata,
         )
         return self.database.get_job(job_id)
 
@@ -136,6 +138,12 @@ class RenewalService:
         job = self.database.get_job(job_id)
         if job is None:
             raise KeyError(job_id)
+        if (
+            job["state"] == RenewalState.DRAFT.value
+            and job.get("metadata", {}).get("external_ca_workflow") == "existing"
+        ):
+            self.database.delete_job(job_id)
+            return job
         if job["state"] not in {
             RenewalState.CANCELLED.value,
             RenewalState.DEPLOYED.value,

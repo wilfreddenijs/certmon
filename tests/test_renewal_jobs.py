@@ -147,6 +147,24 @@ def test_delete_terminal_job_removes_issued_job(tmp_path):
     assert db.get_job(job["id"]) is None
 
 
+def test_delete_terminal_job_removes_existing_import_draft_job(tmp_path):
+    db, service = make_service(tmp_path)
+    job = service.create_job(
+        endpoint_host="device.local",
+        endpoint_port=443,
+        issuer_type="external_ca",
+        identifiers=["device.local"],
+        profile="generic-rsa",
+        metadata={"external_ca_workflow": "existing"},
+    )
+
+    removed = service.delete_terminal_job(job["id"])
+
+    assert removed["state"] == "draft"
+    assert removed["metadata"]["external_ca_workflow"] == "existing"
+    assert db.get_job(job["id"]) is None
+
+
 def test_delete_terminal_job_rejects_active_job(tmp_path):
     _, service = make_service(tmp_path)
     job = service.create_job(

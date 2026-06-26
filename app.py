@@ -219,6 +219,7 @@ def _safe_job(job):
         "dns_records",
         "visible",
         "replaced",
+        "metadata",
     }
     return {key: value for key, value in job.items() if key in allowed}
 
@@ -470,6 +471,7 @@ def create_renewal():
             profile=body.get("profile") or "generic-rsa",
             environment=body.get("environment"),
             dns_provider=body.get("dns_provider"),
+            metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
         )
         return jsonify(_safe_job(job)), 201
     except (TypeError, ValueError) as error:
@@ -508,6 +510,15 @@ def start_renewal(job_id):
                 terms_of_service_agreed=body.get("terms_of_service_agreed") is True,
             )
         elif job["issuer_type"] == "external_ca":
+            if job.get("metadata", {}).get("external_ca_workflow") == "existing":
+                return (
+                    jsonify(
+                        {
+                            "error": "This draft is for importing an existing certificate and private key. Use Import certificate or delete the entry."
+                        }
+                    ),
+                    400,
+                )
             artifact_name = external_ca_service.create_csr_job(job_id)
             result = {**database.get_job(job_id), "artifact_name": artifact_name}
         elif job["issuer_type"] == "local_ca":

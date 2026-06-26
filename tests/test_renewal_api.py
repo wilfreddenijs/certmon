@@ -53,6 +53,29 @@ def test_job_list_and_detail_are_sanitized(tmp_data_dir):
     assert "passphrase" not in serialized
 
 
+def test_existing_external_import_draft_cannot_be_started_as_csr(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+    client = module.app.test_client()
+    created = client.post(
+        "/api/renew",
+        json={
+            "endpoint_host": "device.local",
+            "issuer_type": "external_ca",
+            "identifiers": ["device.local"],
+            "profile": "generic-rsa",
+            "metadata": {"external_ca_workflow": "existing"},
+        },
+    ).get_json()
+
+    assert created["metadata"]["external_ca_workflow"] == "existing"
+
+    response = client.post(f"/api/renewals/{created['id']}/start", json={})
+
+    assert response.status_code == 400
+    assert "Import certificate" in response.get_json()["error"]
+    assert module.database.get_job(created["id"])["state"] == "draft"
+
+
 def test_awaiting_dns_list_includes_challenge_records(tmp_data_dir):
     module = load_app(tmp_data_dir)
     client = module.app.test_client()

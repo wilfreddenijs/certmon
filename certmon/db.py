@@ -116,6 +116,7 @@ class Database:
         profile,
         environment=None,
         dns_provider=None,
+        metadata=None,
     ):
         now = _utc_now()
         with self.transaction() as conn:
@@ -124,8 +125,8 @@ class Database:
                 INSERT INTO renewal_jobs(
                     id, endpoint_host, endpoint_port, issuer_type, state,
                     identifiers_json, profile, environment, dns_provider,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -139,6 +140,7 @@ class Database:
                     dns_provider,
                     now,
                     now,
+                    json.dumps(metadata or {}),
                 ),
             )
 
@@ -226,6 +228,7 @@ class Database:
             return None
         result = dict(row)
         result["identifiers"] = json.loads(result.pop("identifiers_json"))
+        result["metadata"] = json.loads(result.pop("metadata_json") or "{}")
         return result
 
     def list_jobs(self):

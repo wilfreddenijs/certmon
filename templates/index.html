@@ -1192,6 +1192,7 @@
     if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'cancelled') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'draft' && r.issuer_type === 'external_ca' && r.metadata?.external_ca_workflow === 'existing') return `<button class="btn" onclick="openExternalImport('${r.id}','existing')">Import certificate</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'draft') return `<button class="btn" onclick="resumeRenewal('${r.id}','start')">Start renewal</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     return '';
   }
@@ -1332,7 +1333,8 @@
       profile: document.getElementById('renewal-profile').value,
       dns_provider: issuer === 'acme' ? selectedRenewalValue('renewal-dns') : null,
       environment: issuer === 'acme' ? selectedRenewalValue('renewal-environment') : null,
-      external_ca_workflow: issuer === 'external_ca' ? selectedRenewalValue('external-ca-workflow') : null
+      external_ca_workflow: issuer === 'external_ca' ? selectedRenewalValue('external-ca-workflow') : null,
+      metadata: issuer === 'external_ca' ? { external_ca_workflow: selectedRenewalValue('external-ca-workflow') } : {}
     };
   }
 

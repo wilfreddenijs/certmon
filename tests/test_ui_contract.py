@@ -138,6 +138,9 @@ def test_external_ca_import_form_submits_generated_and_existing_certificates():
     assert "Signed certificate for the generated CSR" in html
     assert "openExternalImport(job.id, 'existing')" in html
     assert "draft.external_ca_workflow === 'existing'" in html
+    assert "r.metadata?.external_ca_workflow === 'existing'" in html
+    assert "Import certificate" in html
+    assert "Use Import certificate or delete the entry" in html
     assert "Use the External CA import form" not in html
 
 
