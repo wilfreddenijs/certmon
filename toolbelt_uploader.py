@@ -76,6 +76,49 @@ CA_DIR = r"C:\CertMon\CA"
 TOOLBELT_EXE = r"C:\Program Files (x86)\Extron\Toolbelt\Toolbelt.exe"
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toolbelt_upload.log")
 
+
+def _toolbelt_candidate_paths():
+    """Likely locations of Toolbelt.exe — both Program Files trees + registry."""
+    paths = [TOOLBELT_EXE]
+    for base in (os.environ.get("ProgramFiles(x86)"),
+                 os.environ.get("ProgramFiles"),
+                 os.environ.get("ProgramW6432")):
+        if base:
+            paths.append(os.path.join(base, "Extron", "Toolbelt", "Toolbelt.exe"))
+    # Registry App Paths (set by the installer), 64- and 32-bit views
+    try:
+        import winreg
+        for hive, key in (
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Toolbelt.exe"),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Toolbelt.exe"),
+        ):
+            try:
+                with winreg.OpenKey(hive, key) as k:
+                    val, _ = winreg.QueryValueEx(k, None)  # default value = exe path
+                    if val:
+                        paths.append(val.strip('"'))
+            except OSError:
+                pass
+    except Exception:
+        pass
+    # de-dupe preserving order
+    seen, out = set(), []
+    for p in paths:
+        if p and p.lower() not in seen:
+            seen.add(p.lower())
+            out.append(p)
+    return out
+
+
+def find_toolbelt_exe():
+    """Return the first existing Toolbelt.exe path, or None if not installed."""
+    for p in _toolbelt_candidate_paths():
+        if os.path.exists(p):
+            return p
+    return None
+
 # Generous waits — device manage + reboot are slow.
 T_MANAGE = 25      # seconds to wait for a device's config panels after Manage
 T_DIALOG = 15      # file-open dialog appear
@@ -126,6 +169,14 @@ def _is_elevated():
 
 def connect_toolbelt(launch_if_needed=True, timeout=60):
     app = Application(backend="uia")
+    # Fast preflight: if Toolbelt is neither running nor installed, fail now with
+    # a clear message instead of burning ~28s retrying to attach to nothing.
+    exe = find_toolbelt_exe()
+    if not _win32_toolbelt_present() and not exe:
+        raise RuntimeError(
+            "Extron Toolbelt is not installed and not running. Install Toolbelt "
+            "(or open it) and re-run.\nSearched:\n  - "
+            + "\n  - ".join(_toolbelt_candidate_paths()))
     # Retry UIA connect: the window can be transiently UIA-unreachable while
     # Toolbelt is busy (e.g. opening a heavy device page). Only conclude an
     # elevation mismatch if it stays unreachable across all retries.
@@ -150,11 +201,13 @@ def connect_toolbelt(launch_if_needed=True, timeout=60):
                 "admin. [this script elevated=%s]" % _is_elevated())
         if not launch_if_needed:
             raise RuntimeError("Could not attach to Toolbelt.")
-        if not os.path.exists(TOOLBELT_EXE):
-            raise RuntimeError("Toolbelt.exe not found at %s" % TOOLBELT_EXE)
-        log.info("Toolbelt not running — launching it (this is slow; "
-                 "for reliability open Toolbelt yourself before running)...")
-        Application(backend="uia").start(TOOLBELT_EXE)
+        if not exe:
+            raise RuntimeError(
+                "Extron Toolbelt is not installed. Searched:\n  - "
+                + "\n  - ".join(_toolbelt_candidate_paths()))
+        log.info("Toolbelt not running — launching %s (this is slow; "
+                 "for reliability open Toolbelt yourself before running)...", exe)
+        Application(backend="uia").start(exe)
         # Toolbelt loads slowly and shows a splash first — poll patiently.
         deadline = time.time() + max(timeout, 90)
         connected = False
