@@ -110,6 +110,13 @@ def test_external_ca_import_form_submits_generated_and_existing_certificates():
     assert "Safe test mode" in html
     assert "Creates a real trusted certificate" in html
     assert "Used by the ACME provider" in html
+    assert 'name="external-ca-workflow"' in html
+    assert 'value="csr"' in html
+    assert 'value="existing"' in html
+    assert "Generate CSR with CertMon key" in html
+    assert "Import existing certificate and private key" in html
+    assert "CertMon keeps the new job in draft and opens the import form immediately" in html
+    assert "Create and import certificate" in html
     assert "Certificate file" in html
     assert "certificate.pem" in html
     assert "Do not use <code>full-chain.pem</code> here" in html
@@ -130,6 +137,8 @@ def test_external_ca_import_form_submits_generated_and_existing_certificates():
     assert "already been started as a CSR flow" in html
     assert "create a new External CA renewal and import before starting it" in html
     assert "Signed certificate for the generated CSR" in html
+    assert "openExternalImport(job.id, 'existing')" in html
+    assert "draft.external_ca_workflow === 'existing'" in html
     assert "Use the External CA import form" not in html
 
 

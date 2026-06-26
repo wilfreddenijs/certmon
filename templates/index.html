@@ -912,6 +912,9 @@
       <div id="external-ca-controls" hidden>
         <div class="help-text" style="font-size:12px;margin-bottom:10px">After creating the job, download its CSR or import an existing signed certificate and key.</div>
         <div class="help-text">Use CSR mode when CertMon should create the private key. Use existing-certificate import when the certificate and private key already exist outside CertMon.</div>
+        <div class="form-label" style="margin-top:12px">External CA workflow</div>
+        <label class="wizard-choice"><input type="radio" name="external-ca-workflow" value="csr" checked /> Generate CSR with CertMon key<span class="help-text" style="display:block;margin-top:4px">CertMon creates and stores the private key. You download the CSR, get it signed by your CA, then import only the signed certificate and chain.</span></label>
+        <label class="wizard-choice"><input type="radio" name="external-ca-workflow" value="existing" /> Import existing certificate and private key<span class="help-text" style="display:block;margin-top:4px">Use this when the certificate and its matching private key already exist. CertMon keeps the new job in draft and opens the import form immediately.</span></label>
       </div>
     </section>
 
@@ -1301,6 +1304,11 @@
     document.getElementById('renewal-back').hidden = currentRenewalStep === 1;
     document.getElementById('renewal-next').hidden = currentRenewalStep === 4;
     document.getElementById('renewal-submit').hidden = currentRenewalStep !== 4;
+    const draft = renewalDraft();
+    document.getElementById('renewal-submit').textContent =
+      draft.issuer_type === 'external_ca' && draft.external_ca_workflow === 'existing'
+        ? 'Create and import certificate'
+        : 'Review and start';
   }
 
   function selectedRenewalValue(name) {
@@ -1322,7 +1330,8 @@
       issuer_type: issuer,
       profile: document.getElementById('renewal-profile').value,
       dns_provider: issuer === 'acme' ? selectedRenewalValue('renewal-dns') : null,
-      environment: issuer === 'acme' ? selectedRenewalValue('renewal-environment') : null
+      environment: issuer === 'acme' ? selectedRenewalValue('renewal-environment') : null,
+      external_ca_workflow: issuer === 'external_ca' ? selectedRenewalValue('external-ca-workflow') : null
     };
   }
 
@@ -1333,7 +1342,8 @@
       <b>Identifiers:</b> ${draft.identifiers.join(', ')}<br>
       <b>Issuer:</b> ${draft.issuer_type}<br>
       <b>Profile:</b> ${draft.profile}<br>
-      ${draft.environment ? `<b>Environment:</b> ${draft.environment}<br><b>DNS:</b> ${draft.dns_provider}` : ''}`;
+      ${draft.environment ? `<b>Environment:</b> ${draft.environment}<br><b>DNS:</b> ${draft.dns_provider}` : ''}
+      ${draft.external_ca_workflow ? `<br><b>External CA workflow:</b> ${draft.external_ca_workflow === 'existing' ? 'Import existing certificate and private key' : 'Generate CSR with CertMon key'}` : ''}`;
   }
 
   async function submitRenewal() {
@@ -1346,6 +1356,13 @@
     const job = await createResponse.json();
     if (!createResponse.ok) { alert(job.error || 'Could not create renewal'); return; }
     currentRenewalJobId = job.id;
+    if (draft.issuer_type === 'external_ca' && draft.external_ca_workflow === 'existing') {
+      closeModal();
+      switchTab('renewals');
+      loadData();
+      openExternalImport(job.id, 'existing');
+      return;
+    }
     const startBody = draft.issuer_type === 'acme' ? {
       email: document.getElementById('renewal-email').value.trim(),
       terms_of_service_agreed: document.getElementById('renewal-tos').checked
@@ -1460,10 +1477,10 @@
     if (action !== 'deploy') switchTab('renewals');
   }
 
-  function openExternalImport(jobId) {
+  function openExternalImport(jobId, mode = 'complete') {
     if (!jobId) return;
     currentRenewalJobId = jobId;
-    document.getElementById('external-import-mode').value = 'complete';
+    document.getElementById('external-import-mode').value = mode;
     ['external-certificate-file', 'external-chain-file', 'external-private-key-file'].forEach(id => {
       document.getElementById(id).value = '';
     });
