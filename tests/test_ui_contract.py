@@ -38,7 +38,6 @@ def test_wizard_has_external_ca_and_resumable_state_actions():
     assert "Verify and continue" in html
     assert "Retry cleanup" in html
     assert "Deploy now" in html
-    assert "Keep for later" in html
     assert "Cancel renewal" in html
 
 
@@ -187,8 +186,10 @@ def test_cancelled_and_failed_renewals_can_be_deleted_from_list():
     assert "Delete entry" in html
     assert "deleteRenewal(" in html
     assert "method: 'DELETE'" in html
+    assert "r.state === 'issued'" in html
     assert "deployment_pending" in html
     assert "Deployment did not finish yet or needs attention" in html
+    assert "Keep for later" not in html
 
 
 def test_awaiting_dns_renewals_show_dns_challenge_records():

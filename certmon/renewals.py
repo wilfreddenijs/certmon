@@ -141,9 +141,10 @@ class RenewalService:
             RenewalState.DEPLOYED.value,
             RenewalState.DEPLOYMENT_PENDING.value,
             RenewalState.FAILED.value,
+            RenewalState.ISSUED.value,
         }:
             raise ValueError(
-                "Only cancelled, failed, deployed, or deployment-pending renewal entries can be deleted"
+                "Only cancelled, failed, issued, deployed, or deployment-pending renewal entries can be deleted"
             )
         self.database.delete_job(job_id)
         return job

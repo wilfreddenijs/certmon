@@ -930,7 +930,6 @@
       <button class="btn btn-ghost" data-action="import-cert" onclick="openExternalImport(currentRenewalJobId)">Import signed certificate</button>
       <button class="btn" data-action="retry-cleanup" onclick="renewalAction('retry-cleanup')">Retry cleanup</button>
       <button class="btn" data-action="deploy" onclick="renewalAction('deploy')">Deploy now</button>
-      <button class="btn btn-ghost" data-action="keep">Keep for later</button>
       <button class="btn btn-danger" data-action="cancel" onclick="renewalAction('cancel')">Cancel renewal</button>
     </section>
 
@@ -1188,7 +1187,7 @@
     if (r.state === 'awaiting_dns') return `<button class="btn" onclick="resumeRenewal('${r.id}','verify')">Verify and continue</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a> <button class="btn" onclick="resumeRenewal('${r.id}','import-cert')">Import signed certificate</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'cleanup_required') return `<button class="btn" onclick="resumeRenewal('${r.id}','retry-cleanup')">Retry cleanup</button>`;
-    if (r.state === 'issued') return `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> <button class="btn btn-ghost" onclick="loadData()">Keep for later</button>`;
+    if (r.state === 'issued') return `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'deployment_pending') return `<div style="color:var(--warning);font-size:12px;margin-bottom:8px">${r.error_message || 'Deployment did not finish yet or needs attention.'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
