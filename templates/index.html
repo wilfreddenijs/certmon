@@ -1629,7 +1629,7 @@
               <option value="generic-rsa">Generic RSA</option>
               <option value="generic-ecdsa">Generic modern (ECDSA)</option>
             </select>
-            <div class="help-text field-note">Choose Extron/RSA for older devices; use modern ECDSA only when the device supports it.</div>
+            <div class="help-text field-note">Extron certificates are legacy/Toolbelt-friendly RSA certs and include an extra combined PEM download for Extron upload. Generic certificates use the normal separate certificate/chain/private-key files.</div>
           </div>
           <button class="btn" style="padding:8px 18px" onclick="issueCert()">Issue Certificate</button>
         </div>
@@ -1643,6 +1643,7 @@
           <div class="section-title" style="margin-bottom:0">Issued Device Certificates (${issued.length})</div>
           <a href="/api/ca/devices-txt" download="devices.txt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" title="Download IPs of all devices with a .pem — feed to toolbelt_uploader.py --list">⬇ devices.txt</button></a>
         </div>
+        <div class="help-text choice-help" style="margin-bottom:14px">Extron profile certificates show an extra <b>PEM (Extron)</b> download. That file contains both certificate and private key for Extron Toolbelt, so keep it secret. Generic certificates should normally use the separate cert/key files from Upload/manual install.</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           ${issued.map(c => `
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
@@ -1652,7 +1653,7 @@
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <a href="/api/ca/download/${c.certificate_id}" download="${c.certificate_id}.crt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
-                <a href="/api/certificates/${c.certificate_id}/private/combined.pem" download="${c.certificate_id}-extron.pem"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>
+                ${c.profile === 'extron-rsa' ? `<a href="/api/certificates/${c.certificate_id}/private/combined.pem" download="${c.certificate_id}-extron.pem"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
                 <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
               </div>
