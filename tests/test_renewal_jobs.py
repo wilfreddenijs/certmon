@@ -108,6 +108,27 @@ def test_delete_terminal_job_removes_cancelled_job_and_events(tmp_path):
     assert db.list_events(job["id"]) == []
 
 
+def test_delete_terminal_job_removes_deployment_pending_job(tmp_path):
+    db, service = make_service(tmp_path)
+    job = service.create_job(
+        endpoint_host="device.local",
+        endpoint_port=443,
+        issuer_type="acme",
+        identifiers=["device.example.com"],
+        profile="generic-rsa",
+    )
+    issuing = service.transition(job["id"], "draft", job["version"], "issuing")
+    issued = service.transition(issuing["id"], "issuing", issuing["version"], "issued")
+    pending = service.transition(
+        issued["id"], "issued", issued["version"], "deployment_pending"
+    )
+
+    removed = service.delete_terminal_job(pending["id"])
+
+    assert removed["state"] == "deployment_pending"
+    assert db.get_job(job["id"]) is None
+
+
 def test_delete_terminal_job_rejects_active_job(tmp_path):
     _, service = make_service(tmp_path)
     job = service.create_job(
@@ -118,7 +139,7 @@ def test_delete_terminal_job_rejects_active_job(tmp_path):
         profile="generic-rsa",
     )
 
-    with pytest.raises(ValueError, match="cancelled or failed"):
+    with pytest.raises(ValueError, match="cancelled, failed, deployed, or deployment-pending"):
         service.delete_terminal_job(job["id"])
 
 
