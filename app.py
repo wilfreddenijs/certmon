@@ -34,6 +34,7 @@ from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
 from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
+from certmon.naming import safe_slug
 from certmon.permissions import Permission, authorize
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
@@ -736,6 +737,39 @@ def _certificate_selector(metadata):
     return identifiers[0] if identifiers else metadata.get("id")
 
 
+def _filename_part(value):
+    return safe_slug(value, max_length=80)
+
+
+def _certificate_download_filename(certificate_id, artifact_name):
+    metadata = database.get_certificate(certificate_id) if database else None
+    metadata = metadata or {"id": certificate_id}
+    identifiers = metadata.get("identifiers") or []
+    parts = []
+    for value in (metadata.get("device_name"), identifiers[0] if identifiers else None):
+        part = _filename_part(value)
+        if part and part not in parts:
+            parts.append(part)
+    profile = metadata.get("profile")
+    if profile == "extron-rsa":
+        parts.append("extron")
+    elif profile:
+        parts.append(_filename_part(profile))
+    base = "-".join(part for part in parts if part) or "certificate"
+    short_id = _filename_part(certificate_id)[:8]
+    if short_id and short_id not in base:
+        base = f"{base}-{short_id}"
+    artifact_labels = {
+        "certificate.pem": "certificate.pem",
+        "chain.pem": "chain.pem",
+        "full-chain.pem": "full-chain.pem",
+        "request.csr": "request.csr",
+        "private-key.pem": "private-key.pem",
+        "combined.pem": "extron-combined.pem" if profile == "extron-rsa" else "combined.pem",
+    }
+    return f"{base}-{artifact_labels.get(artifact_name, artifact_name)}"
+
+
 @app.route("/api/ca/status")
 def ca_status():
     if not ca_exists():
@@ -912,7 +946,9 @@ def ca_download_file(certificate_id):
     except (FileNotFoundError, ValueError):
         return jsonify({"error": "Not found"}), 404
     response = Response(data, status=200, mimetype="application/x-pem-file")
-    response.headers["Content-Disposition"] = f'attachment; filename="{certificate_id}.crt"'
+    filename = _certificate_download_filename(certificate_id, "certificate.pem")
+    filename = filename[:-4] + ".crt" if filename.endswith(".pem") else filename
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
 
@@ -1051,8 +1087,9 @@ def download_public_artifact(certificate_id, artifact_name):
     except (FileNotFoundError, ValueError, PermissionError):
         return jsonify({"error": "Not found"}), 404
     response = Response(data, status=200, mimetype="application/x-pem-file")
+    filename = _certificate_download_filename(certificate_id, artifact_name)
     response.headers["Content-Disposition"] = (
-        f'attachment; filename="{certificate_id}-{artifact_name}"'
+        f'attachment; filename="{filename}"'
     )
     return response
 
@@ -1091,8 +1128,9 @@ def download_private_artifact(certificate_id, artifact_name):
         {"certificate_id": certificate_id, "artifact_name": artifact_name},
     )
     response = Response(data, status=200, mimetype="application/x-pem-file")
+    filename = _certificate_download_filename(certificate_id, artifact_name)
     response.headers["Content-Disposition"] = (
-        f'attachment; filename="{certificate_id}-{artifact_name}"'
+        f'attachment; filename="{filename}"'
     )
     return response
 

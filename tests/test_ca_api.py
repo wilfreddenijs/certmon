@@ -13,6 +13,23 @@ class FakeArtifacts:
         self.requested.append((certificate_id, name))
         return b"-----BEGIN CERTIFICATE-----\npublic\n-----END CERTIFICATE-----\n"
 
+    def materialize_private(self, certificate_id, name):
+        from contextlib import contextmanager
+        from pathlib import Path
+        import tempfile
+
+        @contextmanager
+        def _ctx():
+            with tempfile.NamedTemporaryFile(delete=False) as handle:
+                handle.write(b"-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----\n")
+                path = Path(handle.name)
+            try:
+                yield path
+            finally:
+                path.unlink(missing_ok=True)
+
+        return _ctx()
+
     def delete_certificate_set(self, certificate_id):
         self.deleted.append(certificate_id)
 
@@ -24,6 +41,8 @@ class FakeCertificateDatabase:
                 "id": "cert-1",
                 "kind": "leaf",
                 "issuer_type": "local_ca",
+                "profile": "extron-rsa",
+                "device_name": "UCS (192.168.0.112)",
                 "identifiers": ["192.168.0.10", "device.local"],
                 "not_after": "2030-01-01T00:00:00+00:00",
             },
@@ -46,6 +65,9 @@ class FakeCertificateDatabase:
     def delete_certificate(self, certificate_id):
         self.deleted.append(certificate_id)
         self.certificates.pop(certificate_id, None)
+
+    def record_event(self, event_type, payload):
+        self.last_event = (event_type, payload)
 
 
 class FakeLocalCA:
@@ -89,11 +111,32 @@ def test_public_download_never_reads_private_artifact(tmp_data_dir, monkeypatch)
     module = load_app(tmp_data_dir)
     artifacts = FakeArtifacts()
     monkeypatch.setattr(module, "artifact_store", artifacts)
+    monkeypatch.setattr(module, "database", FakeCertificateDatabase())
 
     response = module.app.test_client().get("/api/ca/download/cert-1")
 
     assert response.status_code == 200
     assert artifacts.requested == [("cert-1", "certificate.pem")]
+    assert (
+        'filename="ucs-192.168.0.112-192.168.0.10-extron-cert-1-certificate.crt"'
+        in response.headers["Content-Disposition"]
+    )
+
+
+def test_private_download_uses_friendly_extron_filename(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    monkeypatch.setattr(module, "database", FakeCertificateDatabase())
+
+    response = module.app.test_client().get(
+        "/api/certificates/cert-1/private/combined.pem"
+    )
+
+    assert response.status_code == 200
+    assert (
+        'filename="ucs-192.168.0.112-192.168.0.10-extron-cert-1-extron-combined.pem"'
+        in response.headers["Content-Disposition"]
+    )
 
 
 def test_devices_txt_exports_certificate_ids_not_private_paths(

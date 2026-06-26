@@ -10,6 +10,7 @@ from certmon.certificates import build_csr, generate_private_key, serialize_priv
 from certmon.dns.base import DNSChallengeRecord, PresentedRecord
 from certmon.dns.manual import ManualChallengeExpired
 from certmon.models import RenewalState, validate_transition
+from certmon.naming import new_certificate_id
 from certmon.permissions import Permission, authorize
 from certmon.profiles import PROFILES
 
@@ -413,7 +414,11 @@ class ACMERenewalOrchestrator:
         )
         if not validation.cryptographically_valid:
             raise CertificateValidationError(validation.errors)
-        certificate_id = str(uuid.uuid4())
+        certificate_id = new_certificate_id(
+            identifiers=job["identifiers"],
+            profile=job["profile"],
+            issuer_type="acme",
+        )
         chain = result.get("chain_pem") or b""
         metadata = {
             "kind": "leaf",

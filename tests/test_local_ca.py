@@ -55,6 +55,7 @@ def test_issue_extron_leaf_preserves_profile_and_combined_pem_order(tmp_path):
 
     assert set(result) == {"certificate_id", "not_after"}
     certificate_id = result["certificate_id"]
+    assert certificate_id.startswith("extron-room-1-device.local-local-ca-extron-rsa-")
     leaf = x509.load_pem_x509_certificate(
         store.read_public(certificate_id, "certificate.pem")
     )

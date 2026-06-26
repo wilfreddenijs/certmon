@@ -1,5 +1,4 @@
 import ipaddress
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from cryptography import x509
@@ -8,6 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from certmon.certificates import generate_private_key, serialize_private_key
+from certmon.naming import new_certificate_id
 from certmon.profiles import PROFILES
 
 
@@ -109,7 +109,12 @@ class LocalCAService:
             .add_extension(_authority_key_identifier(ca_certificate), critical=False)
             .sign(ca_key, hashes.SHA256())
         )
-        certificate_id = str(uuid.uuid4())
+        certificate_id = new_certificate_id(
+            identifiers=identifiers,
+            profile=profile_name,
+            device_name=device_name or identifiers[0],
+            issuer_type="local-ca",
+        )
         certificate_pem = certificate.public_bytes(serialization.Encoding.PEM)
         private_key_pem = serialize_private_key(key)
         metadata = {

@@ -1,5 +1,3 @@
-import uuid
-
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 
@@ -10,6 +8,7 @@ from certmon.certificates import (
     validate_certificate_import,
 )
 from certmon.models import RenewalState, validate_transition
+from certmon.naming import new_certificate_id
 from certmon.permissions import Permission, authorize
 from certmon.profiles import PROFILES
 
@@ -143,7 +142,11 @@ class ExternalCAService:
         )
         if not validation.cryptographically_valid:
             raise ValueError(",".join(validation.errors))
-        certificate_id = str(uuid.uuid4())
+        certificate_id = new_certificate_id(
+            identifiers=job["identifiers"],
+            profile=job["profile"],
+            issuer_type="external-ca",
+        )
         leaf_certificate = validation.ordered_chain[0]
         ordered_chain = b"".join(
             certificate.public_bytes(serialization.Encoding.PEM)
