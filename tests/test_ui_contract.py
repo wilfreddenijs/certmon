@@ -87,6 +87,13 @@ def test_external_ca_import_form_submits_generated_and_existing_certificates():
         "external/${action}",
     ):
         assert required in html
+    assert "Certificate file" in html
+    assert "certificate.pem" in html
+    assert "Do not use <code>full-chain.pem</code> here" in html
+    assert "Intermediate/chain file" in html
+    assert "chain.pem" in html
+    assert "Private key file" in html
+    assert "private-key.pem" in html
     assert "Use the External CA import form" not in html
 
 

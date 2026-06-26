@@ -921,16 +921,19 @@
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label" for="external-certificate-file">Leaf certificate PEM</label>
+      <label class="form-label" for="external-certificate-file">Certificate file</label>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Upload the device/server certificate, usually named <code>certificate.pem</code>. Do not use <code>full-chain.pem</code> here.</div>
       <input id="external-certificate-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
     </div>
     <div class="form-group">
-      <label class="form-label" for="external-chain-file">Certificate chain PEM (optional)</label>
+      <label class="form-label" for="external-chain-file">Intermediate/chain file (optional)</label>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Upload <code>chain.pem</code> if you have it. Leave empty when your certificate file already includes the required chain.</div>
       <input id="external-chain-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
     </div>
     <div id="external-private-key-fields" hidden>
       <div class="form-group">
-        <label class="form-label" for="external-private-key-file">Private key PEM</label>
+        <label class="form-label" for="external-private-key-file">Private key file</label>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Upload the matching <code>private-key.pem</code> for this certificate.</div>
         <input id="external-private-key-file" type="file" accept=".pem,.key,application/x-pem-file" style="width:100%" />
       </div>
       <div class="form-group">
