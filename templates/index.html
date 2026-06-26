@@ -18,7 +18,7 @@
     --critical: #ff5252;
     --expired: #b0bec5;
     --text: #e8eaf6;
-    --muted: #546e7a;
+    --muted: #8fa6b2;
     --card-shadow: 0 4px 24px rgba(0,0,0,0.4);
   }
 
@@ -492,6 +492,25 @@
     display: block;
   }
 
+  .help-text {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .field-note {
+    margin-top: 6px;
+    margin-bottom: 6px;
+  }
+
+  .choice-help {
+    background: rgba(0,229,255,0.06);
+    border: 1px solid rgba(0,229,255,0.22);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 8px;
+  }
+
   select {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -502,6 +521,11 @@
     border-radius: 6px;
     width: 100%;
     outline: none;
+  }
+
+  select option {
+    background: var(--bg);
+    color: var(--text);
   }
 
   select:focus { border-color: var(--accent); }
@@ -754,14 +778,17 @@
                 <option value="homeassistant">Home Assistant</option>
                 <option value="synology">Synology NAS</option>
               </select>
+              <div class="help-text field-note">Choose the closest target. Generic/Manual shows downloadable files and instructions instead of an automatic push.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Username</label>
               <input type="text" id="ud-username" placeholder="admin" style="width:100%"/>
+              <div class="help-text field-note">Used only server-side when CertMon connects to the device.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Password</label>
               <input type="password" id="ud-password" placeholder="extron" style="width:100%"/>
+              <div class="help-text field-note">Stored encrypted. It is not sent back to the browser after saving.</div>
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn" style="flex:1" onclick="addUploadDevice()">+ Add Device</button>
@@ -783,7 +810,7 @@
               <select id="push-certificate-select" style="width:100%">
                 <option value="">- select a stored certificate -</option>
               </select>
-              <div style="font-size:11px;color:var(--muted);margin-top:6px">
+              <div class="help-text field-note">
                 CertMon deploys by certificate ID. Private keys stay on the server and never cross the browser boundary.
               </div>
             </div>
@@ -793,6 +820,7 @@
               <select id="push-device-select" style="width:100%">
                 <option value="">— select a device —</option>
               </select>
+              <div class="help-text field-note">For unsupported devices, CertMon gives manual install files: certificate.pem, chain.pem, full-chain.pem, and a separate private-key.pem download.</div>
             </div>
 
             <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">⬆ Push Certificate to Device</button>
@@ -808,7 +836,7 @@
             </div>
             <div id="push-private-artifacts" style="display:none;margin-top:14px">
               <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">Private key download</div>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Keep this file secret. Download it only when a device requires manual certificate import.</div>
+              <div class="help-text" style="margin-bottom:8px">Keep this file secret. Download it only when a device requires manual certificate import.</div>
               <div id="push-private-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             </div>
             <div id="push-instructions" style="display:none;margin-top:14px">
@@ -834,24 +862,26 @@
         <div class="form-group">
           <label class="form-label" for="renewal-endpoint-host">Endpoint host or IP</label>
           <input id="renewal-endpoint-host" type="text" placeholder="192.168.1.20" style="width:100%" />
+          <div class="help-text field-note">The device CertMon connects to, for example a NAS, controller, or web service.</div>
         </div>
         <div class="form-group">
           <label class="form-label" for="renewal-endpoint-port">Port</label>
           <input id="renewal-endpoint-port" type="number" value="443" style="width:100%" />
+          <div class="help-text field-note">Usually 443 for HTTPS.</div>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label" for="renewal-identifiers">Certificate identifiers</label>
         <textarea id="renewal-identifiers" rows="3" placeholder="device.example.com&#10;*.example.com" style="width:100%"></textarea>
-        <div style="font-size:11px;color:var(--muted);margin-top:5px">One DNS name or private IP per line. Public Let's Encrypt certificates require public DNS names.</div>
+        <div class="help-text field-note">Names that must appear on the certificate. Use one DNS name or private IP per line. Public Let's Encrypt certificates require public DNS names.</div>
       </div>
     </section>
 
     <section class="renewal-step" data-step="2" hidden>
       <div class="form-label">Issuer</div>
-      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="acme" checked onchange="updateRenewalOptions()" /> Let's Encrypt (public ACME)</label>
-      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="local_ca" onchange="updateRenewalOptions()" /> CertMon Local CA</label>
-      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="external_ca" onchange="updateRenewalOptions()" /> External CA or existing certificate</label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="acme" checked onchange="updateRenewalOptions()" /> Let's Encrypt (public ACME)<span class="help-text" style="display:block;margin-top:4px">Use for public DNS names that should be trusted by browsers/devices without installing your own CA.</span></label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="local_ca" onchange="updateRenewalOptions()" /> CertMon Local CA<span class="help-text" style="display:block;margin-top:4px">Use for local IPs or internal names. Devices trust these only after the CertMon CA certificate is installed on clients.</span></label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="external_ca" onchange="updateRenewalOptions()" /> External CA or existing certificate<span class="help-text" style="display:block;margin-top:4px">Use when another CA signs the certificate, or when you want to import an existing certificate and key.</span></label>
     </section>
 
     <section class="renewal-step" data-step="3" hidden>
@@ -862,24 +892,26 @@
           <option value="generic-rsa">Generic RSA 2048</option>
           <option value="generic-ecdsa">Generic modern ECDSA P-256</option>
         </select>
+        <div class="help-text field-note">Choose compatibility first. Extron/older devices often need RSA. Modern services can usually use ECDSA.</div>
       </div>
       <div id="acme-options">
         <div class="form-label">DNS validation</div>
-        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="manual" checked /> Manual DNS</label>
-        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="cloudflare" /> Cloudflare automation</label>
+        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="manual" checked /> Manual DNS<span class="help-text" style="display:block;margin-top:4px">CertMon shows a TXT record. You add it at your DNS provider, wait until it is visible, then continue.</span></label>
+        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="cloudflare" /> Cloudflare automation<span class="help-text" style="display:block;margin-top:4px">CertMon creates and cleans up the TXT record through Cloudflare credentials stored server-side.</span></label>
         <div class="form-label" style="margin-top:12px">Environment</div>
-        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="staging" checked /> Staging (test first)</label>
-        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="production" /> Production</label>
+        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="staging" checked /> Staging (test first)<span class="help-text" style="display:block;margin-top:4px">Safe test mode. The certificate is not trusted, but it proves DNS and renewal flow work without production rate-limit risk.</span></label>
+        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="production" /> Production<span class="help-text" style="display:block;margin-top:4px">Creates a real trusted certificate. Available only after the same identifiers succeeded in staging.</span></label>
         <div class="form-group" style="margin-top:12px">
           <label class="form-label" for="renewal-email">ACME contact email</label>
           <input id="renewal-email" type="email" placeholder="admin@example.com" style="width:100%" />
+          <div class="help-text field-note">Used by the ACME provider for important certificate/account notices.</div>
         </div>
         <label class="wizard-choice"><input id="renewal-tos" type="checkbox" /> I accept the ACME provider Terms of Service</label>
         <div style="font-size:11px;color:var(--warning);margin-top:8px">Production is enabled only after this exact identifier set succeeds in staging.</div>
       </div>
       <div id="external-ca-controls" hidden>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">After creating the job, download its CSR or import an existing signed certificate and key.</div>
-        <div style="font-size:11px;color:var(--muted)">The CSR and import actions become available after the renewal job is created.</div>
+        <div class="help-text" style="font-size:12px;margin-bottom:10px">After creating the job, download its CSR or import an existing signed certificate and key.</div>
+        <div class="help-text">Use CSR mode when CertMon should create the private key. Use existing-certificate import when the certificate and private key already exist outside CertMon.</div>
       </div>
     </section>
 
@@ -912,37 +944,45 @@
 <div class="modal-overlay" id="external-import-modal">
   <div class="modal" style="width:620px;max-width:96vw;max-height:92vh;overflow:auto">
     <div class="modal-title">Import External CA certificate</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Complete the generated CSR, or import an existing certificate together with its private key.</div>
+    <div class="help-text" style="font-size:12px;margin-bottom:16px">Use this when a certificate was signed outside CertMon. Choose the import type based on where the private key was created.</div>
     <div class="form-group">
       <label class="form-label" for="external-import-mode">Import type</label>
       <select id="external-import-mode" style="width:100%" onchange="updateExternalImportMode()">
         <option value="complete">Signed certificate for the generated CSR</option>
         <option value="existing">Existing certificate and private key</option>
       </select>
+      <div id="external-import-help-complete" class="help-text choice-help">
+        Choose this when CertMon generated the CSR and private key. Upload the signed <code>certificate.pem</code> you received from the CA and optionally <code>chain.pem</code>. Do not upload a private key in this mode.
+      </div>
+      <div id="external-import-help-existing" class="help-text choice-help" hidden>
+        Choose this when you already have both the certificate and its matching private key, for example from another tool or a previous install. Upload <code>certificate.pem</code>, optional <code>chain.pem</code>, and <code>private-key.pem</code>.
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label" for="external-certificate-file">Certificate file</label>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Upload the device/server certificate, usually named <code>certificate.pem</code>. Do not use <code>full-chain.pem</code> here.</div>
+      <div class="help-text field-note">Upload the device/server certificate, usually named <code>certificate.pem</code>. Do not use <code>full-chain.pem</code> here.</div>
       <input id="external-certificate-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
     </div>
     <div class="form-group">
       <label class="form-label" for="external-chain-file">Intermediate/chain file (optional)</label>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Upload <code>chain.pem</code> if you have it. Leave empty when your certificate file already includes the required chain.</div>
+      <div class="help-text field-note">Upload <code>chain.pem</code> if you have it. Leave empty when your certificate file already includes the required chain.</div>
       <input id="external-chain-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
     </div>
     <div id="external-private-key-fields" hidden>
       <div class="form-group">
         <label class="form-label" for="external-private-key-file">Private key file</label>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Upload the matching <code>private-key.pem</code> for this certificate.</div>
+        <div class="help-text field-note">Upload the matching <code>private-key.pem</code> for this certificate.</div>
         <input id="external-private-key-file" type="file" accept=".pem,.key,application/x-pem-file" style="width:100%" />
       </div>
       <div class="form-group">
         <label class="form-label" for="external-passphrase">Private key passphrase (optional)</label>
+        <div class="help-text field-note">Leave empty unless the private key file itself is encrypted and asks for a passphrase.</div>
         <input id="external-passphrase" type="password" autocomplete="off" style="width:100%" />
       </div>
     </div>
     <div class="form-group">
       <label class="form-label" for="external-trust-anchor">Trust anchor ID (optional)</label>
+      <div class="help-text field-note">Leave empty for normal imports. Use only when an administrator has imported a private CA/root certificate as a named trust anchor.</div>
       <input id="external-trust-anchor" type="text" autocomplete="off" style="width:100%" />
     </div>
     <div id="external-import-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:8px"></div>
@@ -1441,6 +1481,8 @@
   function updateExternalImportMode() {
     const existing = document.getElementById('external-import-mode').value === 'existing';
     document.getElementById('external-private-key-fields').hidden = !existing;
+    document.getElementById('external-import-help-complete').hidden = existing;
+    document.getElementById('external-import-help-existing').hidden = !existing;
   }
 
   async function readPemFile(id, required) {
@@ -1481,12 +1523,19 @@
       switchTab('renewals');
       loadData();
     } catch (error) {
-      errorEl.textContent = error.message
-        .replace('key_mismatch', 'The private key does not match this certificate.')
-        .replace('identifier_mismatch', 'The certificate identifiers do not match this renewal.');
+      errorEl.textContent = externalImportErrorMessage(error.message, existing);
     } finally {
       submit.disabled = false;
     }
+  }
+
+  function externalImportErrorMessage(message, existing) {
+    return String(message || 'Certificate import failed.')
+      .replace('Job must be in draft state', existing
+        ? 'This renewal has already been started as a CSR flow. To import an existing certificate with its private key, create a new External CA renewal and import before starting it. If this certificate was signed from the generated CSR, choose "Signed certificate for the generated CSR" instead and upload only certificate.pem and chain.pem.'
+        : 'This renewal is not waiting for a signed CSR certificate. Create or resume an External CA CSR renewal, then upload certificate.pem and chain.pem.')
+      .replace('key_mismatch', 'The private key does not match this certificate. Check that private-key.pem belongs to certificate.pem.')
+      .replace('identifier_mismatch', 'The certificate identifiers do not match this renewal. Check the hostname/SANs on certificate.pem.');
   }
 
   function switchTab(name) {
@@ -1544,10 +1593,12 @@
           <div>
             <div class="form-label">Device IP</div>
             <input type="text" id="issue-ip" placeholder="192.168.0.114" style="width:180px" />
+            <div class="help-text field-note">Use the IP address users enter in the browser/device URL.</div>
           </div>
           <div>
             <div class="form-label">Hostname (optional)</div>
             <input type="text" id="issue-hostname" placeholder="ucs303.local" style="width:180px" />
+            <div class="help-text field-note">Add this if users connect by DNS name instead of IP.</div>
           </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
@@ -1558,6 +1609,7 @@
               <option value="generic-rsa">Generic RSA</option>
               <option value="generic-ecdsa">Generic modern (ECDSA)</option>
             </select>
+            <div class="help-text field-note">Choose Extron/RSA for older devices; use modern ECDSA only when the device supports it.</div>
           </div>
           <button class="btn" style="padding:8px 18px" onclick="issueCert()">Issue Certificate</button>
         </div>

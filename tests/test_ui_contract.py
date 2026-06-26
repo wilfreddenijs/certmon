@@ -71,6 +71,19 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "certificate_id" in html
     assert "cert_pem" not in push_function
     assert "key_pem" not in push_function
+    assert "Choose the closest target" in html
+    assert "Used only server-side" in html
+    assert "Stored encrypted" in html
+    assert "For unsupported devices" in html
+    assert "separate private-key.pem download" in html
+
+
+def test_local_ca_ui_explains_device_certificate_fields():
+    html = page()
+
+    assert "Use the IP address users enter" in html
+    assert "Add this if users connect by DNS name" in html
+    assert "Choose Extron/RSA for older devices" in html
 
 
 def test_external_ca_import_form_submits_generated_and_existing_certificates():
@@ -87,6 +100,16 @@ def test_external_ca_import_form_submits_generated_and_existing_certificates():
         "external/${action}",
     ):
         assert required in html
+    assert "The device CertMon connects to" in html
+    assert "Names that must appear on the certificate" in html
+    assert "Use for public DNS names" in html
+    assert "Use for local IPs or internal names" in html
+    assert "Use when another CA signs the certificate" in html
+    assert "Choose compatibility first" in html
+    assert "CertMon shows a TXT record" in html
+    assert "Safe test mode" in html
+    assert "Creates a real trusted certificate" in html
+    assert "Used by the ACME provider" in html
     assert "Certificate file" in html
     assert "certificate.pem" in html
     assert "Do not use <code>full-chain.pem</code> here" in html
@@ -94,7 +117,29 @@ def test_external_ca_import_form_submits_generated_and_existing_certificates():
     assert "chain.pem" in html
     assert "Private key file" in html
     assert "private-key.pem" in html
+    assert "Leave empty for normal imports" in html
+    assert "Use this when a certificate was signed outside CertMon" in html
+    assert 'id="external-import-help-complete"' in html
+    assert 'id="external-import-help-existing"' in html
+    assert "Choose this when CertMon generated the CSR and private key" in html
+    assert "Choose this when you already have both the certificate and its matching private key" in html
+    assert "Leave empty unless the private key file itself is encrypted" in html
+    assert "external-import-help-complete').hidden = existing" in html
+    assert "external-import-help-existing').hidden = !existing" in html
+    assert "externalImportErrorMessage" in html
+    assert "already been started as a CSR flow" in html
+    assert "create a new External CA renewal and import before starting it" in html
+    assert "Signed certificate for the generated CSR" in html
     assert "Use the External CA import form" not in html
+
+
+def test_dark_ui_help_text_uses_readable_contrast():
+    html = page()
+
+    assert "--muted: #8fa6b2" in html
+    assert ".help-text" in html
+    assert ".choice-help" in html
+    assert "select option" in html
 
 
 def test_deployment_result_offers_private_key_download_without_storing_key_material():
