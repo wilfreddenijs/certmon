@@ -53,7 +53,7 @@ USAGE
   # Full pipeline: issue each cert via CertMon, then upload (CertMon running):
   py toolbelt_uploader.py --list devices.txt --issue --commit
 
-The .pem for an IP is taken from C:\\CertMon\\CA\\<ip_with_underscores>.pem
+The .pem for an IP is taken from %ProgramData%\\CertMon\\CA\\<ip_with_underscores>.pem
 (what CertMon's Local CA tab writes). Override with --pem for single-device mode.
 """
 
@@ -72,7 +72,9 @@ except ImportError:
     sys.exit(2)
 
 # ---------------------------------------------------------------------------
-CA_DIR = r"C:\CertMon\CA"
+# CA cert/key/.pem storage — %ProgramData%\CertMon\CA (matches app.py).
+# The old C:\CertMon\CA path is deprecated.
+CA_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "CertMon", "CA")
 TOOLBELT_EXE = r"C:\Program Files (x86)\Extron\Toolbelt\Toolbelt.exe"
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toolbelt_upload.log")
 
