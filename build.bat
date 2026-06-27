@@ -1,6 +1,6 @@
 @echo off
 echo Installing dependencies...
-pip install flask cryptography openpyxl pystray pillow pyinstaller
+pip install -r requirements.txt
 
 echo.
 echo Building CertMon.exe...

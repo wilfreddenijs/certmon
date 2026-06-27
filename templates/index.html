@@ -18,7 +18,7 @@
     --critical: #ff5252;
     --expired: #b0bec5;
     --text: #e8eaf6;
-    --muted: #546e7a;
+    --muted: #8fa6b2;
     --card-shadow: 0 4px 24px rgba(0,0,0,0.4);
   }
 
@@ -410,6 +410,19 @@
   .renewal-status.pending { background: rgba(255,171,0,0.12); color: var(--warning); }
   .renewal-status.ready { background: rgba(0,230,118,0.12); color: var(--ok); }
   .renewal-status.manual { background: rgba(84,110,122,0.12); color: var(--muted); }
+  .renewal-status.awaiting_dns, .renewal-status.awaiting_external_ca, .renewal-status.cleanup_required { background: rgba(255,171,0,0.12); color: var(--warning); }
+  .renewal-status.issued, .renewal-status.deployed { background: rgba(0,230,118,0.12); color: var(--ok); }
+  .renewal-status.failed, .renewal-status.cancelled { background: rgba(255,82,82,0.12); color: var(--critical); }
+
+  .wizard-choice {
+    display: block;
+    padding: 9px 10px;
+    margin: 6px 0;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 12px;
+    cursor: pointer;
+  }
 
   .command-block {
     background: var(--bg);
@@ -479,6 +492,25 @@
     display: block;
   }
 
+  .help-text {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .field-note {
+    margin-top: 6px;
+    margin-bottom: 6px;
+  }
+
+  .choice-help {
+    background: rgba(0,229,255,0.06);
+    border: 1px solid rgba(0,229,255,0.22);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 8px;
+  }
+
   select {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -489,6 +521,11 @@
     border-radius: 6px;
     width: 100%;
     outline: none;
+  }
+
+  select option {
+    background: var(--bg);
+    color: var(--text);
   }
 
   select:focus { border-color: var(--accent); }
@@ -736,19 +773,22 @@
             <div class="form-group">
               <label class="form-label">Device Type</label>
               <select id="ud-type" style="width:100%">
+                <option value="generic">Generic / Manual</option>
                 <option value="extron">Extron (UCS 303, etc.)</option>
                 <option value="homeassistant">Home Assistant</option>
                 <option value="synology">Synology NAS</option>
-                <option value="generic">Generic / Manual</option>
               </select>
+              <div class="help-text field-note">Choose the closest target. Generic/Manual shows downloadable files and instructions instead of an automatic push.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Username</label>
               <input type="text" id="ud-username" placeholder="admin" style="width:100%"/>
+              <div class="help-text field-note">Used only server-side when CertMon connects to the device.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Password</label>
               <input type="password" id="ud-password" placeholder="extron" style="width:100%"/>
+              <div class="help-text field-note">Stored encrypted. It is not sent back to the browser after saving.</div>
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn" style="flex:1" onclick="addUploadDevice()">+ Add Device</button>
@@ -760,29 +800,19 @@
           <div id="upload-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
         </div>
 
-        <!-- Right: cert upload + push -->
+        <!-- Right: certificate selection + push -->
         <div>
-          <div class="section-title" style="margin-bottom:12px">Certificate Files</div>
+          <div class="section-title" style="margin-bottom:12px">Stored Certificates</div>
 
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
             <div class="form-group">
-              <label class="form-label">Certificate (.crt / .pem)</label>
-              <div id="cert-drop" class="cert-drop-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event,'cert')">
-                <div id="cert-drop-label">Drag & drop or <label for="cert-file-input" style="color:var(--accent);cursor:pointer;text-decoration:underline">browse</label></div>
-                <input type="file" id="cert-file-input" accept=".crt,.pem,.cer" style="display:none" onchange="handleFileSelect(event,'cert')"/>
-                <div id="cert-filename" style="color:var(--ok);font-size:11px;margin-top:4px"></div>
+              <label class="form-label">Certificate</label>
+              <select id="push-certificate-select" style="width:100%">
+                <option value="">- select a stored certificate -</option>
+              </select>
+              <div class="help-text field-note">
+                CertMon deploys by certificate ID. Private keys stay on the server and never cross the browser boundary.
               </div>
-              <textarea id="cert-pem" class="pem-area" placeholder="Or paste certificate PEM here&#10;-----BEGIN CERTIFICATE-----&#10;..."></textarea>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Private Key (.key / .pem)</label>
-              <div id="key-drop" class="cert-drop-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event,'key')">
-                <div id="key-drop-label">Drag & drop or <label for="key-file-input" style="color:var(--accent);cursor:pointer;text-decoration:underline">browse</label></div>
-                <input type="file" id="key-file-input" accept=".key,.pem" style="display:none" onchange="handleFileSelect(event,'key')"/>
-                <div id="key-filename" style="color:var(--ok);font-size:11px;margin-top:4px"></div>
-              </div>
-              <textarea id="key-pem" class="pem-area" placeholder="Or paste private key PEM here&#10;-----BEGIN PRIVATE KEY-----&#10;..."></textarea>
             </div>
 
             <div class="form-group">
@@ -790,6 +820,7 @@
               <select id="push-device-select" style="width:100%">
                 <option value="">— select a device —</option>
               </select>
+              <div class="help-text field-note">For unsupported devices, CertMon gives manual install files: certificate.pem, chain.pem, full-chain.pem, and a separate private-key.pem download.</div>
             </div>
 
             <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">⬆ Push Certificate to Device</button>
@@ -799,8 +830,17 @@
           <div id="push-result" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
             <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:600;margin-bottom:10px" id="push-result-title"></div>
             <div id="push-log" style="font-size:11px;color:var(--muted);line-height:1.8;font-family:'JetBrains Mono',monospace"></div>
+            <div id="push-public-artifacts" style="display:none;margin-top:14px">
+              <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:6px">Public certificate downloads</div>
+              <div id="push-public-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            </div>
+            <div id="push-private-artifacts" style="display:none;margin-top:14px">
+              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">Private key download</div>
+              <div class="help-text" style="margin-bottom:8px">Keep this file secret. Download it only when a device requires manual certificate import.</div>
+              <div id="push-private-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            </div>
             <div id="push-instructions" style="display:none;margin-top:14px">
-              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required — follow these steps:</div>
+              <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required - follow these steps:</div>
               <pre id="push-instructions-text" style="font-size:11px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre>
             </div>
           </div>
@@ -813,24 +853,144 @@
 
 <!-- Renewal Modal -->
 <div class="modal-overlay" id="renewal-modal">
-  <div class="modal">
-    <div class="modal-title">⟳ Create Renewal</div>
-    <div id="modal-host-label" style="color:var(--muted);margin-bottom:16px;font-size:12px"></div>
-    <div class="form-group">
-      <label class="form-label">Method</label>
-      <select id="renewal-method">
-        <option value="certbot">Certbot (Let's Encrypt)</option>
-        <option value="acme.sh">acme.sh</option>
-        <option value="manual">Manual / Other CA</option>
-      </select>
-    </div>
-    <div class="form-group checkbox-row">
-      <input type="checkbox" id="staging-check" />
-      <label for="staging-check" style="font-size:12px">Use Let's Encrypt staging environment</label>
-    </div>
+  <div class="modal" style="width:680px;max-width:96vw;max-height:92vh;overflow:auto">
+    <div class="modal-title">⟳ Certificate Renewal Wizard</div>
+    <div id="renewal-wizard-status" style="color:var(--muted);margin-bottom:16px;font-size:12px">Step 1 of 4 · Endpoint and identifiers</div>
+
+    <section class="renewal-step" data-step="1">
+      <div style="display:grid;grid-template-columns:1fr 100px;gap:10px">
+        <div class="form-group">
+          <label class="form-label" for="renewal-endpoint-host">Endpoint host or IP</label>
+          <input id="renewal-endpoint-host" type="text" placeholder="192.168.1.20" style="width:100%" />
+          <div class="help-text field-note">The device CertMon connects to, for example a NAS, controller, or web service.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="renewal-endpoint-port">Port</label>
+          <input id="renewal-endpoint-port" type="number" value="443" style="width:100%" />
+          <div class="help-text field-note">Usually 443 for HTTPS.</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="renewal-identifiers">Certificate identifiers</label>
+        <textarea id="renewal-identifiers" rows="3" placeholder="device.example.com&#10;*.example.com" style="width:100%"></textarea>
+        <div class="help-text field-note">Names that must appear on the certificate. Use one DNS name or private IP per line. Public Let's Encrypt certificates require public DNS names.</div>
+      </div>
+    </section>
+
+    <section class="renewal-step" data-step="2" hidden>
+      <div class="form-label">Issuer</div>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="acme" checked onchange="updateRenewalOptions()" /> Let's Encrypt (public ACME)<span class="help-text" style="display:block;margin-top:4px">Use for public DNS names that should be trusted by browsers/devices without installing your own CA.</span></label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="local_ca" onchange="updateRenewalOptions()" /> CertMon Local CA<span class="help-text" style="display:block;margin-top:4px">Use for local IPs or internal names. Devices trust these only after the CertMon CA certificate is installed on clients.</span></label>
+      <label class="wizard-choice"><input type="radio" name="renewal-issuer" value="external_ca" onchange="updateRenewalOptions()" /> External CA or existing certificate<span class="help-text" style="display:block;margin-top:4px">Use when another CA signs the certificate, or when you want to import an existing certificate and key.</span></label>
+    </section>
+
+    <section class="renewal-step" data-step="3" hidden>
+      <div class="form-group">
+        <label class="form-label" for="renewal-profile">Certificate profile</label>
+        <select id="renewal-profile" style="width:100%">
+          <option value="extron-rsa">Extron compatible (RSA 2048)</option>
+          <option value="generic-rsa">Generic RSA 2048</option>
+          <option value="generic-ecdsa">Generic modern ECDSA P-256</option>
+        </select>
+        <div class="help-text field-note">Choose compatibility first. Extron/older devices often need RSA. Modern services can usually use ECDSA.</div>
+      </div>
+      <div id="acme-options">
+        <div class="form-label">DNS validation</div>
+        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="manual" checked /> Manual DNS<span class="help-text" style="display:block;margin-top:4px">CertMon shows a TXT record. You add it at your DNS provider, wait until it is visible, then continue.</span></label>
+        <label class="wizard-choice"><input type="radio" name="renewal-dns" value="cloudflare" /> Cloudflare automation<span class="help-text" style="display:block;margin-top:4px">CertMon creates and cleans up the TXT record through Cloudflare credentials stored server-side.</span></label>
+        <div class="form-label" style="margin-top:12px">Environment</div>
+        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="staging" checked /> Staging (test first)<span class="help-text" style="display:block;margin-top:4px">Safe test mode. The certificate is not trusted, but it proves DNS and renewal flow work without production rate-limit risk.</span></label>
+        <label class="wizard-choice"><input type="radio" name="renewal-environment" value="production" /> Production<span class="help-text" style="display:block;margin-top:4px">Creates a real trusted certificate. Available only after the same identifiers succeeded in staging.</span></label>
+        <div class="form-group" style="margin-top:12px">
+          <label class="form-label" for="renewal-email">ACME contact email</label>
+          <input id="renewal-email" type="email" placeholder="admin@example.com" style="width:100%" />
+          <div class="help-text field-note">Used by the ACME provider for important certificate/account notices.</div>
+        </div>
+        <label class="wizard-choice"><input id="renewal-tos" type="checkbox" /> I accept the ACME provider Terms of Service</label>
+        <div style="font-size:11px;color:var(--warning);margin-top:8px">Production is enabled only after this exact identifier set succeeds in staging.</div>
+      </div>
+      <div id="external-ca-controls" hidden>
+        <div class="help-text" style="font-size:12px;margin-bottom:10px">After creating the job, download its CSR or import an existing signed certificate and key.</div>
+        <div class="help-text">Use CSR mode when CertMon should create the private key. Use existing-certificate import when the certificate and private key already exist outside CertMon.</div>
+        <div class="form-label" style="margin-top:12px">External CA workflow</div>
+        <label class="wizard-choice"><input type="radio" name="external-ca-workflow" value="csr" checked /> Generate CSR with CertMon key<span class="help-text" style="display:block;margin-top:4px">CertMon creates and stores the private key. You download the CSR, get it signed by your CA, then import only the signed certificate and chain.</span></label>
+        <label class="wizard-choice"><input type="radio" name="external-ca-workflow" value="existing" /> Import existing certificate and private key<span class="help-text" style="display:block;margin-top:4px">Use this when the certificate and its matching private key already exist. CertMon keeps the new job in draft and opens the import form immediately.</span></label>
+      </div>
+    </section>
+
+    <section class="renewal-step" data-step="4" hidden>
+      <div class="form-label">Review</div>
+      <div id="renewal-review" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;line-height:1.8"></div>
+    </section>
+
+    <section id="renewal-action-panel" hidden>
+      <div id="renewal-action-message" style="font-size:12px;margin-bottom:12px"></div>
+      <button class="btn" data-action="verify" onclick="renewalAction('verify')">Verify and continue</button>
+      <button class="btn btn-ghost" data-action="download-csr">Download CSR</button>
+      <button class="btn btn-ghost" data-action="import-cert" onclick="openExternalImport(currentRenewalJobId)">Import signed certificate</button>
+      <button class="btn" data-action="retry-cleanup" onclick="renewalAction('retry-cleanup')">Retry cleanup</button>
+      <button class="btn" data-action="deploy" onclick="renewalAction('deploy')">Deploy now</button>
+      <button class="btn btn-danger" data-action="cancel" onclick="renewalAction('cancel')">Cancel renewal</button>
+    </section>
+
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="submitRenewal()">Create Renewal</button>
+      <button class="btn btn-ghost" id="renewal-back" onclick="renewalStep(-1)" hidden>Back</button>
+      <button class="btn" id="renewal-next" onclick="renewalStep(1)">Next</button>
+      <button class="btn" id="renewal-submit" onclick="submitRenewal()" hidden>Review and start</button>
+    </div>
+  </div>
+</div>
+
+<!-- External CA certificate import -->
+<div class="modal-overlay" id="external-import-modal">
+  <div class="modal" style="width:620px;max-width:96vw;max-height:92vh;overflow:auto">
+    <div class="modal-title">Import External CA certificate</div>
+    <div class="help-text" style="font-size:12px;margin-bottom:16px">Use this when a certificate was signed outside CertMon. Choose the import type based on where the private key was created.</div>
+    <div class="form-group">
+      <label class="form-label" for="external-import-mode">Import type</label>
+      <select id="external-import-mode" style="width:100%" onchange="updateExternalImportMode()">
+        <option value="complete">Signed certificate for the generated CSR</option>
+        <option value="existing">Existing certificate and private key</option>
+      </select>
+      <div id="external-import-help-complete" class="help-text choice-help">
+        Choose this when CertMon generated the CSR and private key. Upload the signed <code>certificate.pem</code> you received from the CA and optionally <code>chain.pem</code>. Do not upload a private key in this mode.
+      </div>
+      <div id="external-import-help-existing" class="help-text choice-help" hidden>
+        Choose this when you already have both the certificate and its matching private key, for example from another tool or a previous install. Upload <code>certificate.pem</code>, optional <code>chain.pem</code>, and <code>private-key.pem</code>.
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="external-certificate-file">Certificate file</label>
+      <div class="help-text field-note">Upload the device/server certificate, usually named <code>certificate.pem</code>. Do not use <code>full-chain.pem</code> here.</div>
+      <input id="external-certificate-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="external-chain-file">Intermediate/chain file (optional)</label>
+      <div class="help-text field-note">Upload <code>chain.pem</code> if you have it. Leave empty when your certificate file already includes the required chain.</div>
+      <input id="external-chain-file" type="file" accept=".pem,.crt,.cer,application/x-pem-file" style="width:100%" />
+    </div>
+    <div id="external-private-key-fields" hidden>
+      <div class="form-group">
+        <label class="form-label" for="external-private-key-file">Private key file</label>
+        <div class="help-text field-note">Upload the matching <code>private-key.pem</code> for this certificate.</div>
+        <input id="external-private-key-file" type="file" accept=".pem,.key,application/x-pem-file" style="width:100%" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="external-passphrase">Private key passphrase (optional)</label>
+        <div class="help-text field-note">Leave empty unless the private key file itself is encrypted and asks for a passphrase.</div>
+        <input id="external-passphrase" type="password" autocomplete="off" style="width:100%" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="external-trust-anchor">Trust anchor ID (optional)</label>
+      <div class="help-text field-note">Leave empty for normal imports. Use only when an administrator has imported a private CA/root certificate as a named trust anchor.</div>
+      <input id="external-trust-anchor" type="text" autocomplete="off" style="width:100%" />
+    </div>
+    <div id="external-import-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:8px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" type="button" onclick="closeExternalImport()">Cancel</button>
+      <button class="btn" id="external-import-submit" type="button" onclick="submitExternalImport()">Import certificate</button>
     </div>
   </div>
 </div>
@@ -838,7 +998,10 @@
 <script>
   let currentRenewalHost = null;
   let currentRenewalPort = null;
+  let currentRenewalStep = 1;
+  let currentRenewalJobId = null;
   let scanPollInterval = null;
+  const renewalActionResults = {};
 
   async function loadData() {
     const res = await fetch('/api/data');
@@ -848,9 +1011,13 @@
       const udRes = await fetch('/api/upload/devices');
       uploadDevices = await udRes.json();
     } catch (e) { /* keep existing uploadDevices */ }
+    let renewals = [];
+    try {
+      renewals = await (await fetch('/api/renewals')).json();
+    } catch (e) { /* show no renewal jobs */ }
     renderSidebar(data);
     renderCerts(data.certificates || {});
-    renderRenewals(data.renewals || []);
+    renderRenewals(renewals);
     updateStats(data.certificates || {});
   }
 
@@ -969,32 +1136,69 @@
   function renderRenewals(renewals) {
     const list = document.getElementById('renewal-list');
     if (!renewals.length) {
+      Object.keys(renewalActionResults).forEach(id => delete renewalActionResults[id]);
       list.innerHTML = `<div class="empty-state"><h3>No renewals yet</h3><p>Click "Renew" on a certificate card to create a renewal task.</p></div>`;
       return;
     }
+    const renewalIds = new Set(renewals.map(r => r.id));
+    Object.keys(renewalActionResults).forEach(id => {
+      if (!renewalIds.has(id)) delete renewalActionResults[id];
+    });
     list.innerHTML = renewals.slice().reverse().map(r => `
       <div class="renewal-card">
         <div class="renewal-header">
           <div>
-            <div class="renewal-host">${r.host}:${r.port}</div>
-            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.method} · ${r.staging ? 'staging' : 'production'} · ${new Date(r.created).toLocaleDateString()}</div>
+            <div class="renewal-host">${r.endpoint_host}:${r.endpoint_port}</div>
+            <div style="color:var(--muted);font-size:11px;margin-top:3px">${r.issuer_type} · ${r.profile}${r.environment ? ` · ${r.environment}` : ''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px">
-            <span class="renewal-status ${r.status}">${r.status}</span>
-            <button class="btn btn-danger" onclick="deleteRenewal(${r.id})">✕</button>
+            <span class="renewal-status ${r.state}">${r.state.replaceAll('_',' ')}</span>
           </div>
         </div>
-        ${r.command ? `
-          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run this command on your server:</div>
-          <div class="command-block" onclick="copyCommand(this, '${escapeHtml(r.command)}')">${r.command}</div>
-        ` : ''}
-        ${r.log && r.log.length ? `<div style="font-size:11px;color:var(--muted);margin-top:8px">${r.log.join('<br>')}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${(r.identifiers || []).join(', ')}</div>
+        ${renewalDnsRecords(r)}
+        ${renewalStateActions(r)}
+        ${renewalActionResultMarkup(r.id)}
       </div>
     `).join('');
   }
 
+  function renewalActionResultMarkup(id) {
+    const result = renewalActionResults[id] || { text: '', color: 'var(--muted)' };
+    return `<div id="renewal-action-result-${id}" style="font-size:12px;margin-top:10px;color:${result.color}">${escapeHtml(result.text)}</div>`;
+  }
+
+  function renewalDnsRecords(r) {
+    if (r.state !== 'awaiting_dns' || !(r.dns_records || []).length) return '';
+    return `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin:10px 0;font-size:12px">
+      <div style="font-weight:700;color:var(--accent);margin-bottom:8px">DNS TXT challenge</div>
+      ${(r.dns_records || []).map(record => `
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:8px;margin-bottom:6px">
+          <span style="color:var(--muted)">Type</span><code>TXT</code>
+          <span style="color:var(--muted)">Name</span><code>${record.fqdn}</code>
+          <span style="color:var(--muted)">Value</span><code style="word-break:break-all">${record.value}</code>
+        </div>
+      `).join('')}
+      <div style="color:var(--muted);font-size:11px;margin-top:8px">Create this TXT record at your DNS provider, wait for propagation, then click Verify and continue.</div>
+    </div>`;
+  }
+
+  function renewalStateActions(r) {
+    if (r.state === 'awaiting_dns') return `<button class="btn" onclick="resumeRenewal('${r.id}','verify')">Verify and continue</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
+    if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a> <button class="btn" onclick="resumeRenewal('${r.id}','import-cert')">Import signed certificate</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
+    if (r.state === 'cleanup_required') return `<button class="btn" onclick="resumeRenewal('${r.id}','retry-cleanup')">Retry cleanup</button>`;
+    if (r.state === 'issued') return `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'deployment_pending') return `<div style="color:var(--warning);font-size:12px;margin-bottom:8px">${r.error_message || 'Deployment did not finish yet or needs attention.'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'cancelled') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'draft' && r.issuer_type === 'external_ca' && r.metadata?.external_ca_workflow === 'existing') return `<button class="btn" onclick="openExternalImport('${r.id}','existing')">Import certificate</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'draft') return `<button class="btn" onclick="resumeRenewal('${r.id}','start')">Start renewal</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
+    return '';
+  }
+
   function escapeHtml(s) {
-    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   async function addHost() {
@@ -1068,7 +1272,15 @@
   function openModal(host, port) {
     currentRenewalHost = host;
     currentRenewalPort = port;
-    document.getElementById('modal-host-label').textContent = `${host}:${port}`;
+    currentRenewalStep = 1;
+    currentRenewalJobId = null;
+    document.getElementById('renewal-endpoint-host').value = host || '';
+    document.getElementById('renewal-endpoint-port').value = port || 443;
+    document.getElementById('renewal-identifiers').value = host && !/^\d+\.\d+\.\d+\.\d+$/.test(host) ? host : '';
+    document.getElementById('renewal-action-panel').hidden = true;
+    document.querySelectorAll('.renewal-step').forEach(step => step.hidden = Number(step.dataset.step) !== 1);
+    updateRenewalOptions();
+    updateRenewalNavigation();
     document.getElementById('renewal-modal').classList.add('open');
   }
 
@@ -1076,30 +1288,274 @@
     document.getElementById('renewal-modal').classList.remove('open');
   }
 
+  function renewalStep(delta) {
+    if (delta > 0 && currentRenewalStep === 1) {
+      const host = document.getElementById('renewal-endpoint-host').value.trim();
+      const identifiers = document.getElementById('renewal-identifiers').value.trim();
+      if (!host || !identifiers) { alert('Enter an endpoint and at least one certificate identifier.'); return; }
+    }
+    currentRenewalStep = Math.min(4, Math.max(1, currentRenewalStep + delta));
+    document.querySelectorAll('.renewal-step').forEach(step => step.hidden = Number(step.dataset.step) !== currentRenewalStep);
+    if (currentRenewalStep === 4) renderRenewalReview();
+    updateRenewalNavigation();
+  }
+
+  function updateRenewalNavigation() {
+    const labels = ['Endpoint and identifiers', 'Issuer', 'Profile and options', 'Review'];
+    document.getElementById('renewal-wizard-status').textContent = `Step ${currentRenewalStep} of 4 · ${labels[currentRenewalStep - 1]}`;
+    document.getElementById('renewal-back').hidden = currentRenewalStep === 1;
+    document.getElementById('renewal-next').hidden = currentRenewalStep === 4;
+    document.getElementById('renewal-submit').hidden = currentRenewalStep !== 4;
+    const draft = renewalDraft();
+    document.getElementById('renewal-submit').textContent =
+      draft.issuer_type === 'external_ca' && draft.external_ca_workflow === 'existing'
+        ? 'Create and import certificate'
+        : 'Review and start';
+  }
+
+  function selectedRenewalValue(name) {
+    return document.querySelector(`input[name="${name}"]:checked`)?.value;
+  }
+
+  function updateRenewalOptions() {
+    const issuer = selectedRenewalValue('renewal-issuer') || 'acme';
+    document.getElementById('acme-options').hidden = issuer !== 'acme';
+    document.getElementById('external-ca-controls').hidden = issuer !== 'external_ca';
+  }
+
+  function renewalDraft() {
+    const issuer = selectedRenewalValue('renewal-issuer');
+    return {
+      endpoint_host: document.getElementById('renewal-endpoint-host').value.trim(),
+      endpoint_port: Number(document.getElementById('renewal-endpoint-port').value) || 443,
+      identifiers: document.getElementById('renewal-identifiers').value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean),
+      issuer_type: issuer,
+      profile: document.getElementById('renewal-profile').value,
+      dns_provider: issuer === 'acme' ? selectedRenewalValue('renewal-dns') : null,
+      environment: issuer === 'acme' ? selectedRenewalValue('renewal-environment') : null,
+      external_ca_workflow: issuer === 'external_ca' ? selectedRenewalValue('external-ca-workflow') : null,
+      metadata: issuer === 'external_ca' ? { external_ca_workflow: selectedRenewalValue('external-ca-workflow') } : {}
+    };
+  }
+
+  function renderRenewalReview() {
+    const draft = renewalDraft();
+    document.getElementById('renewal-review').innerHTML = `
+      <b>Endpoint:</b> ${draft.endpoint_host}:${draft.endpoint_port}<br>
+      <b>Identifiers:</b> ${draft.identifiers.join(', ')}<br>
+      <b>Issuer:</b> ${draft.issuer_type}<br>
+      <b>Profile:</b> ${draft.profile}<br>
+      ${draft.environment ? `<b>Environment:</b> ${draft.environment}<br><b>DNS:</b> ${draft.dns_provider}` : ''}
+      ${draft.external_ca_workflow ? `<br><b>External CA workflow:</b> ${draft.external_ca_workflow === 'existing' ? 'Import existing certificate and private key' : 'Generate CSR with CertMon key'}` : ''}`;
+  }
+
   async function submitRenewal() {
-    const method = document.getElementById('renewal-method').value;
-    const staging = document.getElementById('staging-check').checked;
-    await fetch('/api/renew', {
+    const draft = renewalDraft();
+    const createResponse = await fetch('/api/renew', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: currentRenewalHost, port: currentRenewalPort, method, staging })
+      body: JSON.stringify(draft)
     });
-    closeModal();
-    switchTab('renewals');
+    const job = await createResponse.json();
+    if (!createResponse.ok) { alert(job.error || 'Could not create renewal'); return; }
+    currentRenewalJobId = job.id;
+    if (draft.issuer_type === 'external_ca' && draft.external_ca_workflow === 'existing') {
+      closeModal();
+      switchTab('renewals');
+      loadData();
+      openExternalImport(job.id, 'existing');
+      return;
+    }
+    const startBody = draft.issuer_type === 'acme' ? {
+      email: document.getElementById('renewal-email').value.trim(),
+      terms_of_service_agreed: document.getElementById('renewal-tos').checked
+    } : {};
+    const startResponse = await fetch(`/api/renewals/${job.id}/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(startBody)
+    });
+    const result = await startResponse.json();
+    if (!startResponse.ok) {
+      document.getElementById('renewal-action-panel').hidden = false;
+      document.getElementById('renewal-action-message').textContent = result.error === 'staging_required'
+        ? 'Production requires a successful staging certificate for these exact identifiers.'
+        : (result.error || 'Could not start renewal');
+      return;
+    }
+    closeModal(); switchTab('renewals'); loadData();
+  }
+
+  async function resumeRenewal(id, action) {
+    currentRenewalJobId = id;
+    if (action === 'import-cert') { openExternalImport(id); return; }
+    if (action === 'deploy') {
+      const detail = await (await fetch(`/api/renewals/${id}`)).json();
+      pendingDeployment = {
+        certificateId: detail.certificate_id || '',
+      };
+      switchTab('upload');
+      return;
+    }
+    const route = action === 'verify' ? 'manual-dns/continue' : action === 'retry-cleanup' ? 'retry-cleanup' : action;
+    const statusEl = document.getElementById(`renewal-action-result-${id}`);
+    if (statusEl) {
+      setRenewalActionResult(id, action === 'verify' ? 'Verifying DNS and continuing...' : 'Working...', 'var(--muted)');
+    }
+    const response = await fetch(`/api/renewals/${id}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'start' ? '{}' : undefined });
+    const text = await response.text();
+    let result = {};
+    try {
+      result = text ? JSON.parse(text) : {};
+    } catch (e) {
+      result = { error: friendlyResponseError(text, response.statusText) };
+    }
+    if (!response.ok) {
+      const message = result.error || friendlyResponseError(text, `Could not verify renewal (${response.status})`);
+      if (statusEl) {
+        setRenewalActionResult(id, message, 'var(--critical)');
+      } else {
+        alert(message);
+      }
+      return;
+    }
+    if (result.state === 'failed' || result.state === 'cleanup_required') {
+      const message = result.error_message || result.error_code || 'Renewal needs attention';
+      if (statusEl) {
+        setRenewalActionResult(id, message, result.state === 'failed' ? 'var(--critical)' : 'var(--warning)');
+      }
+    }
+    if (action === 'verify' && result.state === 'awaiting_dns' && result.visible === false) {
+      if (statusEl) {
+        setRenewalActionResult(id, dnsTxtMismatchMessage(result.dns_records || []), 'var(--warning)');
+      }
+      return;
+    }
+    delete renewalActionResults[id];
     loadData();
+  }
+
+  function setRenewalActionResult(id, text, color) {
+    renewalActionResults[id] = { text, color };
+    const statusEl = document.getElementById(`renewal-action-result-${id}`);
+    if (statusEl) {
+      statusEl.style.color = color;
+      statusEl.textContent = text;
+    }
+  }
+
+  function dnsTxtMismatchMessage(records) {
+    const expected = records.map(record => `${record.fqdn} = ${record.value}`).join('; ');
+    return expected
+      ? `DNS TXT record is not visible yet or does not match. Expected TXT: ${expected}`
+      : 'DNS TXT record is not visible yet or does not match. Check the challenge value at your DNS provider and try again.';
+  }
+
+  function friendlyResponseError(text, fallback) {
+    const clean = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!clean) return fallback || 'Request failed';
+    if (clean.toLowerCase().includes('internal server error')) return 'Server error while continuing the renewal. Check the DNS TXT record and try again, or restart CertMon if it persists.';
+    return clean;
   }
 
   async function deleteRenewal(id) {
-    await fetch(`/api/renewals/${id}`, { method: 'DELETE' });
+    if (!confirm('Delete this renewal entry from the list?')) return;
+    const response = await fetch(`/api/renewals/${id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const text = await response.text();
+      let result = {};
+      try {
+        result = text ? JSON.parse(text) : {};
+      } catch (e) {
+        result = { error: text || response.statusText };
+      }
+      alert(result.error || `Could not delete renewal (${response.status})`);
+      return;
+    }
     loadData();
   }
 
-  function copyCommand(el, cmd) {
-    navigator.clipboard.writeText(cmd).then(() => {
-      el.classList.add('copied');
-      const orig = el.innerHTML;
-      setTimeout(() => el.classList.remove('copied'), 1500);
+  async function renewalAction(action) {
+    if (!currentRenewalJobId) return;
+    await resumeRenewal(currentRenewalJobId, action);
+    closeModal();
+    if (action !== 'deploy') switchTab('renewals');
+  }
+
+  function openExternalImport(jobId, mode = 'complete') {
+    if (!jobId) return;
+    currentRenewalJobId = jobId;
+    document.getElementById('external-import-mode').value = mode;
+    ['external-certificate-file', 'external-chain-file', 'external-private-key-file'].forEach(id => {
+      document.getElementById(id).value = '';
     });
+    document.getElementById('external-passphrase').value = '';
+    document.getElementById('external-trust-anchor').value = '';
+    document.getElementById('external-import-error').textContent = '';
+    updateExternalImportMode();
+    document.getElementById('external-import-modal').classList.add('open');
+  }
+
+  function closeExternalImport() {
+    document.getElementById('external-import-modal').classList.remove('open');
+  }
+
+  function updateExternalImportMode() {
+    const existing = document.getElementById('external-import-mode').value === 'existing';
+    document.getElementById('external-private-key-fields').hidden = !existing;
+    document.getElementById('external-import-help-complete').hidden = existing;
+    document.getElementById('external-import-help-existing').hidden = !existing;
+  }
+
+  async function readPemFile(id, required) {
+    const file = document.getElementById(id).files[0];
+    if (!file) {
+      if (required) throw new Error('Select all required PEM files.');
+      return '';
+    }
+    return await file.text();
+  }
+
+  async function submitExternalImport() {
+    const errorEl = document.getElementById('external-import-error');
+    const submit = document.getElementById('external-import-submit');
+    const existing = document.getElementById('external-import-mode').value === 'existing';
+    errorEl.textContent = '';
+    submit.disabled = true;
+    try {
+      const body = {
+        certificate_pem: await readPemFile('external-certificate-file', true),
+        chain_pem: await readPemFile('external-chain-file', false),
+        trust_anchor_id: document.getElementById('external-trust-anchor').value.trim() || null
+      };
+      if (existing) {
+        body.private_key_pem = await readPemFile('external-private-key-file', true);
+        body.passphrase = document.getElementById('external-passphrase').value || null;
+      }
+      const action = existing ? 'import' : 'complete';
+      const response = await fetch(`/api/renewals/${currentRenewalJobId}/external/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Certificate import failed.');
+      closeExternalImport();
+      closeModal();
+      switchTab('renewals');
+      loadData();
+    } catch (error) {
+      errorEl.textContent = externalImportErrorMessage(error.message, existing);
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  function externalImportErrorMessage(message, existing) {
+    return String(message || 'Certificate import failed.')
+      .replace('Job must be in draft state', existing
+        ? 'This renewal has already been started as a CSR flow. To import an existing certificate with its private key, create a new External CA renewal and import before starting it. If this certificate was signed from the generated CSR, choose "Signed certificate for the generated CSR" instead and upload only certificate.pem and chain.pem.'
+        : 'This renewal is not waiting for a signed CSR certificate. Create or resume an External CA CSR renewal, then upload certificate.pem and chain.pem.')
+      .replace('key_mismatch', 'The private key does not match this certificate. Check that private-key.pem belongs to certificate.pem.')
+      .replace('identifier_mismatch', 'The certificate identifiers do not match this renewal. Check the hostname/SANs on certificate.pem.');
   }
 
   function switchTab(name) {
@@ -1109,7 +1565,10 @@
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${name}`).classList.add('active');
     if (name === 'ca') loadCA();
-    if (name === 'upload') loadUploadDevices();
+    if (name === 'upload') {
+      loadUploadDevices();
+      loadAvailableCertificates();
+    }
   }
 
 
@@ -1154,23 +1613,27 @@
           <div>
             <div class="form-label">Device IP</div>
             <input type="text" id="issue-ip" placeholder="192.168.0.114" style="width:180px" />
+            <div class="help-text field-note">Use the IP address users enter in the browser/device URL.</div>
           </div>
           <div>
             <div class="form-label">Hostname (optional)</div>
             <input type="text" id="issue-hostname" placeholder="ucs303.local" style="width:180px" />
+            <div class="help-text field-note">Add this if users connect by DNS name instead of IP.</div>
           </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
           <div>
-            <div class="form-label">Key passphrase (optional — leave blank for Toolbelt .pem)</div>
-            <input type="text" id="issue-passphrase" placeholder="leave blank = unencrypted key" style="width:280px" />
+            <div class="form-label">Certificate profile</div>
+            <select id="issue-profile" style="width:220px">
+              <option value="extron-rsa">Extron compatible (RSA)</option>
+              <option value="generic-rsa">Generic RSA</option>
+              <option value="generic-ecdsa">Generic modern (ECDSA)</option>
+            </select>
+            <div class="help-text field-note">Extron certificates are legacy/Toolbelt-friendly RSA certs and include an extra combined PEM download for Extron upload. Generic certificates use the normal separate certificate/chain/private-key files.</div>
           </div>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding-bottom:9px;cursor:pointer">
-            <input type="checkbox" id="issue-genpass" onchange="const p=document.getElementById('issue-passphrase'); if(this.checked){p.value='';p.placeholder='will be generated…';p.disabled=true}else{p.placeholder='leave blank = unencrypted key';p.disabled=false}" />
-            generate one for me
-          </label>
           <button class="btn" style="padding:8px 18px" onclick="issueCert()">Issue Certificate</button>
         </div>
+        <div style="color:var(--muted);font-size:11px;margin-top:10px">Private keys remain encrypted on the CertMon server and are not sent to the browser.</div>
         <div id="issue-result" style="margin-top:14px;font-size:12px"></div>
       </div>` : '';
 
@@ -1180,6 +1643,7 @@
           <div class="section-title" style="margin-bottom:0">Issued Device Certificates (${issued.length})</div>
           <a href="/api/ca/devices-txt" download="devices.txt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" title="Download IPs of all devices with a .pem — feed to toolbelt_uploader.py --list">⬇ devices.txt</button></a>
         </div>
+        <div class="help-text choice-help" style="margin-bottom:14px">Extron profile certificates show an extra <b>PEM (Extron)</b> download. That file contains both certificate and private key for Extron Toolbelt, so keep it secret. Generic certificates should normally use the separate cert/key files from Upload/manual install.</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           ${issued.map(c => `
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
@@ -1188,11 +1652,10 @@
                 <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${c.days_remaining} days</div>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                ${c.pem_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.pem')}" download="${c.filename.replace('.crt','.pem')}"><button class="btn" style="font-size:11px;padding:5px 10px" title="Combined cert+key for Extron Toolbelt (Utilities tab)">⬇ PEM (Extron)</button></a>` : ''}
-                <a href="/api/ca/download/${c.filename}" download="${c.filename}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
-                ${c.key_path ? `<a href="/api/ca/download/${c.filename.replace('.crt','.key')}" download="${c.filename.replace('.crt','.key')}"><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Key</button></a>` : ''}
+                <a href="/api/ca/download/${c.certificate_id}" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
+                ${c.profile === 'extron-rsa' ? `<a href="/api/certificates/${c.certificate_id}/private/combined.pem" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
-                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this device's cert/key/pem" onclick="deleteIssued('${c.filename}','${c.cn}')">✕</button>
+                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
               </div>
             </div>`).join('')}
         </div>
@@ -1207,7 +1670,7 @@
     const res = await fetch('/api/ca/generate', {method:'POST'});
     const data = await res.json();
     if (data.ok) {
-      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">✓ CA created at ${data.ca_dir}</span>`;
+      document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--ok)">✓ CA created in encrypted server storage</span>`;
       setTimeout(loadCA, 800);
     } else {
       document.getElementById('ca-generate-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
@@ -1229,21 +1692,12 @@
     const ip = document.getElementById('issue-ip').value.trim();
     const hostname = document.getElementById('issue-hostname').value.trim();
     if (!ip && !hostname) { alert('Enter an IP or hostname'); return; }
-    const passphrase = document.getElementById('issue-passphrase').value;
-    const generate_passphrase = document.getElementById('issue-genpass').checked;
+    const profile = document.getElementById('issue-profile').value;
     document.getElementById('issue-result').textContent = 'Issuing certificate...';
-    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname, passphrase, generate_passphrase})});
+    const res = await fetch('/api/ca/issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip, hostname, profile})});
     const data = await res.json();
     if (data.ok) {
-      let passLine = '';
-      if (data.encrypted && data.passphrase) {
-        // Generated — show in a persistent modal so the list refresh can't wipe it
-        showPassphraseModal(data.cn, data.passphrase);
-        passLine = `<br><span style="color:var(--warning)">🔑 Encrypted key — passphrase shown in the popup (save it).</span>`;
-      } else if (data.encrypted) {
-        passLine = `<br><span style="color:var(--warning)">🔑 Key encrypted with the passphrase you entered.</span>`;
-      }
-      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Extron PEM: ${data.pem_path || data.cert_path}</span>${passLine}`;
+      document.getElementById('issue-result').innerHTML = `<span style="color:var(--ok)">✓ Certificate issued for ${data.cn} · expires ${new Date(data.not_after).toLocaleDateString()}</span><br><span style="color:var(--muted)">Stored securely as ${data.certificate_id}</span>`;
       setTimeout(loadCA, 500);
     } else {
       document.getElementById('issue-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error}</span>`;
@@ -1254,7 +1708,6 @@
     const overlay = document.createElement('div');
     overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
     overlay.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:480px;max-width:95vw">
-      <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:8px">🔑 Key Passphrase</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:16px">The private key for <b style="color:var(--text)">${cn}</b> was encrypted. Enter this passphrase in Extron Toolbelt — and save it now, it won't be shown again.</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
         <code style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:14px;color:var(--accent);word-break:break-all">${passphrase}</code>
@@ -1268,9 +1721,9 @@
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   }
 
-  async function deleteIssued(filename, cn) {
-    if (!confirm(`Delete the certificate for ${cn}?\nThis removes its .crt / .key / .pem from the CA folder (the device keeps any cert already installed).`)) return;
-    await fetch('/api/ca/issued/' + encodeURIComponent(filename), { method: 'DELETE' });
+  async function deleteIssued(certificateId, cn) {
+    if (!confirm(`Delete the stored certificate for ${cn}?\nThe device keeps any certificate already installed.`)) return;
+    await fetch('/api/ca/issued/' + encodeURIComponent(certificateId), { method: 'DELETE' });
     loadCA();
   }
 
@@ -1315,7 +1768,9 @@
   // ── Upload Tab ──────────────────────────────────────────────────────────────
 
   let uploadDevices = [];
+  let availableCertificates = [];
   let selectedDeviceId = null;
+  let pendingDeployment = null;
 
   // Escape a string for safe use inside a single-quoted HTML attribute
   function escAttr(s) {
@@ -1369,7 +1824,7 @@
 
   // Called from the "⬆ Upload / Push" button on a cert card.
   // If a device is already saved for this host, skip the add-device form and
-  // jump straight to the cert-file drop area with that device pre-selected.
+  // jump straight to the certificate/device selectors with that device pre-selected.
   // Otherwise prefill the add-device form.
   async function sendToUpload(host, port, cn) {
     switchTab('upload');
@@ -1381,7 +1836,7 @@
       selectDevice(existing.id);
       const pushCard = document.getElementById('push-btn').closest('div[style*="border-radius:10px"]');
       flashCard(pushCard);
-      document.getElementById('cert-pem').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('push-certificate-select').scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
@@ -1393,10 +1848,11 @@
     document.getElementById('ud-host').value = host;
     document.getElementById('ud-port').value = isHttps ? port : 80;
     document.getElementById('ud-https').checked = isHttps;
-    document.getElementById('ud-type').value = guessDeviceType(cn || host);
+    const guessedType = guessDeviceType(cn || host);
+    document.getElementById('ud-type').value = guessedType === 'extron' ? 'extron' : 'generic';
 
     // Prefill Extron default password as a convenience
-    if (guessDeviceType(cn || host) === 'extron' && !document.getElementById('ud-password').value) {
+    if (guessedType === 'extron' && !document.getElementById('ud-password').value) {
       document.getElementById('ud-password').value = 'extron';
     }
 
@@ -1409,6 +1865,14 @@
     uploadDevices = await res.json();
     renderUploadDevices();
     renderDeviceSelect();
+    applyPendingDeployment();
+  }
+
+  async function loadAvailableCertificates() {
+    const res = await fetch('/api/certificates');
+    availableCertificates = await res.json();
+    renderCertificateSelect();
+    applyPendingDeployment();
   }
 
   function renderUploadDevices() {
@@ -1434,6 +1898,28 @@
     const cur = sel.value;
     sel.innerHTML = '<option value="">— select a device —</option>' +
       uploadDevices.map(d => `<option value="${d.id}"${d.id === cur ? ' selected' : ''}>${d.name} (${d.host})</option>`).join('');
+  }
+
+  function renderCertificateSelect() {
+    const sel = document.getElementById('push-certificate-select');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— select a stored certificate —</option>' +
+      availableCertificates.map(c => {
+        const label = `${(c.identifiers || [c.certificate_id])[0]} · ${c.issuer_type} · ${c.certificate_id}`;
+        return `<option value="${c.certificate_id}"${c.certificate_id === cur ? ' selected' : ''}>${label}</option>`;
+      }).join('');
+  }
+
+  function applyPendingDeployment() {
+    if (!pendingDeployment) return;
+    if (pendingDeployment.deviceId) {
+      selectedDeviceId = pendingDeployment.deviceId;
+      document.getElementById('push-device-select').value = pendingDeployment.deviceId;
+      renderUploadDevices();
+    }
+    if (pendingDeployment.certificateId && document.getElementById('push-certificate-select')) {
+      document.getElementById('push-certificate-select').value = pendingDeployment.certificateId;
+    }
   }
 
   function selectDevice(id) {
@@ -1498,34 +1984,11 @@
     el.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
   }
 
-  function handleDrop(event, type) {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (file) readPemFile(file, type);
-    event.currentTarget.classList.remove('dragover');
-  }
-
-  function handleFileSelect(event, type) {
-    const file = event.target.files[0];
-    if (file) readPemFile(file, type);
-  }
-
-  function readPemFile(file, type) {
-    const reader = new FileReader();
-    reader.onload = e => {
-      document.getElementById(`${type}-pem`).value = e.target.result;
-      document.getElementById(`${type}-filename`).textContent = '✓ ' + file.name;
-    };
-    reader.readAsText(file);
-  }
-
   async function pushCert() {
-    const cert_pem = document.getElementById('cert-pem').value.trim();
-    const key_pem = document.getElementById('key-pem').value.trim();
+    const certificate_id = document.getElementById('push-certificate-select').value;
     const device_id = document.getElementById('push-device-select').value;
 
-    if (!cert_pem) { alert('Please provide a certificate (drag & drop or paste)'); return; }
-    if (!key_pem) { alert('Please provide a private key (drag & drop or paste)'); return; }
+    if (!certificate_id) { alert('Please select a stored certificate'); return; }
     if (!device_id) { alert('Please select a target device'); return; }
 
     const btn = document.getElementById('push-btn');
@@ -1535,7 +1998,10 @@
     const res = await fetch('/api/upload/push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_id, cert_pem, key_pem })
+      body: JSON.stringify({
+        device_id,
+        certificate_id,
+      })
     });
     const data = await res.json();
 
@@ -1545,13 +2011,38 @@
     const resultDiv = document.getElementById('push-result');
     const titleEl = document.getElementById('push-result-title');
     const logEl = document.getElementById('push-log');
+    const publicArtifactsDiv = document.getElementById('push-public-artifacts');
+    const publicArtifactsEl = document.getElementById('push-public-artifact-links');
+    const privateArtifactsDiv = document.getElementById('push-private-artifacts');
+    const privateArtifactsEl = document.getElementById('push-private-artifact-links');
     const instrDiv = document.getElementById('push-instructions');
     const instrText = document.getElementById('push-instructions-text');
 
     resultDiv.style.display = 'block';
     titleEl.style.color = data.ok ? 'var(--ok)' : 'var(--warning)';
-    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Automatic push did not succeed';
+    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Deployment needs attention';
     logEl.innerHTML = (data.log || []).map(l => `<div>${l}</div>`).join('');
+
+    const publicArtifacts = data.public_artifacts || {};
+    const publicEntries = Object.entries(publicArtifacts);
+    if (publicEntries.length) {
+      publicArtifactsDiv.style.display = 'block';
+      publicArtifactsEl.innerHTML = publicEntries.map(([name, url]) =>
+        `<a class="btn btn-ghost" href="${url}" download style="font-size:11px;padding:6px 10px">${name}</a>`
+      ).join('');
+    } else {
+      publicArtifactsDiv.style.display = 'none';
+      publicArtifactsEl.innerHTML = '';
+    }
+
+    if (data.instructions && certificate_id) {
+      privateArtifactsDiv.style.display = 'block';
+      privateArtifactsEl.innerHTML =
+        `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
+    } else {
+      privateArtifactsDiv.style.display = 'none';
+      privateArtifactsEl.innerHTML = '';
+    }
 
     if (data.instructions) {
       instrDiv.style.display = 'block';
@@ -1560,18 +2051,19 @@
       instrDiv.style.display = 'none';
     }
 
+    if (data.ok) {
+      pendingDeployment = null;
+      loadData();
+    } else if (data.job && data.job.certificate_id) {
+      pendingDeployment = {
+        certificateId: data.job.certificate_id,
+        deviceId,
+      };
+      loadData();
+    }
+
     resultDiv.scrollIntoView({ behavior: 'smooth' });
   }
-
-  // Drag highlight
-  document.addEventListener('DOMContentLoaded', () => {
-    ['cert-drop','key-drop'].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('dragover', () => el.classList.add('dragover'));
-      el.addEventListener('dragleave', () => el.classList.remove('dragover'));
-    });
-  });
 
   // Initial load + auto-refresh every 60s
   loadData();

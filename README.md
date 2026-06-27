@@ -1,36 +1,74 @@
-# CertMon — TLS Certificate Monitor
+# CertMon
 
-Scans your local network for devices with TLS certificates and monitors expiry dates.
-Generates ACME renewal commands for expiring certificates.
+CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certificates, and deploys stored certificates to supported devices such as Extron products.
 
-## Download standalone EXE (no Python needed)
+## Security Status
 
-1. Go to the **Actions** tab on GitHub
-2. Click the latest **Build CertMon Windows EXE** run
-3. Download **CertMon-Windows** artifact
-4. Extract and run `CertMon.exe` — browser opens automatically
+This release is still single-user software and has no application authentication. Run it on `127.0.0.1` only. Do not bind it to a LAN interface or place it behind a shared reverse proxy until Phase 2 authentication and roles are implemented.
 
-## Or build locally
+Certificate private keys, ACME account keys, device credentials, and Cloudflare tokens are encrypted at rest. Manual private-key export is intentionally separate, permission checked, and audited. Exported keys must be handled as secrets.
+
+## Issuer Workflows
+
+- **Let's Encrypt / ACME:** Public DNS names using DNS-01. Manual DNS and Cloudflare automation are supported. The exact normalized identifier set must succeed against Let's Encrypt staging before production is enabled.
+- **CertMon Local CA:** Offline issuance for private IP addresses and internal DNS names. Install the public CertMon CA certificate on operator computers. Never distribute the CA private key.
+- **External CA:** Generate a CSR, pause the job, obtain a signed certificate from an enterprise or public CA, then resume by importing the validated chain. Existing certificate/key pairs can also be imported after cryptographic validation.
+
+For Cloudflare automation, create an API token limited to `Zone:DNS:Edit` and `Zone:Zone:Read` for only the zones CertMon manages. Do not use the Global API Key.
+
+## Data Directory
+
+Set `CERTMON_DATA_DIR` to choose the server data location:
+
+```powershell
+$env:CERTMON_DATA_DIR = 'C:\CertMon\Data'
+python launcher.py
+```
+
+Development defaults to `data` beside the source. The packaged Windows build defaults to `%PROGRAMDATA%\CertMon`.
+
+## Recovery And Backup
+
+Create and securely store a vault recovery package and its passphrase separately. The package can restore the installation master key after service-account migration; possession of both package and passphrase grants access to all encrypted CertMon secrets.
+
+`BackupService` creates a consistent SQLite online backup plus encrypted certificate artifacts and vault files. Its manifest is hash checked, HMAC authenticated, tied to a backup ID, and bound to the recovery package. Restore always writes to a new directory and verifies it completely. Stop CertMon and perform the final directory swap manually after verification.
+
+When moving CertMon to another Windows service account:
+
+1. Restore the backup into a new directory.
+2. Restore the vault master key with the recovery package and passphrase.
+3. Rewrap the master key using DPAPI under the new service account.
+4. Verify representative certificates and keys before switching `CERTMON_DATA_DIR`.
+
+## Run From Source
+
+```powershell
+pip install -r requirements.txt
+python launcher.py
+```
+
+## Build Windows EXE
 
 ```powershell
 build.bat
 ```
 
-## Run from source
+The build installs `requirements.txt`, runs PyInstaller, and writes `dist\CertMon.exe`.
 
-```bash
-pip install -r requirements.txt
-python launcher.py
+## Optional ACME Staging Integration Test
+
+The integration test never uses production. Configure a disposable test domain and provider credentials, then set:
+
+```powershell
+$env:CERTMON_ACME_STAGING_TEST = '1'
+$env:CERTMON_ACME_TEST_DOMAIN = 'certmon-test.example.com'
+$env:CERTMON_CLOUDFLARE_TOKEN = 'scoped-token'
+$env:CERTMON_CLOUDFLARE_ZONES = 'example.com'
+pytest -m acme_staging -v
 ```
 
-## Features
+The normal offline suite excludes this test:
 
-- **Network scan**: CIDR range scan, finds all devices with TLS
-- **Manual hosts**: add specific hostnames/IPs with custom ports
-- **Self-signed vs CA detection**: badge on every certificate card
-- **Dashboard**: color-coded status (OK / Warning / Critical / Expired)
-- **Renewals**: generates certbot or acme.sh commands
-- **Excel export**: formatted .xlsx with all certificates and renewals
-- **System tray**: runs in background, right-click to quit
-- **Auto browser launch**: opens automatically on startup
-- **Persistent**: data saved to certmon_data.json next to the .exe
+```powershell
+pytest -m "not acme_staging" -v
+```
