@@ -190,8 +190,7 @@ class ToolbeltBatchService:
             list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
             credential_file.write_text(json.dumps(credentials), encoding="utf-8")
             command = [
-                sys.executable,
-                str(self.script_path),
+                *self._uploader_entrypoint(),
                 "--list",
                 str(list_file),
                 "--jsonl",
@@ -233,6 +232,11 @@ class ToolbeltBatchService:
         code = process.wait()
         if code:
             raise RuntimeError(f"Toolbelt uploader exited with code {code}")
+
+    def _uploader_entrypoint(self):
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--toolbelt-uploader"]
+        return [sys.executable, str(self.script_path)]
 
     def _handle_event(self, run):
         def handle(event):

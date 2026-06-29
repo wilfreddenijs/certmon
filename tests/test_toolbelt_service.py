@@ -132,3 +132,22 @@ def test_toolbelt_service_credentials_are_encrypted_and_not_returned(tmp_path):
     payload = json.dumps(devices)
     assert '"password"' not in payload
     assert "admin" not in payload
+
+
+def test_toolbelt_service_uses_child_mode_when_frozen(tmp_path, monkeypatch):
+    database = FakeDatabase()
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: None,
+    )
+
+    monkeypatch.setattr("certmon.toolbelt.sys.frozen", True, raising=False)
+    monkeypatch.setattr("certmon.toolbelt.sys.executable", r"C:\CertMon\CertMon.exe")
+
+    assert service._uploader_entrypoint() == [
+        r"C:\CertMon\CertMon.exe",
+        "--toolbelt-uploader",
+    ]
