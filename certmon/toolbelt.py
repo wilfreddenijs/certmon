@@ -204,13 +204,26 @@ class ToolbeltBatchService:
             self.runner(command, self._handle_event(run))
             self._finish(run, "stopped" if run.requested_stop else "complete")
         except Exception as exc:
-            run.error = str(exc)
-            self._record_event(run, {"event": "run_failed", "message": str(exc)})
+            message = self._friendly_error(str(exc))
+            run.error = message
+            self._record_event(run, {"event": "run_failed", "message": message})
+            failed_event = "upload_failed" if run.mode == "upload" else "dry_run_failed"
+            for row in targets:
+                self._record_device_event(
+                    run,
+                    {
+                        "event": failed_event,
+                        "selector": row["selector"],
+                        "certificate_id": row["certificate_id"],
+                        "message": message,
+                    },
+                )
             self._finish(run, "failed")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _run_subprocess(self, command, on_event):
+        output_tail = []
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -228,15 +241,41 @@ class ToolbeltBatchService:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 event = {"event": "log", "message": line}
+                output_tail.append(line)
+                output_tail = output_tail[-8:]
             on_event(event)
         code = process.wait()
         if code:
+            detail = "\n".join(output_tail).strip()
+            if detail:
+                raise RuntimeError(detail)
             raise RuntimeError(f"Toolbelt uploader exited with code {code}")
 
     def _uploader_entrypoint(self):
         if getattr(sys, "frozen", False):
             return [sys.executable, "--toolbelt-uploader"]
         return [sys.executable, str(self.script_path)]
+
+    @staticmethod
+    def _friendly_error(message):
+        text = message or "Toolbelt uploader failed"
+        lower = text.lower()
+        if "not installed" in lower or "not running" in lower:
+            return (
+                "Extron Toolbelt is not installed or not running. Install/open "
+                "Toolbelt, wait until the device list is visible, then retry dry-run."
+            )
+        if "cannot be automated" in lower or "administrator" in lower or "elevated" in lower:
+            return (
+                "Toolbelt is running at a different privilege level. Run CertMon "
+                "and Toolbelt both as Administrator, or both normally, then retry."
+            )
+        if "pywinauto is required" in lower:
+            return (
+                "Toolbelt automation support is missing from this build "
+                "(pywinauto/comtypes). Install dependencies or use a newer build."
+            )
+        return text
 
     def _handle_event(self, run):
         def handle(event):

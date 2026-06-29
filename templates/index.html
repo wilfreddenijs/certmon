@@ -2011,9 +2011,10 @@
     const run = await res.json();
     const status = document.getElementById('toolbelt-run-status');
     const done = Object.values(run.devices || {}).filter(d => d.ok).length;
-    const failed = Object.values(run.devices || {}).filter(d => !d.ok).length;
+    const failed = Object.values(run.devices || {}).filter(d => d.event && d.event !== 'device_pending' && !d.ok).length;
     status.style.color = run.status === 'failed' ? 'var(--warning)' : 'var(--muted)';
-    status.textContent = `Run ${run.mode}: ${run.status}. Current: ${run.current_device || '-'} · OK ${done} · attention ${failed}`;
+    const errorText = run.error ? ` — ${run.error}` : '';
+    status.textContent = `Run ${run.mode}: ${run.status}. Current: ${run.current_device || '-'} · OK ${done} · attention ${failed}${errorText}`;
     if (run.status === 'running') {
       clearTimeout(toolbeltPollTimer);
       toolbeltPollTimer = setTimeout(pollToolbeltRun, 1500);

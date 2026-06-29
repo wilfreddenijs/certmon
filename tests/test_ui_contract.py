@@ -189,6 +189,9 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "/api/toolbelt/upload" in html
     assert "Stop after current device" in html
     assert "tries admin/extron; save custom credentials if the device uses serial number" in html
+    assert "run.error" in html
+    assert "errorText" in html
+    assert "d.event !== 'device_pending'" in html
 
 
 def test_renewal_resume_actions_surface_errors_inline():

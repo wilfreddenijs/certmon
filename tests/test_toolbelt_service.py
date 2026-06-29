@@ -151,3 +151,30 @@ def test_toolbelt_service_uses_child_mode_when_frozen(tmp_path, monkeypatch):
         r"C:\CertMon\CertMon.exe",
         "--toolbelt-uploader",
     ]
+
+
+def test_toolbelt_service_marks_devices_failed_when_runner_fails(tmp_path):
+    database = FakeDatabase()
+
+    def runner(command, on_event):
+        raise RuntimeError("Extron Toolbelt is not installed and not running")
+
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=runner,
+    )
+
+    run = service.start(mode="dry-run", selectors=["192.168.0.10"])
+    run_id = run["id"]
+
+    wait_until(lambda: service.get_run(run_id)["status"] == "failed")
+    failed = service.get_run(run_id)
+
+    assert "Toolbelt is not installed or not running" in failed["error"]
+    assert failed["devices"]["192.168.0.10"]["event"] == "dry_run_failed"
+    assert failed["devices"]["192.168.0.10"]["ok"] is False
+    latest = database.get_setting(STATUS_KEY)
+    assert latest["192.168.0.10|cert-1|dry-run"]["event"] == "dry_run_failed"
