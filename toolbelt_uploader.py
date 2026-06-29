@@ -63,6 +63,7 @@ import time
 import ctypes
 import argparse
 import logging
+import json
 
 try:
     from pywinauto import Application, Desktop
@@ -128,6 +129,16 @@ T_APPLY = 120      # apply + reboot to report success
 POLL = 0.5
 
 log = logging.getLogger("tb")
+_JSONL = False
+
+
+def emit(event, **fields):
+    if not _JSONL:
+        return
+    payload = {"event": event, **fields}
+    for key in ("password", "private_key", "private_key_pem"):
+        payload.pop(key, None)
+    print(json.dumps(payload, sort_keys=True), flush=True)
 
 
 def setup_logging():
@@ -254,6 +265,7 @@ def cy(rect):
 
 
 _DEVICE_PASSWORD = None  # optional override; set from --device-password
+_DEVICE_CREDENTIALS = {}
 
 
 def _credentials_modal_present(win):
@@ -278,7 +290,28 @@ def accept_credentials_prompt(win, ip, timeout=8):
         return False  # device already authenticated this session
 
     # Optionally override the prefilled password.
+    credential = _DEVICE_CREDENTIALS.get(ip) or {}
+    candidates = []
     if _DEVICE_PASSWORD:
+        candidates.append(_DEVICE_PASSWORD)
+    if credential.get("password"):
+        candidates.append(credential["password"])
+    candidates.extend(credential.get("password_candidates") or [])
+    candidate_password = next(
+        (
+            candidate
+            for candidate in candidates
+            if candidate and candidate not in {"__SERIAL__", "__PREFILLED__"}
+        ),
+        None,
+    )
+    if "__SERIAL__" in candidates and not credential.get("serial"):
+        emit(
+            "serial_column_missing",
+            selector=ip,
+            message="Serial-number password fallback needs the serial number from Toolbelt",
+        )
+    if candidate_password:
         try:
             import pywinauto.mouse as mouse
             plabel = next(c.rectangle() for c in win.descendants(control_type="Text")
@@ -286,7 +319,7 @@ def accept_credentials_prompt(win, ip, timeout=8):
             mouse.click(coords=(plabel.left + 40, plabel.bottom + 18))
             time.sleep(0.2)
             win.type_keys("^a{BACKSPACE}", set_foreground=True)
-            win.type_keys(_DEVICE_PASSWORD, with_spaces=True, set_foreground=True)
+            win.type_keys(candidate_password, with_spaces=True, set_foreground=True)
         except Exception:
             pass
 
@@ -298,6 +331,7 @@ def accept_credentials_prompt(win, ip, timeout=8):
     time.sleep(2.5)
 
     if _credentials_modal_present(win):
+        emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
         raise RuntimeError(
             "credentials rejected for %s — the prefilled password is wrong. "
             "Authenticate it once in Toolbelt (new units: password = serial "
@@ -710,10 +744,20 @@ def main():
     ap.add_argument("--device-password", default=None,
                     help="device admin password for the credentials prompt "
                          "(default: accept Toolbelt's prefilled value)")
+    ap.add_argument("--device-password-file", default=None,
+                    help="JSON credential file keyed by device selector; avoids secrets on the command line")
+    ap.add_argument("--jsonl", action="store_true",
+                    help="emit machine-readable JSONL progress events to stdout")
+    ap.add_argument("--stop-file", default=None,
+                    help="if this file appears, stop safely before starting the next device")
     args = ap.parse_args()
 
-    global _DEVICE_PASSWORD
+    global _DEVICE_PASSWORD, _DEVICE_CREDENTIALS, _JSONL
     _DEVICE_PASSWORD = args.device_password
+    _JSONL = args.jsonl
+    if args.device_password_file:
+        with open(args.device_password_file, encoding="utf-8") as f:
+            _DEVICE_CREDENTIALS = json.load(f)
 
     setup_logging()
     if not args.device and not args.list:
@@ -741,11 +785,17 @@ def main():
 
     log.info("=== Toolbelt uploader: %d device(s), commit=%s, issue=%s ===",
              len(devices), args.commit, args.issue)
+    emit("run_started", mode="upload" if args.commit else "dry-run", count=len(devices))
     app, win = connect_toolbelt()
 
     results = []
     for idx, (ip, pem_override) in enumerate(devices, 1):
+        if args.stop_file and os.path.exists(args.stop_file):
+            emit("device_cancelled", selector=ip, message="Stop requested before device started")
+            results.append((ip, False, "cancelled before start"))
+            break
         log.info("--- (%d/%d) %s ---", idx, len(devices), ip)
+        emit("device_started", selector=ip, index=idx, total=len(devices))
         app, win = ensure_connection(app, win)
         _close_stray_dialogs()
 
@@ -774,6 +824,10 @@ def main():
                 ok, msg = False, "ERROR: %s" % e2
                 log.error("[%s] %s", ip, msg)
         results.append((ip, ok, msg))
+        if ok:
+            emit("upload_ok" if args.commit else "dry_run_ok", selector=ip, message=msg)
+        else:
+            emit("upload_failed" if args.commit else "dry_run_failed", selector=ip, message=msg)
         time.sleep(args.settle)
 
     log.info("=== SUMMARY ===")
@@ -781,6 +835,7 @@ def main():
         log.info("  %-16s %s  %s", ip, "OK  " if ok else "FAIL", msg)
     n_ok = sum(1 for _, ok, _ in results if ok)
     log.info("Done: %d/%d ok", n_ok, len(results))
+    emit("run_finished", ok=n_ok, total=len(results), status="complete")
 
 
 if __name__ == "__main__":

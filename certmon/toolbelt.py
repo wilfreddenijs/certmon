@@ -1,0 +1,335 @@
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+STATUS_KEY = "toolbelt_latest_status"
+SELECTION_KEY = "toolbelt_selected_devices"
+SECRET_PREFIX = "toolbelt-device-credentials:"
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class ToolbeltRun:
+    id: str
+    mode: str
+    status: str = "running"
+    started_at: str = field(default_factory=utc_now)
+    finished_at: str | None = None
+    current_device: str | None = None
+    events: list[dict] = field(default_factory=list)
+    devices: dict[str, dict] = field(default_factory=dict)
+    requested_stop: bool = False
+    error: str | None = None
+    stop_file: str | None = None
+    temp_dir: str | None = None
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "mode": self.mode,
+            "status": self.status,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "current_device": self.current_device,
+            "events": list(self.events[-200:]),
+            "devices": self.devices,
+            "requested_stop": self.requested_stop,
+            "error": self.error,
+        }
+
+
+class ToolbeltBatchService:
+    """Server-side Toolbelt orchestration.
+
+    The browser sees device/certificate IDs and progress only. Private Extron
+    combined PEM files are materialized server-side into a temporary run
+    directory and deleted when the run ends.
+    """
+
+    def __init__(self, database, artifacts, vault, *, script_path=None, runner=None):
+        self.database = database
+        self.artifacts = artifacts
+        self.vault = vault
+        self.script_path = Path(script_path or Path(__file__).parents[1] / "toolbelt_uploader.py")
+        self.runner = runner or self._run_subprocess
+        self._lock = threading.RLock()
+        self._runs: dict[str, ToolbeltRun] = {}
+
+    def list_devices(self):
+        latest = self.database.get_setting(STATUS_KEY, {})
+        selected = set(self.database.get_setting(SELECTION_KEY, []))
+        rows = []
+        for cert in self.database.list_certificates():
+            if cert.get("kind") != "leaf" or cert.get("issuer_type") != "local_ca":
+                continue
+            selector = self._selector(cert)
+            if not selector:
+                continue
+            profile = cert.get("profile")
+            rows.append(
+                {
+                    "selector": selector,
+                    "certificate_id": cert["id"],
+                    "label": cert.get("device_name") or selector,
+                    "identifiers": cert.get("identifiers") or [],
+                    "profile": profile,
+                    "extron_ready": profile == "extron-rsa"
+                    and self.artifacts.has_certificate(cert["id"]),
+                    "selected": selector in selected or not selected,
+                    "dry_run": latest.get(self._status_key(selector, cert["id"], "dry-run")),
+                    "upload": latest.get(self._status_key(selector, cert["id"], "upload")),
+                    "credentials_saved": self.database.get_secret(
+                        self._secret_id(selector)
+                    )
+                    is not None,
+                }
+            )
+        return sorted(rows, key=lambda row: (row["label"], row["selector"]))
+
+    def save_selection(self, selectors):
+        self.database.put_setting(SELECTION_KEY, sorted(set(selectors or [])))
+
+    def save_credentials(self, selector, *, username, password):
+        if not selector or not username or password is None:
+            raise ValueError("selector, username and password are required")
+        blob = self.vault.encrypt(
+            json.dumps({"username": username, "password": password}).encode("utf-8"),
+            purpose="toolbelt-device-credentials",
+        )
+        self.database.put_secret(
+            self._secret_id(selector), blob, {"selector": selector, "username": username}
+        )
+
+    def start(self, *, mode, selectors=None):
+        if mode not in {"dry-run", "upload"}:
+            raise ValueError("mode must be dry-run or upload")
+        targets = [
+            row
+            for row in self.list_devices()
+            if not selectors or row["selector"] in set(selectors)
+        ]
+        if not targets:
+            raise ValueError("No Toolbelt devices selected")
+        if mode == "upload":
+            blocked = [
+                row["selector"]
+                for row in targets
+                if not (row.get("dry_run") or {}).get("ok")
+            ]
+            if blocked:
+                raise ValueError(
+                    "Upload is blocked until dry-run is OK for: "
+                    + ", ".join(blocked)
+                )
+
+        run = ToolbeltRun(id=str(uuid.uuid4()), mode=mode)
+        with self._lock:
+            self._runs[run.id] = run
+        thread = threading.Thread(
+            target=self._execute_run, args=(run, targets), daemon=True
+        )
+        thread.start()
+        return run.to_dict()
+
+    def get_run(self, run_id):
+        with self._lock:
+            run = self._runs.get(run_id)
+            return None if run is None else run.to_dict()
+
+    def stop(self, run_id):
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is None:
+                return None
+            run.requested_stop = True
+            if run.stop_file:
+                Path(run.stop_file).write_text("stop", encoding="utf-8")
+            return run.to_dict()
+
+    def _execute_run(self, run, targets):
+        temp_dir = Path(tempfile.mkdtemp(prefix=f"certmon-toolbelt-{run.id}-"))
+        run.temp_dir = str(temp_dir)
+        stop_file = temp_dir / "stop"
+        run.stop_file = str(stop_file)
+        list_file = temp_dir / "devices.txt"
+        credential_file = temp_dir / "credentials.json"
+        try:
+            lines = []
+            credentials = {}
+            for row in targets:
+                selector = row["selector"]
+                certificate_id = row["certificate_id"]
+                pem_name = f"{self._safe_name(selector)}-{certificate_id[:8]}-extron-combined.pem"
+                pem_path = temp_dir / pem_name
+                with self.artifacts.materialize_private(
+                    certificate_id, "combined.pem"
+                ) as materialized:
+                    shutil.copy2(materialized, pem_path)
+                lines.append(f"{selector},{pem_path}")
+                credentials[selector] = self._credentials_for(selector)
+                self._record_device_event(
+                    run,
+                    {
+                        "event": "device_pending",
+                        "selector": selector,
+                        "certificate_id": certificate_id,
+                    },
+                )
+            list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            credential_file.write_text(json.dumps(credentials), encoding="utf-8")
+            command = [
+                sys.executable,
+                str(self.script_path),
+                "--list",
+                str(list_file),
+                "--jsonl",
+                "--stop-file",
+                str(stop_file),
+                "--device-password-file",
+                str(credential_file),
+            ]
+            if run.mode == "upload":
+                command.append("--commit")
+            self.runner(command, self._handle_event(run))
+            self._finish(run, "stopped" if run.requested_stop else "complete")
+        except Exception as exc:
+            run.error = str(exc)
+            self._record_event(run, {"event": "run_failed", "message": str(exc)})
+            self._finish(run, "failed")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _run_subprocess(self, command, on_event):
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                event = {"event": "log", "message": line}
+            on_event(event)
+        code = process.wait()
+        if code:
+            raise RuntimeError(f"Toolbelt uploader exited with code {code}")
+
+    def _handle_event(self, run):
+        def handle(event):
+            self._record_event(run, event)
+            selector = event.get("selector") or event.get("device")
+            if selector:
+                run.current_device = selector
+            if selector and event.get("event") in {
+                "dry_run_ok",
+                "dry_run_failed",
+                "upload_ok",
+                "upload_failed",
+                "credentials_needed",
+                "device_cancelled",
+                "device_skipped",
+            }:
+                self._record_device_event(run, event)
+
+        return handle
+
+    def _record_event(self, run, event):
+        event = {"time": utc_now(), **event}
+        with self._lock:
+            run.events.append(self._sanitize(event))
+
+    def _record_device_event(self, run, event):
+        event = self._sanitize(event)
+        selector = event.get("selector") or event.get("device")
+        if not selector:
+            return
+        certificate_id = event.get("certificate_id") or self._certificate_id_for(selector)
+        ok = event.get("event", "").endswith("_ok")
+        state = {
+            "event": event.get("event"),
+            "ok": ok,
+            "message": event.get("message") or event.get("status"),
+            "time": utc_now(),
+            "run_id": run.id,
+            "mode": run.mode,
+        }
+        with self._lock:
+            run.devices[selector] = state
+        if certificate_id and event.get("event") in {
+            "dry_run_ok",
+            "dry_run_failed",
+            "upload_ok",
+            "upload_failed",
+        }:
+            latest = self.database.get_setting(STATUS_KEY, {})
+            latest[self._status_key(selector, certificate_id, run.mode)] = state
+            self.database.put_setting(STATUS_KEY, latest)
+
+    def _finish(self, run, status):
+        with self._lock:
+            run.status = status
+            run.finished_at = utc_now()
+            run.current_device = None
+
+    def _credentials_for(self, selector):
+        blob = self.database.get_secret(self._secret_id(selector))
+        if blob is not None:
+            try:
+                return json.loads(
+                    self.vault.decrypt(
+                        blob, purpose="toolbelt-device-credentials"
+                    ).decode("utf-8")
+                )
+            except Exception:
+                pass
+        return {"username": "admin", "password_candidates": ["extron", "__SERIAL__"]}
+
+    def _certificate_id_for(self, selector):
+        for row in self.list_devices():
+            if row["selector"] == selector:
+                return row["certificate_id"]
+        return None
+
+    @staticmethod
+    def _selector(metadata):
+        identifiers = metadata.get("identifiers") or []
+        return identifiers[0] if identifiers else metadata.get("id")
+
+    @staticmethod
+    def _status_key(selector, certificate_id, mode):
+        return f"{selector}|{certificate_id}|{mode}"
+
+    @staticmethod
+    def _secret_id(selector):
+        return SECRET_PREFIX + selector
+
+    @staticmethod
+    def _safe_name(value):
+        return "".join(ch if ch.isalnum() or ch in ".-" else "-" for ch in value)[:80]
+
+    @staticmethod
+    def _sanitize(value):
+        text = json.dumps(value, default=str)
+        for forbidden in ("password", "private-key", "BEGIN PRIVATE KEY"):
+            text = text.replace(forbidden, "[redacted]")
+        return json.loads(text)

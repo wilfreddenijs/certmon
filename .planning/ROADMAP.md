@@ -33,4 +33,4 @@ Goal: turn CertMon into a safe shared LAN service with local users, roles, sessi
 **Plans:** 1 plan
 
 Plans:
-- [ ] `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation
+- [x] `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation

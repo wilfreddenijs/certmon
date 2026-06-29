@@ -175,6 +175,22 @@ def test_local_ca_extron_pem_download_uses_private_combined_artifact():
     assert "Extron PEM contains certificate and private key" in html
 
 
+def test_upload_tab_has_toolbelt_batch_upload_flow():
+    html = page()
+
+    assert "Toolbelt batch upload" in html
+    assert "devices.txt" in html
+    assert "Dry-run starts first and is safe" in html
+    assert 'id="toolbelt-device-list"' in html
+    assert 'id="toolbelt-upload-btn"' in html
+    assert 'id="toolbelt-stop-btn"' in html
+    assert "/api/toolbelt/devices" in html
+    assert "/api/toolbelt/dry-run" in html
+    assert "/api/toolbelt/upload" in html
+    assert "Stop after current device" in html
+    assert "tries admin/extron; save custom credentials if the device uses serial number" in html
+
+
 def test_renewal_resume_actions_surface_errors_inline():
     html = page()
 

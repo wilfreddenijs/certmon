@@ -16,6 +16,24 @@ Certificate private keys, ACME account keys, device credentials, and Cloudflare 
 
 For Cloudflare automation, create an API token limited to `Zone:DNS:Edit` and `Zone:Zone:Read` for only the zones CertMon manages. Do not use the Global API Key.
 
+## Extron Toolbelt Batch Upload
+
+The Upload tab contains a **Toolbelt batch upload** section for Extron devices. It is separate from the generic/manual upload flow.
+
+- The device list comes from CertMon's Local CA Extron mapping, the same data exported as `devices.txt`.
+- Opening the Upload tab starts a safe dry-run first. Dry-run prepares Toolbelt targeting and fields, but does not click Apply and does not reboot devices.
+- Real upload requires an explicit **Start Toolbelt upload** click and is enabled only for selected devices whose dry-run is OK.
+- **Stop after current device** requests a safe stop before the next device starts; it does not force-kill an active Toolbelt operation.
+- CertMon materializes the Extron combined PEM only in a temporary server-side run folder and deletes it after the run.
+- Per-device credentials are stored encrypted. CertMon tries saved credentials first, then `admin` / `extron`. If the device still uses its serial number or another custom password, check the serial number in Toolbelt and save that credential for the device.
+
+First-run Toolbelt checklist:
+
+1. Install Extron Toolbelt and verify it discovers the devices.
+2. Run Toolbelt and CertMon at the same privilege level. If Toolbelt is elevated, CertMon/launcher must also be elevated.
+3. In Toolbelt's discovered-device list, enable the serial-number column so you can copy the serial number when a device still uses it as the password.
+4. Confirm dry-run status in CertMon before starting a real upload.
+
 ## Data Directory
 
 Set `CERTMON_DATA_DIR` to choose the server data location:

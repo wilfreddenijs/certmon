@@ -845,6 +845,22 @@
             </div>
           </div>
 
+          <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-top:16px">
+            <div class="section-title" style="margin-bottom:8px">Toolbelt batch upload</div>
+            <div class="help-text choice-help" style="margin-bottom:12px">
+              This list comes from CertMon's <code>devices.txt</code> / Local CA Extron certificate mapping.
+              Dry-run starts first and is safe: it prepares Toolbelt but does not click Apply or reboot devices.
+              Real upload is only enabled for selected devices whose dry-run is OK.
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+              <button class="btn btn-ghost" onclick="loadToolbeltDevices(true)">Retry dry-run</button>
+              <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
+              <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
+            </div>
+            <div id="toolbelt-run-status" class="help-text" style="margin-bottom:10px"></div>
+            <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -892,7 +908,7 @@
           <option value="generic-rsa">Generic RSA 2048</option>
           <option value="generic-ecdsa">Generic modern ECDSA P-256</option>
         </select>
-        <div class="help-text field-note">Choose compatibility first. Extron/older devices often need RSA. Modern services can usually use ECDSA.</div>
+        <div class="help-text field-note">Choose compatibility first. Choose Extron/RSA for older devices; they often need RSA. Modern services can usually use ECDSA.</div>
       </div>
       <div id="acme-options">
         <div class="form-label">DNS validation</div>
@@ -1192,7 +1208,7 @@
     if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'cancelled') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
-    if (r.state === 'draft' && r.issuer_type === 'external_ca' && r.metadata?.external_ca_workflow === 'existing') return `<button class="btn" onclick="openExternalImport('${r.id}','existing')">Import certificate</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'draft' && r.issuer_type === 'external_ca' && r.metadata?.external_ca_workflow === 'existing') return `<div class="help-text" style="margin-bottom:8px">Use Import certificate or delete the entry.</div><button class="btn" onclick="openExternalImport('${r.id}','existing')">Import certificate</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'draft') return `<button class="btn" onclick="resumeRenewal('${r.id}','start')">Start renewal</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     return '';
   }
@@ -1568,6 +1584,7 @@
     if (name === 'upload') {
       loadUploadDevices();
       loadAvailableCertificates();
+      loadToolbeltDevices(false);
     }
   }
 
@@ -1771,6 +1788,10 @@
   let availableCertificates = [];
   let selectedDeviceId = null;
   let pendingDeployment = null;
+  let toolbeltDevices = [];
+  let toolbeltRunId = null;
+  let toolbeltPollTimer = null;
+  let toolbeltAutoDryRunStarted = false;
 
   // Escape a string for safe use inside a single-quoted HTML attribute
   function escAttr(s) {
@@ -1873,6 +1894,140 @@
     availableCertificates = await res.json();
     renderCertificateSelect();
     applyPendingDeployment();
+  }
+
+  async function loadToolbeltDevices(forceDryRun) {
+    const list = document.getElementById('toolbelt-device-list');
+    const status = document.getElementById('toolbelt-run-status');
+    if (!list || !status) return;
+    try {
+      const res = await fetch('/api/toolbelt/devices');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load Toolbelt devices');
+      toolbeltDevices = data.devices || [];
+      renderToolbeltDevices();
+      if ((forceDryRun || !toolbeltAutoDryRunStarted) && toolbeltDevices.length) {
+        toolbeltAutoDryRunStarted = true;
+        startToolbeltDryRun();
+      }
+    } catch (e) {
+      status.textContent = e.message;
+      status.style.color = 'var(--warning)';
+      list.innerHTML = '<div class="help-text">Toolbelt batch upload is unavailable.</div>';
+    }
+  }
+
+  function toolbeltStatusLabel(state) {
+    if (!state) return '<span style="color:var(--muted)">not tested</span>';
+    const color = state.ok ? 'var(--ok)' : 'var(--warning)';
+    return `<span style="color:${color}">${state.ok ? 'OK' : 'attention'}${state.message ? ' — ' + state.message : ''}</span>`;
+  }
+
+  function renderToolbeltDevices() {
+    const list = document.getElementById('toolbelt-device-list');
+    const uploadBtn = document.getElementById('toolbelt-upload-btn');
+    if (!toolbeltDevices.length) {
+      list.innerHTML = '<div class="help-text">No Extron Local CA certificates yet. Generate Extron-compatible Local CA certificates first; they will appear in devices.txt and here.</div>';
+      uploadBtn.disabled = true;
+      return;
+    }
+    list.innerHTML = toolbeltDevices.map(d => `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)">
+        <label style="display:flex;gap:10px;align-items:flex-start">
+          <input type="checkbox" ${d.selected ? 'checked' : ''} onchange="toggleToolbeltDevice('${escAttr(d.selector)}', this.checked)" />
+          <div style="flex:1">
+            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)">${d.label}</div>
+            <div class="help-text">Selector: <code>${d.selector}</code> · certificate: <code>${d.certificate_id}</code></div>
+            <div class="help-text">Local CA: ${d.extron_ready ? 'Extron PEM ready' : 'not Extron-ready'} · credentials: ${d.credentials_saved ? 'saved encrypted' : 'tries admin/extron; save custom credentials if the device uses serial number or another password'}</div>
+            <div class="help-text">Dry-run status: ${toolbeltStatusLabel(d.dry_run)}</div>
+            <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
+          </div>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Credentials</button>
+        </label>
+      </div>
+    `).join('');
+    const hasUploadable = toolbeltDevices.some(d => d.selected && d.dry_run && d.dry_run.ok);
+    uploadBtn.disabled = !hasUploadable || !!toolbeltRunId;
+  }
+
+  async function toggleToolbeltDevice(selector, checked) {
+    toolbeltDevices = toolbeltDevices.map(d => d.selector === selector ? {...d, selected: checked} : d);
+    await fetch('/api/toolbelt/selection', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectors: toolbeltDevices.filter(d => d.selected).map(d => d.selector) })
+    });
+    renderToolbeltDevices();
+  }
+
+  async function saveToolbeltCredentials(selector) {
+    const username = prompt(`Username for ${selector}`, 'admin');
+    if (!username) return;
+    const password = prompt(`Password for ${selector}. Leave this dialog empty to cancel. CertMon stores it encrypted.`);
+    if (!password) return;
+    const res = await fetch(`/api/toolbelt/devices/${encodeURIComponent(selector)}/credentials`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Could not save credentials'); return; }
+    await loadToolbeltDevices(false);
+  }
+
+  async function startToolbeltDryRun() {
+    return startToolbeltRun('dry-run');
+  }
+
+  async function startToolbeltUpload() {
+    return startToolbeltRun('upload');
+  }
+
+  async function startToolbeltRun(mode) {
+    const selected = toolbeltDevices.filter(d => d.selected).map(d => d.selector);
+    const status = document.getElementById('toolbelt-run-status');
+    status.style.color = 'var(--muted)';
+    status.textContent = mode === 'upload' ? 'Starting Toolbelt upload...' : 'Starting safe Toolbelt dry-run...';
+    const res = await fetch(mode === 'upload' ? '/api/toolbelt/upload' : '/api/toolbelt/dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectors: selected })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.style.color = 'var(--warning)';
+      status.textContent = data.error || 'Could not start Toolbelt run';
+      return;
+    }
+    toolbeltRunId = data.run.id;
+    document.getElementById('toolbelt-stop-btn').disabled = false;
+    document.getElementById('toolbelt-upload-btn').disabled = true;
+    pollToolbeltRun();
+  }
+
+  async function pollToolbeltRun() {
+    if (!toolbeltRunId) return;
+    const res = await fetch(`/api/toolbelt/runs/${toolbeltRunId}`);
+    const run = await res.json();
+    const status = document.getElementById('toolbelt-run-status');
+    const done = Object.values(run.devices || {}).filter(d => d.ok).length;
+    const failed = Object.values(run.devices || {}).filter(d => !d.ok).length;
+    status.style.color = run.status === 'failed' ? 'var(--warning)' : 'var(--muted)';
+    status.textContent = `Run ${run.mode}: ${run.status}. Current: ${run.current_device || '-'} · OK ${done} · attention ${failed}`;
+    if (run.status === 'running') {
+      clearTimeout(toolbeltPollTimer);
+      toolbeltPollTimer = setTimeout(pollToolbeltRun, 1500);
+      return;
+    }
+    toolbeltRunId = null;
+    document.getElementById('toolbelt-stop-btn').disabled = true;
+    await loadToolbeltDevices(false);
+  }
+
+  async function stopToolbeltRun() {
+    if (!toolbeltRunId) return;
+    await fetch(`/api/toolbelt/runs/${toolbeltRunId}/stop`, { method: 'POST' });
+    document.getElementById('toolbelt-run-status').textContent = 'Stop requested. CertMon will stop before the next device.';
   }
 
   function renderUploadDevices() {

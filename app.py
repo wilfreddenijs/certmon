@@ -37,6 +37,7 @@ from certmon.local_ca import LocalCAService
 from certmon.naming import safe_slug
 from certmon.permissions import Permission, authorize
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
+from certmon.toolbelt import ToolbeltBatchService
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
 
 
@@ -135,6 +136,7 @@ def bootstrap_services(
             else deployment_adapters
         ),
     )
+    toolbelt_service = ToolbeltBatchService(database, artifact_store, vault)
     return {
         "vault": vault,
         "artifact_store": artifact_store,
@@ -145,6 +147,7 @@ def bootstrap_services(
         "acme_order_service": acme_order_service,
         "acme_orchestrator": acme_orchestrator,
         "deployment_service": deployment_service,
+        "toolbelt_service": toolbelt_service,
     }
 
 
@@ -157,6 +160,7 @@ acme_account_service = None
 acme_order_service = None
 acme_orchestrator = None
 deployment_service = None
+toolbelt_service = None
 _services = bootstrap_services(database, data_dir())
 globals().update(_services)
 if migration_source is not None and vault is not None:
@@ -1136,6 +1140,105 @@ def download_private_artifact(certificate_id, artifact_name):
 
 
 # ── Certificate Upload Module ─────────────────────────────────────────────────
+
+# Toolbelt batch upload ------------------------------------------------------
+
+def _toolbelt_unavailable():
+    return toolbelt_service is None or artifact_store is None or vault is None
+
+
+@app.route("/api/toolbelt/devices", methods=["GET"])
+def toolbelt_devices():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    return jsonify({"devices": toolbelt_service.list_devices()})
+
+
+@app.route("/api/toolbelt/selection", methods=["PATCH"])
+def toolbelt_selection():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    selectors = body.get("selectors")
+    if selectors is None or not isinstance(selectors, list):
+        return jsonify({"error": "selectors must be a list"}), 400
+    toolbelt_service.save_selection([str(value) for value in selectors])
+    return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
+
+
+@app.route("/api/toolbelt/devices/<path:selector>/credentials", methods=["PATCH"])
+def toolbelt_credentials(selector):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "admin").strip()
+    password = body.get("password")
+    if password is None:
+        return jsonify({"error": "password is required"}), 400
+    toolbelt_service.save_credentials(
+        selector, username=username, password=str(password)
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/toolbelt/dry-run", methods=["POST"])
+def toolbelt_dry_run():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    if any(key in body for key in ("private_key_pem", "combined_pem", "pem")):
+        return jsonify({"error": "Private certificate material must stay server-side"}), 400
+    try:
+        run = toolbelt_service.start(
+            mode="dry-run", selectors=body.get("selectors") or None
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"ok": True, "run": run})
+
+
+@app.route("/api/toolbelt/upload", methods=["POST"])
+def toolbelt_upload():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    if any(key in body for key in ("private_key_pem", "combined_pem", "pem")):
+        return jsonify({"error": "Private certificate material must stay server-side"}), 400
+    try:
+        run = toolbelt_service.start(
+            mode="upload", selectors=body.get("selectors") or None
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"ok": True, "run": run})
+
+
+@app.route("/api/toolbelt/runs/<run_id>", methods=["GET"])
+def toolbelt_run(run_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    run = toolbelt_service.get_run(run_id)
+    if run is None:
+        return jsonify({"error": "Run not found"}), 404
+    return jsonify(run)
+
+
+@app.route("/api/toolbelt/runs/<run_id>/stop", methods=["POST"])
+def toolbelt_stop(run_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    run = toolbelt_service.stop(run_id)
+    if run is None:
+        return jsonify({"error": "Run not found"}), 404
+    return jsonify({"ok": True, "run": run})
+
 
 @app.route("/api/upload/devices", methods=["GET"])
 def list_upload_devices():
