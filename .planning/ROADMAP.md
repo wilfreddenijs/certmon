@@ -30,7 +30,7 @@ Goal: turn CertMon into a safe shared LAN service with local users, roles, sessi
 **Goal:** Add a desktop UI flow that uses the existing CertMon `devices.txt` list to run Extron Toolbelt dry-runs and uploads with visible per-device progress, cancellation, and saved last-result status.
 **Requirements**: Locked in `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-SPEC.md`
 **Depends on:** Phase 1 / current `main`
-**Plans:** 0 plans
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 3 to break down)
+- [ ] `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation
