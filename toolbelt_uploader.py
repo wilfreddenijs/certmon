@@ -273,6 +273,31 @@ def _credentials_modal_present(win):
                for c in win.descendants(control_type="Text"))
 
 
+
+def dismiss_credentials_prompt(win):
+    """Close Toolbelt's in-app credentials modal so one failed device does not
+    block selection/navigation for the next device."""
+    try:
+        if not _credentials_modal_present(win):
+            return False
+    except Exception:
+        return False
+    for b in win.descendants(control_type="Button"):
+        text = (b.window_text() or "").strip().lower()
+        if text in {"cancel", "close"} and b.is_visible():
+            try:
+                b.click_input()
+                time.sleep(0.5)
+                return not _credentials_modal_present(win)
+            except Exception:
+                pass
+    try:
+        win.type_keys("{ESC}", set_foreground=True)
+        time.sleep(0.5)
+        return not _credentials_modal_present(win)
+    except Exception:
+        return False
+
 def accept_credentials_prompt(win, ip, timeout=8):
     """Managing an unauthenticated device pops an in-app 'Please provide
     credentials for <ip>' modal. Username is 'admin'; the password is prefilled
@@ -332,6 +357,7 @@ def accept_credentials_prompt(win, ip, timeout=8):
 
     if _credentials_modal_present(win):
         emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
+        dismiss_credentials_prompt(win)
         raise RuntimeError(
             "credentials rejected for %s — the prefilled password is wrong. "
             "Authenticate it once in Toolbelt (new units: password = serial "
@@ -705,9 +731,11 @@ def certmon_issue(ip, certmon_url, passphrase=""):
     return data.get("pem_path") or pem_for_ip(ip)
 
 
-def _close_stray_dialogs():
-    """Dismiss any leftover #32770 file/confirm dialog before the next device."""
+def _close_stray_dialogs(win=None):
+    """Dismiss leftover dialogs before the next device."""
     from pywinauto import findwindows
+    if win is not None:
+        dismiss_credentials_prompt(win)
     for h in findwindows.find_windows(class_name="#32770"):
         try:
             Application(backend="win32").connect(handle=h).window(handle=h).type_keys("{ESC}")
@@ -797,7 +825,7 @@ def main():
         log.info("--- (%d/%d) %s ---", idx, len(devices), ip)
         emit("device_started", selector=ip, index=idx, total=len(devices))
         app, win = ensure_connection(app, win)
-        _close_stray_dialogs()
+        _close_stray_dialogs(win)
 
         # Resolve / issue the .pem for this device
         if args.issue:
@@ -817,7 +845,7 @@ def main():
             # Transient UI/window errors happen at scale — reconnect and retry once.
             log.info("[%s] error (%s) — reconnecting and retrying once", ip, e)
             try:
-                _close_stray_dialogs()
+                _close_stray_dialogs(win)
                 app, win = connect_toolbelt()
                 ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
             except Exception as e2:
