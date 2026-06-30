@@ -178,3 +178,43 @@ def test_toolbelt_service_marks_devices_failed_when_runner_fails(tmp_path):
     assert failed["devices"]["192.168.0.10"]["ok"] is False
     latest = database.get_setting(STATUS_KEY)
     assert latest["192.168.0.10|cert-1|dry-run"]["event"] == "dry_run_failed"
+
+def test_toolbelt_service_empty_selection_runs_no_devices(tmp_path):
+    database = FakeDatabase()
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: None,
+    )
+
+    service.save_selection([])
+    devices = service.list_devices()
+
+    assert devices[0]["selected"] is False
+    try:
+        service.start(mode="dry-run", selectors=[])
+    except ValueError as error:
+        assert "No Toolbelt devices selected" in str(error)
+    else:
+        raise AssertionError("empty explicit selection should not run all devices")
+
+
+def test_toolbelt_service_blocks_not_extron_ready_devices(tmp_path):
+    database = FakeDatabase()
+    database.certificates[0]["profile"] = "generic-rsa"
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: None,
+    )
+
+    try:
+        service.start(mode="dry-run", selectors=["192.168.0.10"])
+    except ValueError as error:
+        assert "Extron-ready Local CA certificates" in str(error)
+    else:
+        raise AssertionError("non-Extron certificates should not start Toolbelt")

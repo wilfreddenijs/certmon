@@ -69,7 +69,8 @@ class ToolbeltBatchService:
 
     def list_devices(self):
         latest = self.database.get_setting(STATUS_KEY, {})
-        selected = set(self.database.get_setting(SELECTION_KEY, []))
+        selected_setting = self.database.get_setting(SELECTION_KEY, None)
+        selected = set(selected_setting or [])
         rows = []
         for cert in self.database.list_certificates():
             if cert.get("kind") != "leaf" or cert.get("issuer_type") != "local_ca":
@@ -87,7 +88,9 @@ class ToolbeltBatchService:
                     "profile": profile,
                     "extron_ready": profile == "extron-rsa"
                     and self.artifacts.has_certificate(cert["id"]),
-                    "selected": selector in selected or not selected,
+                    "selected": selector in selected
+                    if selected_setting is not None
+                    else True,
                     "dry_run": latest.get(self._status_key(selector, cert["id"], "dry-run")),
                     "upload": latest.get(self._status_key(selector, cert["id"], "upload")),
                     "credentials_saved": self.database.get_secret(
@@ -115,13 +118,20 @@ class ToolbeltBatchService:
     def start(self, *, mode, selectors=None):
         if mode not in {"dry-run", "upload"}:
             raise ValueError("mode must be dry-run or upload")
+        selected = None if selectors is None else set(selectors)
         targets = [
             row
             for row in self.list_devices()
-            if not selectors or row["selector"] in set(selectors)
+            if selected is None or row["selector"] in selected
         ]
         if not targets:
             raise ValueError("No Toolbelt devices selected")
+        not_ready = [row["selector"] for row in targets if not row.get("extron_ready")]
+        if not_ready:
+            raise ValueError(
+                "Toolbelt upload requires Extron-ready Local CA certificates for: "
+                + ", ".join(not_ready)
+            )
         if mode == "upload":
             blocked = [
                 row["selector"]

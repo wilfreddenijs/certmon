@@ -1193,8 +1193,9 @@ def toolbelt_dry_run():
     if any(key in body for key in ("private_key_pem", "combined_pem", "pem")):
         return jsonify({"error": "Private certificate material must stay server-side"}), 400
     try:
+        selectors = body["selectors"] if "selectors" in body else None
         run = toolbelt_service.start(
-            mode="dry-run", selectors=body.get("selectors") or None
+            mode="dry-run", selectors=selectors
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
@@ -1210,8 +1211,9 @@ def toolbelt_upload():
     if any(key in body for key in ("private_key_pem", "combined_pem", "pem")):
         return jsonify({"error": "Private certificate material must stay server-side"}), 400
     try:
+        selectors = body["selectors"] if "selectors" in body else None
         run = toolbelt_service.start(
-            mode="upload", selectors=body.get("selectors") or None
+            mode="upload", selectors=selectors
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
