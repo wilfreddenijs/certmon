@@ -394,8 +394,26 @@ _DEVICE_CREDENTIALS = {}
 
 
 def _credentials_modal_present(win):
-    return any("provide credentials" in (c.window_text() or "").lower()
-               for c in win.descendants(control_type="Text"))
+    try:
+        texts = [win.window_text() or ""]
+    except Exception:
+        texts = []
+    for control_type in ("Text", "Edit", "Button"):
+        for c in win.descendants(control_type=control_type):
+            try:
+                texts.append(c.window_text() or "")
+            except Exception:
+                pass
+    joined = " ".join(texts).lower()
+    return any(
+        marker in joined
+        for marker in (
+            "provide credentials",
+            "credentials are incorrect",
+            "credentials entered are incorrect",
+            "failed to connect",
+        )
+    )
 
 
 
@@ -409,7 +427,7 @@ def dismiss_credentials_prompt(win):
         return False
     for b in win.descendants(control_type="Button"):
         text = (b.window_text() or "").strip().lower()
-        if text in {"cancel", "close"} and b.is_visible():
+        if text in {"cancel", "close", "ok"} and b.is_visible():
             try:
                 b.click_input()
                 time.sleep(0.5)
@@ -977,15 +995,19 @@ def main():
         try:
             ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
         except Exception as e:
-            # Transient UI/window errors happen at scale — reconnect and retry once.
-            log.info("[%s] error (%s) — reconnecting and retrying once", ip, e)
-            try:
-                _close_stray_dialogs(win)
-                app, win = connect_toolbelt()
-                ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
-            except Exception as e2:
-                ok, msg = False, "ERROR: %s" % e2
+            if "credentials rejected" in str(e).lower():
+                ok, msg = False, "ERROR: %s" % e
                 log.error("[%s] %s", ip, msg)
+            else:
+                # Transient UI/window errors happen at scale; reconnect and retry once.
+                log.info("[%s] error (%s) - reconnecting and retrying once", ip, e)
+                try:
+                    _close_stray_dialogs(win)
+                    app, win = connect_toolbelt()
+                    ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
+                except Exception as e2:
+                    ok, msg = False, "ERROR: %s" % e2
+                    log.error("[%s] %s", ip, msg)
         results.append((ip, ok, msg))
         if ok:
             emit("upload_ok" if args.commit else "dry_run_ok", selector=ip, message=msg)
