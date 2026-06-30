@@ -218,3 +218,20 @@ def test_toolbelt_service_blocks_not_extron_ready_devices(tmp_path):
         assert "Extron-ready Local CA certificates" in str(error)
     else:
         raise AssertionError("non-Extron certificates should not start Toolbelt")
+
+def test_toolbelt_service_prefers_ip_identifier_for_selector(tmp_path):
+    database = FakeDatabase()
+    database.certificates[0]["device_name"] = "IPLP"
+    database.certificates[0]["identifiers"] = ["IPLP", "192.168.0.20"]
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: None,
+    )
+
+    devices = service.list_devices()
+
+    assert devices[0]["label"] == "IPLP"
+    assert devices[0]["selector"] == "192.168.0.20"

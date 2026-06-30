@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import os
 import shutil
@@ -366,6 +367,12 @@ class ToolbeltBatchService:
     @staticmethod
     def _selector(metadata):
         identifiers = metadata.get("identifiers") or []
+        for value in identifiers:
+            try:
+                ipaddress.ip_address(value)
+            except ValueError:
+                continue
+            return value
         return identifiers[0] if identifiers else metadata.get("id")
 
     @staticmethod
