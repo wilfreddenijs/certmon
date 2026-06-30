@@ -278,41 +278,55 @@ def _device_visible(win, selectors):
 
 
 def _click_discovery_control(win):
-    button_terms = (
+    terms = (
         "discover",
         "discovery",
         "refresh",
         "rescan",
         "scan",
-        "start discovery",
+        "search",
+        "start",
         "device discovery",
         "DeviceDiscoveryUserControl_Discover",
         "DeviceDiscoveryUserControl_Refresh",
         "DeviceDiscoveryUserControl_Search",
         "DeviceDiscoveryUserControl_Start",
     )
+    control_types = (
+        "Button",
+        "Hyperlink",
+        "Text",
+        "TabItem",
+        "ListItem",
+        "MenuItem",
+        "Custom",
+        "Image",
+    )
     seen = []
-    for b in win.descendants(control_type="Button"):
-        try:
-            if not b.is_visible():
-                continue
-        except Exception:
-            continue
-        label = _control_text(b)
-        if label:
-            seen.append(label)
-        lower = label.lower()
-        if any(term.lower() in lower for term in button_terms):
+    for control_type in control_types:
+        for control in win.descendants(control_type=control_type):
             try:
-                b.click_input()
-                log.info("started/refreshed Toolbelt discovery via button '%s'", label)
-                return True
-            except Exception as exc:
-                log.info("could not click Toolbelt discovery button '%s': %s", label, exc)
+                if not control.is_visible():
+                    continue
+            except Exception:
+                continue
+            label = _control_text(control)
+            if not label:
+                continue
+            lower = label.lower()
+            if any(term.lower() in lower for term in terms):
+                seen.append(f"{control_type}:{label}")
+                try:
+                    control.click_input()
+                    log.info("started/refreshed Toolbelt discovery via %s '%s'", control_type, label)
+                    return True
+                except Exception as exc:
+                    log.info("could not click Toolbelt discovery candidate %s '%s': %s", control_type, label, exc)
+            elif control_type == "Button":
+                seen.append(f"{control_type}:{label}")
     if seen:
-        log.info("visible Toolbelt buttons while looking for discovery: %s", "; ".join(seen[:30]))
+        log.info("visible Toolbelt discovery candidates/buttons: %s", "; ".join(seen[:40]))
     return False
-
 
 def _keyboard_discovery_refresh(win):
     for keys in ("{F5}", "^r"):
@@ -338,9 +352,13 @@ def ensure_discovery_started(win, selectors, timeout=45, require_visible=False):
         started = _keyboard_discovery_refresh(win)
 
     deadline = time.time() + timeout
+    next_click = time.time() + 3
     while time.time() < deadline:
         if _device_visible(win, selectors):
             return True
+        if time.time() >= next_click:
+            started = _click_discovery_control(win) or started
+            next_click = time.time() + 3
         time.sleep(POLL)
     message = "Toolbelt discovery did not show requested devices before timeout"
     if require_visible:
