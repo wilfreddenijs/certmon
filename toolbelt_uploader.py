@@ -241,6 +241,53 @@ def connect_toolbelt(launch_if_needed=True, timeout=60):
     return app, win
 
 
+
+def _device_visible(win, selectors):
+    wanted = {str(value).strip() for value in selectors if str(value).strip()}
+    if not wanted:
+        return True
+    for control_type in ("Text", "Hyperlink"):
+        for c in win.descendants(control_type=control_type):
+            if (c.window_text() or "").strip() in wanted:
+                return True
+    return False
+
+
+def ensure_discovery_started(win, selectors, timeout=45):
+    """Toolbelt can open without starting discovery. Start/refresh discovery and
+    wait until at least one requested selector appears in the active device list."""
+    bring_to_front(win)
+    if _device_visible(win, selectors):
+        return
+
+    clicked = False
+    button_terms = ("discover", "discovery", "refresh", "rescan", "scan", "start")
+    for b in win.descendants(control_type="Button"):
+        text = (b.window_text() or "").strip().lower()
+        aid = ""
+        try:
+            aid = (b.element_info.automation_id or "").lower()
+        except Exception:
+            pass
+        if b.is_visible() and any(term in text or term in aid for term in button_terms):
+            try:
+                b.click_input()
+                clicked = True
+                log.info("started/refreshed Toolbelt discovery via button '%s'", text or aid)
+                break
+            except Exception:
+                pass
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _device_visible(win, selectors):
+            return
+        time.sleep(POLL)
+    if clicked:
+        log.info("Toolbelt discovery did not show requested devices before timeout; continuing anyway")
+    else:
+        log.info("Toolbelt discovery control not found; continuing with current device list")
+
 def bring_to_front(win):
     """Toolbelt must be restored + foreground or real-mouse clicks land off-screen
     (a minimized window sits at ~ -32000,-32000)."""
@@ -815,6 +862,7 @@ def main():
              len(devices), args.commit, args.issue)
     emit("run_started", mode="upload" if args.commit else "dry-run", count=len(devices))
     app, win = connect_toolbelt()
+    ensure_discovery_started(win, [ip for ip, _ in devices])
 
     results = []
     for idx, (ip, pem_override) in enumerate(devices, 1):

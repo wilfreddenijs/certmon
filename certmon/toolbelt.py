@@ -127,6 +127,7 @@ class ToolbeltBatchService:
         ]
         if not targets:
             raise ValueError("No Toolbelt devices selected")
+        self._clear_previous_statuses(mode, targets)
         not_ready = [row["selector"] for row in targets if not row.get("extron_ready")]
         if not_ready:
             raise ValueError(
@@ -168,6 +169,19 @@ class ToolbeltBatchService:
             if run.stop_file:
                 Path(run.stop_file).write_text("stop", encoding="utf-8")
             return run.to_dict()
+
+    def _clear_previous_statuses(self, mode, targets):
+        latest = self.database.get_setting(STATUS_KEY, {})
+        modes = ("dry-run", "upload") if mode == "dry-run" else ("upload",)
+        changed = False
+        for row in targets:
+            for status_mode in modes:
+                key = self._status_key(row["selector"], row["certificate_id"], status_mode)
+                if key in latest:
+                    latest.pop(key, None)
+                    changed = True
+        if changed:
+            self.database.put_setting(STATUS_KEY, latest)
 
     def _execute_run(self, run, targets):
         temp_dir = Path(tempfile.mkdtemp(prefix=f"certmon-toolbelt-{run.id}-"))

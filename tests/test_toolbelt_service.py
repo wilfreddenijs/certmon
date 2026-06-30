@@ -235,3 +235,28 @@ def test_toolbelt_service_prefers_ip_identifier_for_selector(tmp_path):
 
     assert devices[0]["label"] == "IPLP"
     assert devices[0]["selector"] == "192.168.0.20"
+
+def test_toolbelt_service_clears_stale_statuses_when_run_starts(tmp_path):
+    database = FakeDatabase()
+    database.put_setting(
+        STATUS_KEY,
+        {
+            "192.168.0.10|cert-1|dry-run": {"ok": False, "message": "old dry-run"},
+            "192.168.0.10|cert-1|upload": {"ok": True, "message": "old upload"},
+        },
+    )
+    started = []
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: started.append(command),
+    )
+
+    service.start(mode="dry-run", selectors=["192.168.0.10"])
+    wait_until(lambda: started)
+
+    devices = service.list_devices()
+    assert devices[0]["dry_run"] is None
+    assert devices[0]["upload"] is None
