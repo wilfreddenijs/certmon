@@ -445,23 +445,53 @@ def _discovery_row_texts(win, row_y):
     return [text for _, text in _discovery_row_cells(win, row_y)]
 
 
-def _serial_column_center(win):
+def _grid_header_cells(win, row_y=None):
+    headers = []
     for control_type in ("Text", "Header", "HeaderItem", "DataItem"):
         for c in win.descendants(control_type=control_type):
             try:
                 if hasattr(c, "is_visible") and not c.is_visible():
                     continue
-                text = (_control_text(c) or "").strip().lower()
-                if text not in {"serial", "serial number"}:
+                text = (_control_text(c) or "").strip()
+                lower = text.lower()
+                if lower not in {
+                    "ip address",
+                    "actions",
+                    "model name",
+                    "mac address",
+                    "device type",
+                    "hostname",
+                    "serial number",
+                    "serial",
+                }:
                     continue
-                return cx(c.rectangle())
+                rect = c.rectangle()
+                if row_y is not None and not (rect.bottom < row_y and row_y - rect.bottom < 180):
+                    continue
+                headers.append((rect.top, rect.left, rect.right, lower))
             except Exception:
                 continue
+    return headers
+
+
+def _serial_column_center(win, row_y=None):
+    headers = _grid_header_cells(win, row_y=row_y)
+    bands = {}
+    for top, left, right, text in headers:
+        band = round(top / 10) * 10
+        bands.setdefault(band, []).append((left, right, text))
+    for cells in bands.values():
+        labels = {text for _, _, text in cells}
+        if "ip address" not in labels or "model name" not in labels:
+            continue
+        for left, right, text in cells:
+            if text in {"serial", "serial number"}:
+                return (left + right) // 2
     return None
 
 
-def _serial_column_visible(win):
-    return _serial_column_center(win) is not None
+def _serial_column_visible(win, row_y=None):
+    return _serial_column_center(win, row_y=row_y) is not None
 
 
 def _toolbelt_search_roots(win):
@@ -630,8 +660,8 @@ def _enable_serial_number_field(win):
     return False
 
 
-def ensure_serial_column_visible(win):
-    if _serial_column_visible(win):
+def ensure_serial_column_visible(win, row_y=None):
+    if _serial_column_visible(win, row_y=row_y):
         log.info("Toolbelt Serial Number column is visible")
         return True
     if not _open_fields_menu(win):
@@ -640,7 +670,7 @@ def ensure_serial_column_visible(win):
     if not _enable_serial_number_field(win):
         log.warning("could not enable Toolbelt Serial Number field")
         return False
-    visible = _serial_column_visible(win)
+    visible = _serial_column_visible(win, row_y=row_y)
     log.info("Toolbelt Serial Number column visible after Fields toggle: %s", visible)
     return visible
 
@@ -653,7 +683,7 @@ def _masked_secret(value):
 
 
 def discover_serial_from_row(win, ip, row_y):
-    serial_x = _serial_column_center(win)
+    serial_x = _serial_column_center(win, row_y=row_y)
     if serial_x is None:
         return None
     candidates = []
@@ -857,6 +887,8 @@ def _credential_candidates(credential, serial):
                 add(serial, "serial")
             continue
         add(candidate, "candidate")
+    if serial:
+        add(serial, "serial")
     return candidates
 
 
@@ -871,6 +903,11 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
     credential = _DEVICE_CREDENTIALS.get(ip) or {}
     raw_candidates = credential.get("password_candidates") or []
     candidates = _credential_candidates(credential, serial)
+    log.info(
+        "[%s] Toolbelt credential candidate sources: %s",
+        ip,
+        ", ".join(source for _, source in candidates) or "prefilled",
+    )
     if "__SERIAL__" in raw_candidates and not serial:
         emit(
             "serial_column_missing",
@@ -937,7 +974,7 @@ def select_device(win, ip, timeout=T_MANAGE):
     row_y = cy(ip_cell.rectangle())
     serial = None
     if _wants_serial_fallback(ip):
-        if ensure_serial_column_visible(win):
+        if ensure_serial_column_visible(win, row_y=row_y):
             refreshed_cell = find_device_cell(win, ip)
             if refreshed_cell is not None:
                 ip_cell = refreshed_cell
