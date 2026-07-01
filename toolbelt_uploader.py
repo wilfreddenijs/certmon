@@ -700,6 +700,36 @@ def _enable_serial_number_field(win):
     return False
 
 
+def _enable_serial_number_field_by_geometry(win):
+    try:
+        import pywinauto.mouse as mouse
+    except Exception:
+        return False
+    rows = []
+    for c in _iter_toolbelt_controls(win, ("Text", "CheckBox", "MenuItem", "Button")):
+        try:
+            text = _control_label(c).lower()
+            if text != "serial number":
+                continue
+            if hasattr(c, "is_visible") and not c.is_visible():
+                continue
+            rect = c.rectangle()
+            rows.append((rect.left, rect.top, rect.bottom))
+        except Exception:
+            continue
+    for left, top, bottom in sorted(rows, key=lambda item: item[0]):
+        y = (top + bottom) // 2
+        for x in (left - 12, left - 18, left + 6):
+            try:
+                log.info("clicking Toolbelt Serial Number checkbox at %s,%s", x, y)
+                mouse.click(coords=(x, y))
+                time.sleep(0.8)
+                return True
+            except Exception:
+                continue
+    return False
+
+
 def ensure_serial_column_visible(win, row_y=None):
     if _serial_column_visible(win, row_y=row_y):
         log.info("Toolbelt Serial Number column is visible")
@@ -707,10 +737,15 @@ def ensure_serial_column_visible(win, row_y=None):
     if not _open_fields_menu(win):
         log.warning("could not open Toolbelt Fields menu")
         return False
-    if not _enable_serial_number_field(win):
+    _enable_serial_number_field(win)
+    visible = _serial_column_visible(win, row_y=row_y)
+    if not visible:
+        _open_fields_menu(win)
+        _enable_serial_number_field_by_geometry(win)
+        visible = _serial_column_visible(win, row_y=row_y)
+    if not visible:
         log.warning("could not enable Toolbelt Serial Number field")
         return False
-    visible = _serial_column_visible(win, row_y=row_y)
     log.info("Toolbelt Serial Number column visible after Fields toggle: %s", visible)
     return visible
 
