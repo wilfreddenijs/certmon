@@ -1007,9 +1007,11 @@ def _fill_credentials_fields(win, username, password):
         except Exception:
             continue
     edits = sorted(edits, key=lambda c: (c.rectangle().top, c.rectangle().left))
-    if len(edits) >= 2:
-        _fill_edit(edits[0], win, username or "admin")
-        _fill_edit(edits[1], win, password)
+    if edits:
+        # Toolbelt pre-fills username=admin and often disables that field. The
+        # password field is the last visible edit in both the first prompt and
+        # the "Credentials are Incorrect" retry prompt.
+        _fill_edit(edits[-1], win, password)
         return True
 
     try:
@@ -1031,10 +1033,12 @@ def _fill_credentials_fields(win, username, password):
 def _click_credentials_enter(win):
     for b in win.descendants(control_type="Button"):
         text = (b.window_text() or "").strip().lower()
-        if text in {"enter", "ok", "login", "log in", "connect"} and b.is_visible():
+        if text in {"enter", "ok", "login", "log in", "connect", "try again"} and b.is_visible():
+            log.info("clicking Toolbelt credentials button '%s'", text)
             b.click_input()
             return True
     try:
+        log.info("submitting Toolbelt credentials with keyboard Enter")
         win.type_keys("{ENTER}", set_foreground=True)
         return True
     except Exception:
