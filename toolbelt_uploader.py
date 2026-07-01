@@ -129,7 +129,7 @@ def find_toolbelt_exe():
     return None
 
 # Generous waits — device manage + reboot are slow.
-T_MANAGE = 120     # seconds to wait for a device's config panels after Manage
+T_MANAGE = 180     # seconds to wait for a device's config panels after Manage
 T_DIALOG = 15      # file-open dialog appear
 T_APPLY = 120      # apply + reboot to report success
 T_CREDENTIAL_ACCEPT = 120  # slow Extron units can take a long time after auth
@@ -1189,6 +1189,34 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
     return True
 
 
+def _find_text_control(win, text):
+    for c in win.descendants(control_type="Text"):
+        if (c.window_text() or "").strip() == text:
+            return c
+    return None
+
+
+def _text_visible(win, text):
+    return _find_text_control(win, text) is not None
+
+
+def _wait_for_ui(win, ip, label, predicate, timeout=T_MANAGE):
+    deadline = time.time() + timeout
+    last_busy_log = 0
+    while time.time() < deadline:
+        try:
+            result = predicate()
+            if result:
+                return result
+        except Exception as exc:
+            now = time.time()
+            if now - last_busy_log > 10:
+                log.info("[%s] waiting for %s; Toolbelt UI busy: %s", ip, label, exc)
+                last_busy_log = now
+        time.sleep(POLL)
+    raise RuntimeError("timed out waiting for %s after %ss" % (label, timeout))
+
+
 # ---------------------------------------------------------------------------
 # Device selection + navigation  (task #2)
 # ---------------------------------------------------------------------------
@@ -1238,21 +1266,19 @@ def select_device(win, ip, timeout=T_MANAGE):
     # accept it (prefilled admin/extron) before anything else.
     accept_credentials_prompt(win, ip, serial=serial)
 
-    # Wait for the Utilities tab to be available, then click it
-    def utilities_tab():
-        for c in win.descendants(control_type="Text"):
-            if (c.window_text() or "").strip() == "Utilities":
-                return c
-        return None
-    wait_until(timeout, POLL, lambda: utilities_tab() is not None, value=True)
-    tab = utilities_tab()
+    # Wait for the Utilities tab to be available, then click it. Slow devices
+    # can keep Toolbelt's UIA tree busy for over a minute after authentication.
+    tab = _wait_for_ui(win, ip, "Utilities tab", lambda: _find_text_control(win, "Utilities"), timeout=timeout)
     tab.click_input()
     time.sleep(1.0)
     # Confirm the SSL section rendered
-    wait_until(timeout, POLL,
-               lambda: any((c.window_text() or "").strip() == "View and upload SSL certificates"
-                           for c in win.descendants(control_type="Text")),
-               value=True)
+    _wait_for_ui(
+        win,
+        ip,
+        "SSL certificate section",
+        lambda: _text_visible(win, "View and upload SSL certificates"),
+        timeout=timeout,
+    )
     log.info("[%s] Utilities tab open, SSL section visible", ip)
 
 
