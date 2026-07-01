@@ -852,6 +852,19 @@ def _write_resolved_credentials():
 
 
 def _credentials_modal_present(win):
+    joined = _credentials_modal_text(win)
+    return any(
+        marker in joined
+        for marker in (
+            "provide credentials",
+            "credentials are incorrect",
+            "credentials entered are incorrect",
+            "failed to connect",
+        )
+    )
+
+
+def _credentials_modal_text(win):
     try:
         texts = [win.window_text() or ""]
     except Exception:
@@ -866,11 +879,14 @@ def _credentials_modal_present(win):
                 texts.append(c.window_text() or "")
             except Exception:
                 pass
-    joined = " ".join(texts).lower()
+    return " ".join(texts).lower()
+
+
+def _credentials_rejected_present(win):
+    joined = _credentials_modal_text(win)
     return any(
         marker in joined
         for marker in (
-            "provide credentials",
             "credentials are incorrect",
             "credentials entered are incorrect",
             "failed to connect",
@@ -1062,13 +1078,16 @@ def _click_credentials_enter(win):
 
 
 def _wait_for_credentials_result(win, ip, source):
-    timeout = T_CREDENTIAL_ACCEPT if source == "serial" else 8
+    timeout = T_CREDENTIAL_ACCEPT
     deadline = time.time() + timeout
     last_busy_log = 0
+    reject_grace = time.time() + 2.5
     while time.time() < deadline:
         try:
             if not _credentials_modal_present(win):
                 return True
+            if time.time() > reject_grace and _credentials_rejected_present(win):
+                return False
         except Exception as exc:
             now = time.time()
             if now - last_busy_log > 5:
