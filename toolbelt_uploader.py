@@ -519,6 +519,33 @@ def _click_toolbar_overflow(win):
         return False
 
 
+def _toolbar_overflow_candidates(win):
+    candidates = []
+    for b in _iter_toolbelt_controls(win, ("Button", "SplitButton")):
+        try:
+            if hasattr(b, "is_visible") and not b.is_visible():
+                continue
+            rect = b.rectangle()
+            label = _control_label(b).lower()
+            if rect.top > 140 or rect.width() > 42 or rect.height() > 50:
+                continue
+            if label and not any(marker in label for marker in ("more", "overflow", "toolbar")):
+                continue
+            candidates.append((rect.right, b))
+        except Exception:
+            continue
+    return [button for _, button in sorted(candidates, key=lambda item: item[0], reverse=True)]
+
+
+def _click_control(control):
+    try:
+        control.click_input()
+        time.sleep(0.5)
+        return True
+    except Exception:
+        return False
+
+
 def _click_fields_button(win):
     for b in _iter_toolbelt_controls(win, ("Button", "SplitButton", "MenuItem")):
         try:
@@ -527,11 +554,51 @@ def _click_fields_button(win):
                 continue
             if hasattr(b, "is_visible") and not b.is_visible():
                 continue
-            b.click_input()
-            time.sleep(0.5)
+            if _click_control(b):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _click_fields_by_toolbar_geometry(win):
+    try:
+        import pywinauto.mouse as mouse
+    except Exception:
+        return False
+    anchors = []
+    for c in _iter_toolbelt_controls(win, ("Button", "SplitButton", "MenuItem", "Text")):
+        try:
+            label = _control_label(c).lower()
+            if label not in {"group", "filter"}:
+                continue
+            rect = c.rectangle()
+            if rect.top > 160:
+                continue
+            offset = 64 if label == "group" else 128
+            anchors.append((rect.right, rect.top, rect.bottom, offset))
+        except Exception:
+            continue
+    for right, top, bottom, offset in sorted(anchors, key=lambda item: item[0], reverse=True):
+        try:
+            x = right + offset
+            y = (top + bottom) // 2
+            mouse.click(coords=(x, y))
+            time.sleep(0.6)
             return True
         except Exception:
             continue
+    return False
+
+
+def _open_fields_menu(win):
+    if _click_fields_button(win) or _click_fields_by_toolbar_geometry(win):
+        return True
+    for overflow in _toolbar_overflow_candidates(win):
+        if not _click_control(overflow):
+            continue
+        if _click_fields_button(win) or _click_fields_by_toolbar_geometry(win):
+            return True
     return False
 
 
@@ -559,10 +626,11 @@ def _enable_serial_number_field(win):
 def ensure_serial_column_visible(win):
     if _serial_column_visible(win):
         return True
-    if not _click_fields_button(win):
-        if not _click_toolbar_overflow(win) or not _click_fields_button(win):
-            return False
+    if not _open_fields_menu(win):
+        log.warning("could not open Toolbelt Fields menu")
+        return False
     if not _enable_serial_number_field(win):
+        log.warning("could not enable Toolbelt Serial Number field")
         return False
     return _serial_column_visible(win)
 
@@ -580,6 +648,19 @@ def discover_serial_from_row(win, ip, row_y):
     if not candidates:
         return None
     return sorted(candidates, key=lambda item: item[0])[0][1]
+
+
+def find_device_cell(win, ip):
+    for control_type in ("Text", "Hyperlink"):
+        for c in win.descendants(control_type=control_type):
+            if (c.window_text() or "").strip() == ip:
+                return c
+    ensure_discovery_started(win, [ip], timeout=45, require_visible=False)
+    for control_type in ("Text", "Hyperlink"):
+        for c in win.descendants(control_type=control_type):
+            if (c.window_text() or "").strip() == ip:
+                return c
+    return None
 
 
 def _record_resolved_credential(ip, username, password):
@@ -823,26 +904,7 @@ def select_device(win, ip, timeout=T_MANAGE):
     log.info("[%s] selecting device", ip)
 
     # Locate the IP cell in the discovery list
-    ip_cell = None
-    for c in win.descendants(control_type="Text"):
-        if (c.window_text() or "").strip() == ip:
-            ip_cell = c
-            break
-    if ip_cell is None:
-        # try hyperlink
-        for c in win.descendants(control_type="Hyperlink"):
-            if (c.window_text() or "").strip() == ip:
-                ip_cell = c
-                break
-    if ip_cell is None:
-        ensure_discovery_started(win, [ip], timeout=45, require_visible=False)
-        for control_type in ("Text", "Hyperlink"):
-            for c in win.descendants(control_type=control_type):
-                if (c.window_text() or "").strip() == ip:
-                    ip_cell = c
-                    break
-            if ip_cell is not None:
-                break
+    ip_cell = find_device_cell(win, ip)
     if ip_cell is None:
         raise RuntimeError("device %s not found in discovery list (is discovery started?)" % ip)
 
@@ -850,7 +912,13 @@ def select_device(win, ip, timeout=T_MANAGE):
     serial = None
     if _wants_serial_fallback(ip):
         ensure_serial_column_visible(win)
+        refreshed_cell = find_device_cell(win, ip)
+        if refreshed_cell is not None:
+            ip_cell = refreshed_cell
+            row_y = cy(ip_cell.rectangle())
         serial = discover_serial_from_row(win, ip, row_y)
+        if serial:
+            log.info("[%s] discovered serial number from Toolbelt row", ip)
     # Click the row to select it
     ip_cell.click_input()
     time.sleep(0.5)
