@@ -1029,6 +1029,38 @@ def _fill_edit(edit, win, value):
     return False
 
 
+def _password_label_rect(win):
+    for c in win.descendants(control_type="Text"):
+        try:
+            if (c.window_text() or "").strip().lower() == "password":
+                return c.rectangle()
+        except Exception:
+            continue
+    return None
+
+
+def _choose_password_edit(win, edits):
+    label = _password_label_rect(win)
+    if label is not None:
+        candidates = []
+        for edit in edits:
+            try:
+                rect = edit.rectangle()
+                if rect.top < label.top - 5:
+                    continue
+                if rect.left < label.left - 10:
+                    continue
+                vertical_distance = abs(cy(rect) - (label.bottom + 18))
+                horizontal_distance = abs(rect.left - label.left)
+                candidates.append((vertical_distance, horizontal_distance, edit))
+            except Exception:
+                continue
+        if candidates:
+            log.info("selected Toolbelt password edit by Password label geometry")
+            return sorted(candidates, key=lambda item: (item[0], item[1]))[0][2]
+    return edits[-1] if edits else None
+
+
 def _fill_credentials_fields(win, username, password):
     edits = []
     for edit in win.descendants(control_type="Edit"):
@@ -1041,10 +1073,8 @@ def _fill_credentials_fields(win, username, password):
     edits = sorted(edits, key=lambda c: (c.rectangle().top, c.rectangle().left))
     log.info("Toolbelt credentials prompt visible edit count: %d", len(edits))
     if edits:
-        # Toolbelt pre-fills username=admin and often disables that field. The
-        # password field is the last visible edit in both the first prompt and
-        # the "Credentials are Incorrect" retry prompt.
-        return _fill_edit(edits[-1], win, password)
+        edit = _choose_password_edit(win, edits)
+        return _fill_edit(edit, win, password)
 
     try:
         import pywinauto.mouse as mouse
