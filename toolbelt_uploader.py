@@ -77,7 +77,13 @@ except ImportError:
 # The old C:\CertMon\CA path is deprecated.
 CA_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "CertMon", "CA")
 TOOLBELT_EXE = r"C:\Program Files (x86)\Extron\Toolbelt\Toolbelt.exe"
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toolbelt_upload.log")
+def _log_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+LOG_FILE = os.path.join(_log_dir(), "toolbelt_upload.log")
 
 
 def _toolbelt_candidate_paths():
@@ -143,6 +149,7 @@ def emit(event, **fields):
 
 def setup_logging():
     log.setLevel(logging.INFO)
+    log.handlers.clear()
     fmt = logging.Formatter("%(asctime)s %(levelname)-5s %(message)s", "%Y-%m-%d %H:%M:%S")
     fh = logging.FileHandler(LOG_FILE, encoding="utf-8"); fh.setFormatter(fmt); log.addHandler(fh)
     sh = logging.StreamHandler(sys.stdout); sh.setFormatter(fmt); log.addHandler(sh)
@@ -1321,6 +1328,7 @@ def main():
             _DEVICE_CREDENTIALS = json.load(f)
 
     setup_logging()
+    emit("log_file", path=LOG_FILE)
     if not args.device and not args.list:
         ap.error("provide --device or --list")
 
