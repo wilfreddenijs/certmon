@@ -129,9 +129,10 @@ def find_toolbelt_exe():
     return None
 
 # Generous waits — device manage + reboot are slow.
-T_MANAGE = 25      # seconds to wait for a device's config panels after Manage
+T_MANAGE = 120     # seconds to wait for a device's config panels after Manage
 T_DIALOG = 15      # file-open dialog appear
 T_APPLY = 120      # apply + reboot to report success
+T_CREDENTIAL_ACCEPT = 120  # slow Extron units can take a long time after auth
 POLL = 0.5
 
 log = logging.getLogger("tb")
@@ -856,7 +857,11 @@ def _credentials_modal_present(win):
     except Exception:
         texts = []
     for control_type in ("Text", "Edit", "Button"):
-        for c in win.descendants(control_type=control_type):
+        try:
+            controls = win.descendants(control_type=control_type)
+        except Exception:
+            return True
+        for c in controls:
             try:
                 texts.append(c.window_text() or "")
             except Exception:
@@ -1056,6 +1061,23 @@ def _click_credentials_enter(win):
         return False
 
 
+def _wait_for_credentials_result(win, ip, source):
+    timeout = T_CREDENTIAL_ACCEPT if source == "serial" else 8
+    deadline = time.time() + timeout
+    last_busy_log = 0
+    while time.time() < deadline:
+        try:
+            if not _credentials_modal_present(win):
+                return True
+        except Exception as exc:
+            now = time.time()
+            if now - last_busy_log > 5:
+                log.info("[%s] waiting for Toolbelt credential result; UI busy: %s", ip, exc)
+                last_busy_log = now
+        time.sleep(POLL)
+    return False
+
+
 def _credential_candidates(credential, serial):
     seen = set()
     candidates = []
@@ -1126,8 +1148,7 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
             _fill_credentials_password(win, candidate_password)
         if not _click_credentials_enter(win):
             break
-        time.sleep(2.5)
-        if not _credentials_modal_present(win):
+        if _wait_for_credentials_result(win, ip, source):
             if source == "serial":
                 _record_resolved_credential(
                     ip,
