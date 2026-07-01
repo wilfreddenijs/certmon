@@ -35,9 +35,12 @@ Goal: turn CertMon into a safe shared LAN service with local users, roles, sessi
 Plans:
 - [x] `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation
 
-### Phase 04 - Extron workflow/UI simplification
+### Phase 04: Extron workflow/UI simplification
 
 **Goal:** Restructure the CertMon workflow around scanned Extron devices, a single upload list, and centralized Local CA device-certificate handling in the Upload tab, while keeping the existing certificate and Toolbelt implementation logic unchanged.
 **Requirements:** Locked in `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-SPEC.md`
 **Depends on:** Phase 03 Toolbelt auto-upload UI
-**Plans:** 0 plans
+**Plans:** 1 plan
+
+Plans:
+- [ ] `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-01-PLAN.md` — Device-first Extron Local CA and Upload workflow
