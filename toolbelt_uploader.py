@@ -452,7 +452,7 @@ def _serial_column_center(win):
                 if hasattr(c, "is_visible") and not c.is_visible():
                     continue
                 text = (_control_text(c) or "").strip().lower()
-                if not (text in {"serial", "serial number"} or "serial number" in text):
+                if text not in {"serial", "serial number"}:
                     continue
                 return cx(c.rectangle())
             except Exception:
@@ -632,6 +632,7 @@ def _enable_serial_number_field(win):
 
 def ensure_serial_column_visible(win):
     if _serial_column_visible(win):
+        log.info("Toolbelt Serial Number column is visible")
         return True
     if not _open_fields_menu(win):
         log.warning("could not open Toolbelt Fields menu")
@@ -639,7 +640,16 @@ def ensure_serial_column_visible(win):
     if not _enable_serial_number_field(win):
         log.warning("could not enable Toolbelt Serial Number field")
         return False
-    return _serial_column_visible(win)
+    visible = _serial_column_visible(win)
+    log.info("Toolbelt Serial Number column visible after Fields toggle: %s", visible)
+    return visible
+
+
+def _masked_secret(value):
+    text = str(value or "")
+    if len(text) <= 4:
+        return "*" * len(text)
+    return "%s...%s" % (text[:2], text[-2:])
 
 
 def discover_serial_from_row(win, ip, row_y):
@@ -878,6 +888,15 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
 
     for candidate_password, source in candidates:
         if candidate_password:
+            log.info(
+                "[%s] trying Toolbelt credential candidate source=%s value=%s",
+                ip,
+                source,
+                _masked_secret(candidate_password),
+            )
+        else:
+            log.info("[%s] trying Toolbelt prefilled credential candidate", ip)
+        if candidate_password:
             _fill_credentials_password(win, candidate_password)
         if not _click_credentials_enter(win):
             break
@@ -918,14 +937,18 @@ def select_device(win, ip, timeout=T_MANAGE):
     row_y = cy(ip_cell.rectangle())
     serial = None
     if _wants_serial_fallback(ip):
-        ensure_serial_column_visible(win)
-        refreshed_cell = find_device_cell(win, ip)
-        if refreshed_cell is not None:
-            ip_cell = refreshed_cell
-            row_y = cy(ip_cell.rectangle())
-        serial = discover_serial_from_row(win, ip, row_y)
-        if serial:
-            log.info("[%s] discovered serial number from Toolbelt row", ip)
+        if ensure_serial_column_visible(win):
+            refreshed_cell = find_device_cell(win, ip)
+            if refreshed_cell is not None:
+                ip_cell = refreshed_cell
+                row_y = cy(ip_cell.rectangle())
+            serial = discover_serial_from_row(win, ip, row_y)
+            if serial:
+                log.info("[%s] using Toolbelt serial candidate %s", ip, _masked_secret(serial))
+            else:
+                log.warning("[%s] Serial Number column is visible but no serial was read from the row", ip)
+        else:
+            log.warning("[%s] Serial Number column is not visible; skipping serial password fallback", ip)
     # Click the row to select it
     ip_cell.click_input()
     time.sleep(0.5)
