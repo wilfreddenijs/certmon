@@ -647,12 +647,13 @@ def _click_filter_overflow_arrow(win):
             continue
     for _, _, rect in sorted(filter_buttons, key=lambda item: item[0], reverse=True):
         for x, y in (
-            (rect.right + 8, rect.bottom - 7),
-            (rect.right - 8, rect.bottom - 7),
-            (rect.right - 10, cy(rect)),
+            (rect.right + 28, rect.bottom - 3),
+            (rect.right + 24, rect.bottom - 4),
+            (rect.right + 32, rect.bottom - 8),
+            (rect.right + 8, rect.bottom - 3),
         ):
             try:
-                log.info("clicking Toolbelt Filter overflow arrow at %s,%s", x, y)
+                log.info("clicking Toolbelt toolbar overflow divider near Filter at %s,%s", x, y)
                 mouse.click(coords=(x, y))
                 time.sleep(0.8)
                 return True
