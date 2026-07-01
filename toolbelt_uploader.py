@@ -628,13 +628,52 @@ def _click_fields_by_toolbar_geometry(win):
     return False
 
 
+def _click_filter_overflow_arrow(win):
+    try:
+        import pywinauto.mouse as mouse
+    except Exception:
+        return False
+    filter_buttons = []
+    for c in _iter_toolbelt_controls(win, ("Button", "SplitButton", "Text")):
+        try:
+            label = _control_label(c).lower()
+            if label != "filter":
+                continue
+            rect = c.rectangle()
+            if rect.top > 160:
+                continue
+            filter_buttons.append((rect.right, rect.bottom, rect))
+        except Exception:
+            continue
+    for _, _, rect in sorted(filter_buttons, key=lambda item: item[0], reverse=True):
+        for x, y in (
+            (rect.right + 8, rect.bottom - 7),
+            (rect.right - 8, rect.bottom - 7),
+            (rect.right - 10, cy(rect)),
+        ):
+            try:
+                log.info("clicking Toolbelt Filter overflow arrow at %s,%s", x, y)
+                mouse.click(coords=(x, y))
+                time.sleep(0.8)
+                return True
+            except Exception:
+                continue
+    return False
+
+
 def _open_fields_menu(win):
-    if _click_fields_button(win) or _click_fields_by_toolbar_geometry(win):
+    if _click_fields_button(win):
+        return True
+    if _click_filter_overflow_arrow(win) and _click_fields_button(win):
+        return True
+    if _click_fields_by_toolbar_geometry(win) and _click_fields_button(win):
         return True
     for overflow in _toolbar_overflow_candidates(win):
         if not _click_control(overflow):
             continue
-        if _click_fields_button(win) or _click_fields_by_toolbar_geometry(win):
+        if _click_fields_button(win):
+            return True
+        if _click_fields_by_toolbar_geometry(win) and _click_fields_button(win):
             return True
     return False
 
