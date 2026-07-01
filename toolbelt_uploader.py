@@ -1430,6 +1430,22 @@ def upload_to_device(app, win, ip, pem_path, passphrase, commit, force=False):
     return ok, msg
 
 
+def test_serial_column(app, win, ip):
+    bring_to_front(win)
+    ensure_discovery_started(win, [ip], timeout=45, require_visible=False)
+    ip_cell = find_device_cell(win, ip)
+    row_y = cy(ip_cell.rectangle()) if ip_cell is not None else None
+    ok = ensure_serial_column_visible(win, row_y=row_y)
+    emit(
+        "serial_column_test",
+        selector=ip,
+        ok=ok,
+        message="Serial Number column visible" if ok else "Serial Number column not visible",
+    )
+    log.info("[%s] Serial Number column test result: %s", ip, ok)
+    return ok
+
+
 def pem_for_ip(ip):
     return os.path.join(CA_DIR, ip.replace(".", "_").replace(":", "_") + ".pem")
 
@@ -1487,6 +1503,8 @@ def main():
                     help="seconds to pause between devices (default 2)")
     ap.add_argument("--force", action="store_true",
                     help="re-upload even if the device already serves this cert")
+    ap.add_argument("--test-serial-column", action="store_true",
+                    help="only test enabling Toolbelt's Serial Number discovery column")
     ap.add_argument("--device-password", default=None,
                     help="device admin password for the credentials prompt "
                          "(default: accept Toolbelt's prefilled value)")
@@ -1510,6 +1528,8 @@ def main():
 
     setup_logging()
     emit("log_file", path=LOG_FILE)
+    if args.test_serial_column and not args.device:
+        ap.error("--test-serial-column requires --device")
     if not args.device and not args.list:
         ap.error("provide --device or --list")
 
@@ -1538,6 +1558,10 @@ def main():
     emit("run_started", mode="upload" if args.commit else "dry-run", count=len(devices))
     app, win = connect_toolbelt()
     ensure_discovery_started(win, [ip for ip, _ in devices])
+    if args.test_serial_column:
+        ok = test_serial_column(app, win, devices[0][0])
+        emit("run_finished", ok=1 if ok else 0, total=1, status="complete")
+        return
 
     results = []
     for idx, (ip, pem_override) in enumerate(devices, 1):
