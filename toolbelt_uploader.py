@@ -919,6 +919,51 @@ def _accept_credentials_prompt_legacy(win, ip, timeout=8):
 
 
 def _fill_credentials_password(win, password):
+    _fill_credentials_fields(win, "admin", password)
+
+
+def _paste_text(win, text):
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        win.type_keys("^v", set_foreground=True)
+        return True
+    except Exception:
+        try:
+            win.type_keys(text, with_spaces=True, set_foreground=True)
+            return True
+        except Exception:
+            return False
+
+
+def _fill_edit(edit, win, value):
+    try:
+        import pywinauto.mouse as mouse
+        rect = edit.rectangle()
+        mouse.click(coords=(cx(rect), cy(rect)))
+        time.sleep(0.2)
+        win.type_keys("^a{BACKSPACE}", set_foreground=True)
+        _paste_text(win, value)
+        return True
+    except Exception:
+        return False
+
+
+def _fill_credentials_fields(win, username, password):
+    edits = []
+    for edit in win.descendants(control_type="Edit"):
+        try:
+            if hasattr(edit, "is_visible") and not edit.is_visible():
+                continue
+            edits.append(edit)
+        except Exception:
+            continue
+    edits = sorted(edits, key=lambda c: (c.rectangle().top, c.rectangle().left))
+    if len(edits) >= 2:
+        _fill_edit(edits[0], win, username or "admin")
+        _fill_edit(edits[1], win, password)
+        return True
+
     try:
         import pywinauto.mouse as mouse
         plabel = next(
@@ -929,9 +974,10 @@ def _fill_credentials_password(win, password):
         mouse.click(coords=(plabel.left + 40, plabel.bottom + 18))
         time.sleep(0.2)
         win.type_keys("^a{BACKSPACE}", set_foreground=True)
-        win.type_keys(password, with_spaces=True, set_foreground=True)
+        _paste_text(win, password)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _click_credentials_enter(win):
