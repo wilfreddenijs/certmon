@@ -1484,10 +1484,20 @@ def test_serial_column(app, win, ip):
     ip_cell = find_device_cell(win, ip)
     row_y = cy(ip_cell.rectangle()) if ip_cell is not None else None
     ok = ensure_serial_column_visible(win, row_y=row_y)
+    serial = None
+    if ok:
+        ip_cell = find_device_cell(win, ip)
+        row_y = cy(ip_cell.rectangle()) if ip_cell is not None else row_y
+        serial = discover_serial_from_row(win, ip, row_y) if row_y is not None else None
+        if serial:
+            log.info("[%s] Serial Number column test read serial %s", ip, _masked_secret(serial))
+        else:
+            log.warning("[%s] Serial Number column visible but serial could not be read", ip)
     emit(
         "serial_column_test",
         selector=ip,
         ok=ok,
+        serial_preview=_masked_secret(serial) if serial else None,
         message="Serial Number column visible" if ok else "Serial Number column not visible",
     )
     log.info("[%s] Serial Number column test result: %s", ip, ok)
