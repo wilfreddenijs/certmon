@@ -38,6 +38,10 @@ class FakeToolbeltService:
     def save_selection(self, selectors):
         self.selection = selectors
 
+    def reset_upload_tab_state(self):
+        self.selection = None
+        return self.list_devices()
+
     def save_credentials(self, selector, *, username, password):
         self.credentials = (selector, username, password)
 
@@ -72,6 +76,18 @@ def test_toolbelt_devices_returns_safe_device_list(tmp_data_dir):
     assert payload["devices"][0]["selector"] == "192.168.0.10"
     assert "password" not in str(payload).lower()
     assert "private_key" not in str(payload).lower()
+
+
+def test_toolbelt_reset_upload_tab_route_returns_clean_device_list(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+    service = FakeToolbeltService()
+    install_fake_toolbelt(module, service)
+
+    response = module.app.test_client().post("/api/toolbelt/reset-upload-tab")
+
+    assert response.status_code == 200
+    assert response.get_json()["devices"][0]["selector"] == "192.168.0.10"
+    assert service.selection is None
 
 
 def test_toolbelt_dry_run_rejects_private_material_and_starts_run(tmp_data_dir):

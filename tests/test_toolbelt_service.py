@@ -317,3 +317,37 @@ def test_toolbelt_service_clears_stale_statuses_when_run_starts(tmp_path):
     devices = service.list_devices()
     assert devices[0]["dry_run"] is None
     assert devices[0]["upload"] is None
+
+
+def test_toolbelt_service_reset_upload_tab_state_clears_status_and_selection(tmp_path):
+    database = FakeDatabase()
+    database.put_setting(
+        STATUS_KEY,
+        {
+            "192.168.0.10|cert-1|dry-run": {"ok": False, "message": "old dry-run"},
+            "192.168.0.10|cert-1|upload": {"ok": True, "message": "old upload"},
+        },
+    )
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: None,
+    )
+    service.save_selection([])
+
+    devices = service.reset_upload_tab_state()
+
+    assert database.get_setting(STATUS_KEY) == {}
+    assert devices[0]["selected"] is True
+    assert devices[0]["dry_run"] is None
+    assert devices[0]["upload"] is None
+
+
+def test_toolbelt_service_sanitizer_does_not_redact_password_substrings():
+    message = {"message": "all known Toolbelt passwords failed"}
+
+    sanitized = ToolbeltBatchService._sanitize(message)
+
+    assert sanitized["message"] == "all known Toolbelt passwords failed"

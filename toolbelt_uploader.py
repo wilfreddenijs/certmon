@@ -457,10 +457,72 @@ def _serial_column_visible(win):
     return _serial_column_center(win) is not None
 
 
-def _click_fields_button(win):
-    for b in win.descendants(control_type="Button"):
+def _toolbelt_search_roots(win):
+    roots = [win]
+    try:
+        roots.extend(Desktop(backend="uia").windows())
+    except Exception:
+        pass
+    return roots
+
+
+def _iter_toolbelt_controls(win, control_types):
+    seen = set()
+    for root in _toolbelt_search_roots(win):
+        for control_type in control_types:
+            try:
+                controls = root.descendants(control_type=control_type)
+            except Exception:
+                continue
+            for c in controls:
+                try:
+                    runtime_id = getattr(c.element_info, "runtime_id", None)
+                    key = tuple(runtime_id) if runtime_id else (c.handle, id(c))
+                except Exception:
+                    key = id(c)
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield c
+
+
+def _control_label(control):
+    try:
+        return (_control_text(control) or control.window_text() or "").strip()
+    except Exception:
+        return ""
+
+
+def _click_toolbar_overflow(win):
+    candidates = []
+    for b in _iter_toolbelt_controls(win, ("Button", "SplitButton")):
         try:
-            text = (_control_text(b) or b.window_text() or "").strip().lower()
+            if hasattr(b, "is_visible") and not b.is_visible():
+                continue
+            rect = b.rectangle()
+            label = _control_label(b).lower()
+            if rect.top > 130 or rect.width() > 38 or rect.height() > 45:
+                continue
+            if label and not any(marker in label for marker in ("more", "overflow", "toolbar")):
+                continue
+            candidates.append((rect.right, b))
+        except Exception:
+            continue
+    if not candidates:
+        return False
+    _, button = sorted(candidates, key=lambda item: item[0])[-1]
+    try:
+        button.click_input()
+        time.sleep(0.5)
+        return True
+    except Exception:
+        return False
+
+
+def _click_fields_button(win):
+    for b in _iter_toolbelt_controls(win, ("Button", "SplitButton", "MenuItem")):
+        try:
+            text = _control_label(b).lower()
             if "fields" not in text:
                 continue
             if hasattr(b, "is_visible") and not b.is_visible():
@@ -474,24 +536,23 @@ def _click_fields_button(win):
 
 
 def _enable_serial_number_field(win):
-    for control_type in ("MenuItem", "CheckBox", "Text", "Button"):
-        for c in win.descendants(control_type=control_type):
-            try:
-                text = (_control_text(c) or c.window_text() or "").strip().lower()
-                if text != "serial number":
-                    continue
-                if hasattr(c, "is_visible") and not c.is_visible():
-                    continue
-                try:
-                    if c.get_toggle_state() == 1:
-                        return True
-                except Exception:
-                    pass
-                c.click_input()
-                time.sleep(0.8)
-                return True
-            except Exception:
+    for c in _iter_toolbelt_controls(win, ("MenuItem", "CheckBox", "Text", "Button")):
+        try:
+            text = _control_label(c).lower()
+            if text != "serial number":
                 continue
+            if hasattr(c, "is_visible") and not c.is_visible():
+                continue
+            try:
+                if c.get_toggle_state() == 1:
+                    return True
+            except Exception:
+                pass
+            c.click_input()
+            time.sleep(0.8)
+            return True
+        except Exception:
+            continue
     return False
 
 
@@ -499,7 +560,8 @@ def ensure_serial_column_visible(win):
     if _serial_column_visible(win):
         return True
     if not _click_fields_button(win):
-        return False
+        if not _click_toolbar_overflow(win) or not _click_fields_button(win):
+            return False
     if not _enable_serial_number_field(win):
         return False
     return _serial_column_visible(win)
@@ -518,7 +580,6 @@ def discover_serial_from_row(win, ip, row_y):
     if not candidates:
         return None
     return sorted(candidates, key=lambda item: item[0])[0][1]
-    return None
 
 
 def _record_resolved_credential(ip, username, password):
@@ -747,7 +808,7 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
         emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
         dismiss_credentials_prompt(win)
         raise RuntimeError(
-            "credentials rejected for %s - all known Toolbelt passwords failed. "
+            "credentials rejected for %s - all known Toolbelt credential attempts failed. "
             "If the device uses the serial number, choose Fields > Serial Number "
             "in Toolbelt discovery. If Fields is hidden, open the toolbar overflow "
             "menu; if the column is off-screen, scroll right or move the splitter." % ip)

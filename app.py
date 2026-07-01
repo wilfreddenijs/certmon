@@ -1174,6 +1174,14 @@ def toolbelt_selection():
     return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
 
 
+@app.route("/api/toolbelt/reset-upload-tab", methods=["POST"])
+def toolbelt_reset_upload_tab():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    return jsonify({"ok": True, "devices": toolbelt_service.reset_upload_tab_state()})
+
+
 @app.route("/api/toolbelt/devices/<path:selector>/credentials", methods=["PATCH"])
 def toolbelt_credentials(selector):
     authorize(Permission.DEPLOY_CERTIFICATE)

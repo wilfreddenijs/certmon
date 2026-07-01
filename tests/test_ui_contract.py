@@ -185,6 +185,7 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert 'id="toolbelt-upload-btn"' in html
     assert 'id="toolbelt-stop-btn"' in html
     assert "/api/toolbelt/devices" in html
+    assert "/api/toolbelt/reset-upload-tab" in html
     assert "/api/toolbelt/dry-run" in html
     assert "/api/toolbelt/upload" in html
     assert "Stop after current device" in html

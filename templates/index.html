@@ -1792,6 +1792,7 @@
   let toolbeltRunId = null;
   let toolbeltPollTimer = null;
   let toolbeltAutoDryRunStarted = false;
+  let toolbeltInitialStateReset = false;
 
   // Escape a string for safe use inside a single-quoted HTML attribute
   function escAttr(s) {
@@ -1901,7 +1902,13 @@
     const status = document.getElementById('toolbelt-run-status');
     if (!list || !status) return;
     try {
-      const res = await fetch('/api/toolbelt/devices');
+      let res;
+      if (!toolbeltInitialStateReset && !forceDryRun) {
+        toolbeltInitialStateReset = true;
+        res = await fetch('/api/toolbelt/reset-upload-tab', { method: 'POST' });
+      } else {
+        res = await fetch('/api/toolbelt/devices');
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load Toolbelt devices');
       toolbeltDevices = data.devices || [];

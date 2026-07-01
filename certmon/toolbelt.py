@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -104,6 +105,14 @@ class ToolbeltBatchService:
 
     def save_selection(self, selectors):
         self.database.put_setting(SELECTION_KEY, sorted(set(selectors or [])))
+
+    def reset_upload_tab_state(self):
+        self.database.put_setting(STATUS_KEY, {})
+        if hasattr(self.database, "delete_setting"):
+            self.database.delete_setting(SELECTION_KEY)
+        else:
+            self.database.put_setting(SELECTION_KEY, None)
+        return self.list_devices()
 
     def save_credentials(self, selector, *, username, password):
         if not selector or not username or password is None:
@@ -428,6 +437,7 @@ class ToolbeltBatchService:
     @staticmethod
     def _sanitize(value):
         text = json.dumps(value, default=str)
-        for forbidden in ("password", "private-key", "BEGIN PRIVATE KEY"):
+        text = re.sub(r"\bpassword\b", "[redacted]", text, flags=re.IGNORECASE)
+        for forbidden in ("private-key", "BEGIN PRIVATE KEY"):
             text = text.replace(forbidden, "[redacted]")
         return json.loads(text)
