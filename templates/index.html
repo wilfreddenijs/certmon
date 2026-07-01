@@ -854,6 +854,7 @@
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
               <button class="btn btn-ghost" onclick="loadToolbeltDevices(true)">Retry dry-run</button>
+              <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared password</button>
               <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
               <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
             </div>
@@ -1938,6 +1939,13 @@
       uploadBtn.disabled = true;
       return;
     }
+    const toolbeltCredentialsLabel = d => {
+      if (d.credentials_saved) return 'saved encrypted';
+      if (d.default_credentials_saved) {
+        return 'tries shared password, then admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
+      }
+      return 'tries admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
+    };
     list.innerHTML = toolbeltDevices.map(d => `
       <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)">
         <label style="display:flex;gap:10px;align-items:flex-start">
@@ -1945,7 +1953,7 @@
           <div style="flex:1">
             <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)">${d.label}</div>
             <div class="help-text">Selector: <code>${d.selector}</code> · certificate: <code>${d.certificate_id}</code></div>
-            <div class="help-text">Local CA: ${d.extron_ready ? 'Extron PEM ready' : 'not Extron-ready'} · credentials: ${d.credentials_saved ? 'saved encrypted' : 'tries admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it'}</div>
+            <div class="help-text">Local CA: ${d.extron_ready ? 'Extron PEM ready' : 'not Extron-ready'} · credentials: ${toolbeltCredentialsLabel(d)}</div>
             <div class="help-text">Dry-run status: ${toolbeltStatusLabel(d.dry_run)}</div>
             <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
           </div>
@@ -1964,6 +1972,22 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ selectors: toolbeltDevices.filter(d => d.selected).map(d => d.selector) })
     });
+    renderToolbeltDevices();
+  }
+
+  async function saveToolbeltDefaultCredentials() {
+    const username = prompt('Shared Toolbelt username', 'admin');
+    if (!username) return;
+    const password = prompt('Shared Toolbelt password. CertMon tries this before admin/extron and serial fallback. Leave empty to cancel.');
+    if (!password) return;
+    const res = await fetch('/api/toolbelt/default-credentials', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Could not save shared credentials'); return; }
+    toolbeltDevices = data.devices || toolbeltDevices;
     renderToolbeltDevices();
   }
 

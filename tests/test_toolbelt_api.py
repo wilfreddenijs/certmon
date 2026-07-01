@@ -11,6 +11,7 @@ class FakeToolbeltService:
     def __init__(self):
         self.selection = None
         self.credentials = None
+        self.default_credentials = None
         self.started = []
         self.run = {
             "id": "run-1",
@@ -32,6 +33,7 @@ class FakeToolbeltService:
                 "dry_run": {"ok": True, "message": "dry-run (not applied)"},
                 "upload": None,
                 "credentials_saved": False,
+                "default_credentials_saved": self.default_credentials is not None,
             }
         ]
 
@@ -44,6 +46,9 @@ class FakeToolbeltService:
 
     def save_credentials(self, selector, *, username, password):
         self.credentials = (selector, username, password)
+
+    def save_default_credentials(self, *, username, password):
+        self.default_credentials = (username, password)
 
     def start(self, *, mode, selectors=None):
         self.started.append((mode, selectors))
@@ -124,6 +129,15 @@ def test_toolbelt_upload_stop_selection_and_credentials_routes(tmp_data_dir):
         json={"username": "admin", "password": "extron"},
     ).status_code == 200
     assert service.credentials == ("192.168.0.10", "admin", "extron")
+
+    default_response = client.patch(
+        "/api/toolbelt/default-credentials",
+        json={"username": "admin", "password": "shared-secret"},
+    )
+    assert default_response.status_code == 200
+    assert service.default_credentials == ("admin", "shared-secret")
+    assert default_response.get_json()["devices"][0]["default_credentials_saved"] is True
+    assert "shared-secret" not in str(default_response.get_json())
 
     response = client.post(
         "/api/toolbelt/upload", json={"selectors": ["192.168.0.10"]}

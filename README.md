@@ -25,7 +25,7 @@ The Upload tab contains a **Toolbelt batch upload** section for Extron devices. 
 - Real upload requires an explicit **Start Toolbelt upload** click and is enabled only for selected devices whose dry-run is OK.
 - **Stop after current device** requests a safe stop before the next device starts; it does not force-kill an active Toolbelt operation.
 - CertMon materializes the Extron combined PEM only in a temporary server-side run folder and deletes it after the run.
-- Per-device credentials are stored encrypted. CertMon tries saved credentials first, then `admin` / `extron`, then `admin` / the serial number read from Toolbelt discovery during dry-run. If the serial number is not visible, choose **Fields** > **Serial Number** in Toolbelt and retry dry-run; if **Fields** is hidden, open the toolbar overflow menu, and if the serial column is off-screen, scroll right or move the splitter.
+- Per-device and shared Toolbelt credentials are stored encrypted. CertMon tries saved per-device credentials first, then the shared Toolbelt password if configured, then `admin` / `extron`, then `admin` / the serial number read from Toolbelt discovery during dry-run. If the serial number is not visible, choose **Fields** > **Serial Number** in Toolbelt and retry dry-run; if **Fields** is hidden, open the toolbar overflow menu, and if the serial column is off-screen, scroll right or move the splitter.
 
 First-run Toolbelt checklist:
 

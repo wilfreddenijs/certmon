@@ -16,6 +16,8 @@ from pathlib import Path
 STATUS_KEY = "toolbelt_latest_status"
 SELECTION_KEY = "toolbelt_selected_devices"
 SECRET_PREFIX = "toolbelt-device-credentials:"
+DEFAULT_SECRET_ID = "toolbelt-default-credentials"
+SECRET_PURPOSE = "toolbelt-device-credentials"
 
 
 def utc_now():
@@ -73,6 +75,7 @@ class ToolbeltBatchService:
         latest = self.database.get_setting(STATUS_KEY, {})
         selected_setting = self.database.get_setting(SELECTION_KEY, None)
         selected = set(selected_setting or [])
+        default_credentials_saved = self.database.get_secret(DEFAULT_SECRET_ID) is not None
         rows = []
         for cert in self.database.list_certificates():
             if cert.get("kind") != "leaf" or cert.get("issuer_type") != "local_ca":
@@ -99,6 +102,7 @@ class ToolbeltBatchService:
                         self._secret_id(selector)
                     )
                     is not None,
+                    "default_credentials_saved": default_credentials_saved,
                 }
             )
         return sorted(rows, key=lambda row: (row["label"], row["selector"]))
@@ -119,10 +123,21 @@ class ToolbeltBatchService:
             raise ValueError("selector, username and password are required")
         blob = self.vault.encrypt(
             json.dumps({"username": username, "password": password}).encode("utf-8"),
-            purpose="toolbelt-device-credentials",
+            purpose=SECRET_PURPOSE,
         )
         self.database.put_secret(
             self._secret_id(selector), blob, {"selector": selector, "username": username}
+        )
+
+    def save_default_credentials(self, *, username, password):
+        if not username or password is None:
+            raise ValueError("username and password are required")
+        blob = self.vault.encrypt(
+            json.dumps({"username": username, "password": password}).encode("utf-8"),
+            purpose=SECRET_PURPOSE,
+        )
+        self.database.put_secret(
+            DEFAULT_SECRET_ID, blob, {"scope": "default", "username": username}
         )
 
     def start(self, *, mode, selectors=None):
@@ -393,17 +408,28 @@ class ToolbeltBatchService:
                 pass
 
     def _credentials_for(self, selector):
-        blob = self.database.get_secret(self._secret_id(selector))
-        if blob is not None:
-            try:
-                return json.loads(
-                    self.vault.decrypt(
-                        blob, purpose="toolbelt-device-credentials"
-                    ).decode("utf-8")
-                )
-            except Exception:
-                pass
-        return {"username": "admin", "password_candidates": ["extron", "__SERIAL__"]}
+        saved = self._load_secret_credentials(self._secret_id(selector))
+        if saved is not None:
+            return saved
+
+        default = self._load_secret_credentials(DEFAULT_SECRET_ID) or {}
+        username = default.get("username") or "admin"
+        password_candidates = []
+        for candidate in (default.get("password"), "extron", "__SERIAL__"):
+            if candidate is not None and candidate not in password_candidates:
+                password_candidates.append(candidate)
+        return {"username": username, "password_candidates": password_candidates}
+
+    def _load_secret_credentials(self, secret_id):
+        blob = self.database.get_secret(secret_id)
+        if blob is None:
+            return None
+        try:
+            return json.loads(
+                self.vault.decrypt(blob, purpose=SECRET_PURPOSE).decode("utf-8")
+            )
+        except Exception:
+            return None
 
     def _certificate_id_for(self, selector):
         for row in self.list_devices():

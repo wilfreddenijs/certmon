@@ -1198,6 +1198,22 @@ def toolbelt_credentials(selector):
     return jsonify({"ok": True})
 
 
+@app.route("/api/toolbelt/default-credentials", methods=["PATCH"])
+def toolbelt_default_credentials():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "admin").strip()
+    password = body.get("password")
+    if password is None:
+        return jsonify({"error": "password is required"}), 400
+    toolbelt_service.save_default_credentials(
+        username=username, password=str(password)
+    )
+    return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
+
+
 @app.route("/api/toolbelt/dry-run", methods=["POST"])
 def toolbelt_dry_run():
     authorize(Permission.DEPLOY_CERTIFICATE)
