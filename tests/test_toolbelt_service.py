@@ -134,6 +134,63 @@ def test_toolbelt_service_credentials_are_encrypted_and_not_returned(tmp_path):
     assert "admin" not in payload
 
 
+def test_toolbelt_service_saves_serial_fallback_after_dry_run(tmp_path):
+    database = FakeDatabase()
+    commands = []
+
+    def runner(command, on_event):
+        commands.append(command)
+        credential_path = Path(command[command.index("--device-password-file") + 1])
+        credentials = json.loads(credential_path.read_text(encoding="utf-8"))
+        resolved_path = Path(command[command.index("--resolved-credentials-file") + 1])
+        if "--commit" not in command:
+            assert credentials["192.168.0.10"]["password_candidates"] == ["extron", "__SERIAL__"]
+            resolved_path.write_text(
+                json.dumps(
+                    {
+                        "192.168.0.10": {
+                            "username": "admin",
+                            "password": "SERIAL123",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            on_event(
+                {
+                    "event": "credentials_resolved",
+                    "selector": "192.168.0.10",
+                    "message": "resolved",
+                }
+            )
+            on_event({"event": "dry_run_ok", "selector": "192.168.0.10", "message": "ok"})
+        else:
+            assert credentials["192.168.0.10"] == {
+                "username": "admin",
+                "password": "SERIAL123",
+            }
+            on_event({"event": "upload_ok", "selector": "192.168.0.10", "message": "ok"})
+
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=runner,
+    )
+
+    service.start(mode="dry-run", selectors=["192.168.0.10"])
+    wait_until(lambda: database.get_secret("toolbelt-device-credentials:192.168.0.10") is not None)
+    devices = service.list_devices()
+    assert devices[0]["credentials_saved"] is True
+    payload = json.dumps(devices)
+    assert "SERIAL123" not in payload
+
+    service.start(mode="upload", selectors=["192.168.0.10"])
+    wait_until(lambda: len(commands) == 2)
+    assert "--commit" in commands[1]
+
+
 def test_toolbelt_service_uses_child_mode_when_frozen(tmp_path, monkeypatch):
     database = FakeDatabase()
     service = ToolbeltBatchService(

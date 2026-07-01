@@ -389,8 +389,153 @@ def cy(rect):
     return (rect.top + rect.bottom) // 2
 
 
+def cx(rect):
+    return (rect.left + rect.right) // 2
+
+
 _DEVICE_PASSWORD = None  # optional override; set from --device-password
 _DEVICE_CREDENTIALS = {}
+_RESOLVED_CREDENTIALS = {}
+_RESOLVED_CREDENTIALS_FILE = None
+
+
+def _wants_serial_fallback(ip):
+    credential = _DEVICE_CREDENTIALS.get(ip) or {}
+    return "__SERIAL__" in (credential.get("password_candidates") or [])
+
+
+def _looks_like_serial(value):
+    text = (value or "").strip()
+    if len(text) < 5 or len(text) > 32:
+        return False
+    lower = text.lower()
+    if lower in {"serial", "serial number", "model", "ip address", "device", "name"}:
+        return False
+    if "." in text or ":" in text or "/" in text or " " in text:
+        return False
+    return any(ch.isdigit() for ch in text) and any(ch.isalpha() for ch in text)
+
+
+def _discovery_row_cells(win, row_y):
+    row = []
+    for control_type in ("Text", "Hyperlink", "DataItem", "ListItem"):
+        for c in win.descendants(control_type=control_type):
+            try:
+                if not c.is_visible():
+                    continue
+                r = c.rectangle()
+                if abs(cy(r) - row_y) > 24:
+                    continue
+                text = (c.window_text() or "").strip()
+                if text:
+                    row.append((r.left, text))
+            except Exception:
+                pass
+    return sorted(row, key=lambda item: item[0])
+
+
+def _discovery_row_texts(win, row_y):
+    return [text for _, text in _discovery_row_cells(win, row_y)]
+
+
+def _serial_column_center(win):
+    for control_type in ("Text", "Header", "HeaderItem", "DataItem"):
+        for c in win.descendants(control_type=control_type):
+            try:
+                if hasattr(c, "is_visible") and not c.is_visible():
+                    continue
+                text = (_control_text(c) or "").strip().lower()
+                if not (text in {"serial", "serial number"} or "serial number" in text):
+                    continue
+                return cx(c.rectangle())
+            except Exception:
+                continue
+    return None
+
+
+def _serial_column_visible(win):
+    return _serial_column_center(win) is not None
+
+
+def _click_fields_button(win):
+    for b in win.descendants(control_type="Button"):
+        try:
+            text = (_control_text(b) or b.window_text() or "").strip().lower()
+            if "fields" not in text:
+                continue
+            if hasattr(b, "is_visible") and not b.is_visible():
+                continue
+            b.click_input()
+            time.sleep(0.5)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _enable_serial_number_field(win):
+    for control_type in ("MenuItem", "CheckBox", "Text", "Button"):
+        for c in win.descendants(control_type=control_type):
+            try:
+                text = (_control_text(c) or c.window_text() or "").strip().lower()
+                if text != "serial number":
+                    continue
+                if hasattr(c, "is_visible") and not c.is_visible():
+                    continue
+                try:
+                    if c.get_toggle_state() == 1:
+                        return True
+                except Exception:
+                    pass
+                c.click_input()
+                time.sleep(0.8)
+                return True
+            except Exception:
+                continue
+    return False
+
+
+def ensure_serial_column_visible(win):
+    if _serial_column_visible(win):
+        return True
+    if not _click_fields_button(win):
+        return False
+    if not _enable_serial_number_field(win):
+        return False
+    return _serial_column_visible(win)
+
+
+def discover_serial_from_row(win, ip, row_y):
+    serial_x = _serial_column_center(win)
+    if serial_x is None:
+        return None
+    candidates = []
+    for left, text in _discovery_row_cells(win, row_y):
+        if text == ip:
+            continue
+        if _looks_like_serial(text):
+            candidates.append((abs(left - serial_x), text))
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: item[0])[0][1]
+    return None
+
+
+def _record_resolved_credential(ip, username, password):
+    if not password:
+        return
+    _RESOLVED_CREDENTIALS[ip] = {"username": username or "admin", "password": password}
+    emit("credentials_resolved", selector=ip, message="Resolved Toolbelt credentials from discovery serial number")
+    _write_resolved_credentials()
+
+
+def _write_resolved_credentials():
+    if not _RESOLVED_CREDENTIALS_FILE or not _RESOLVED_CREDENTIALS:
+        return
+    tmp = _RESOLVED_CREDENTIALS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(_RESOLVED_CREDENTIALS, f)
+    os.replace(tmp, _RESOLVED_CREDENTIALS_FILE)
 
 
 def _credentials_modal_present(win):
@@ -441,7 +586,7 @@ def dismiss_credentials_prompt(win):
     except Exception:
         return False
 
-def accept_credentials_prompt(win, ip, timeout=8):
+def _accept_credentials_prompt_legacy(win, ip, timeout=8):
     """Managing an unauthenticated device pops an in-app 'Please provide
     credentials for <ip>' modal. Username is 'admin'; the password is prefilled
     with the factory default ('extron' on older units, the SERIAL NUMBER on new
@@ -509,6 +654,106 @@ def accept_credentials_prompt(win, ip, timeout=8):
     return True
 
 
+def _fill_credentials_password(win, password):
+    try:
+        import pywinauto.mouse as mouse
+        plabel = next(
+            c.rectangle()
+            for c in win.descendants(control_type="Text")
+            if (c.window_text() or "").strip() == "Password"
+        )
+        mouse.click(coords=(plabel.left + 40, plabel.bottom + 18))
+        time.sleep(0.2)
+        win.type_keys("^a{BACKSPACE}", set_foreground=True)
+        win.type_keys(password, with_spaces=True, set_foreground=True)
+    except Exception:
+        pass
+
+
+def _click_credentials_enter(win):
+    for b in win.descendants(control_type="Button"):
+        if (b.window_text() or "").strip() == "Enter" and b.is_visible():
+            b.click_input()
+            return True
+    return False
+
+
+def _credential_candidates(credential, serial):
+    seen = set()
+    candidates = []
+
+    def add(password, source):
+        if not password or password == "__PREFILLED__" or password in seen:
+            return
+        seen.add(password)
+        candidates.append((password, source))
+
+    if _DEVICE_PASSWORD:
+        add(_DEVICE_PASSWORD, "override")
+    if credential.get("password"):
+        add(credential["password"], "saved")
+    for candidate in credential.get("password_candidates") or []:
+        if candidate == "__SERIAL__":
+            if serial:
+                add(serial, "serial")
+            continue
+        add(candidate, "candidate")
+    return candidates
+
+
+def accept_credentials_prompt(win, ip, timeout=8, serial=None):
+    """Accept Toolbelt's credentials modal, retrying serial-number fallback."""
+    deadline = time.time() + timeout
+    while time.time() < deadline and not _credentials_modal_present(win):
+        time.sleep(POLL)
+    if not _credentials_modal_present(win):
+        return False
+
+    credential = _DEVICE_CREDENTIALS.get(ip) or {}
+    raw_candidates = credential.get("password_candidates") or []
+    candidates = _credential_candidates(credential, serial)
+    if "__SERIAL__" in raw_candidates and not serial:
+        emit(
+            "serial_column_missing",
+            selector=ip,
+            message=(
+                "Serial-number password fallback needs the Serial Number column "
+                "enabled in the Toolbelt discovery list. Choose Fields > Serial "
+                "Number; if Fields is hidden, open the toolbar overflow menu, "
+                "and if the column is off-screen, scroll right or move the splitter."
+            ),
+        )
+
+    if not candidates:
+        candidates = [(None, "prefilled")]
+
+    for candidate_password, source in candidates:
+        if candidate_password:
+            _fill_credentials_password(win, candidate_password)
+        if not _click_credentials_enter(win):
+            break
+        time.sleep(2.5)
+        if not _credentials_modal_present(win):
+            if source == "serial":
+                _record_resolved_credential(
+                    ip,
+                    credential.get("username") or "admin",
+                    candidate_password,
+                )
+            log.info("[%s] accepted credentials prompt", ip)
+            return True
+
+    if _credentials_modal_present(win):
+        emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
+        dismiss_credentials_prompt(win)
+        raise RuntimeError(
+            "credentials rejected for %s - all known Toolbelt passwords failed. "
+            "If the device uses the serial number, choose Fields > Serial Number "
+            "in Toolbelt discovery. If Fields is hidden, open the toolbar overflow "
+            "menu; if the column is off-screen, scroll right or move the splitter." % ip)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Device selection + navigation  (task #2)
 # ---------------------------------------------------------------------------
@@ -541,6 +786,10 @@ def select_device(win, ip, timeout=T_MANAGE):
         raise RuntimeError("device %s not found in discovery list (is discovery started?)" % ip)
 
     row_y = cy(ip_cell.rectangle())
+    serial = None
+    if _wants_serial_fallback(ip):
+        ensure_serial_column_visible(win)
+        serial = discover_serial_from_row(win, ip, row_y)
     # Click the row to select it
     ip_cell.click_input()
     time.sleep(0.5)
@@ -561,7 +810,7 @@ def select_device(win, ip, timeout=T_MANAGE):
 
     # An unauthenticated device shows a credentials modal that blocks the page —
     # accept it (prefilled admin/extron) before anything else.
-    accept_credentials_prompt(win, ip)
+    accept_credentials_prompt(win, ip, serial=serial)
 
     # Wait for the Utilities tab to be available, then click it
     def utilities_tab():
@@ -926,14 +1175,17 @@ def main():
                          "(default: accept Toolbelt's prefilled value)")
     ap.add_argument("--device-password-file", default=None,
                     help="JSON credential file keyed by device selector; avoids secrets on the command line")
+    ap.add_argument("--resolved-credentials-file", default=None,
+                    help="JSON output file for credentials resolved during dry-run")
     ap.add_argument("--jsonl", action="store_true",
                     help="emit machine-readable JSONL progress events to stdout")
     ap.add_argument("--stop-file", default=None,
                     help="if this file appears, stop safely before starting the next device")
     args = ap.parse_args()
 
-    global _DEVICE_PASSWORD, _DEVICE_CREDENTIALS, _JSONL
+    global _DEVICE_PASSWORD, _DEVICE_CREDENTIALS, _RESOLVED_CREDENTIALS_FILE, _JSONL
     _DEVICE_PASSWORD = args.device_password
+    _RESOLVED_CREDENTIALS_FILE = args.resolved_credentials_file
     _JSONL = args.jsonl
     if args.device_password_file:
         with open(args.device_password_file, encoding="utf-8") as f:
@@ -1020,6 +1272,7 @@ def main():
         log.info("  %-16s %s  %s", ip, "OK  " if ok else "FAIL", msg)
     n_ok = sum(1 for _, ok, _ in results if ok)
     log.info("Done: %d/%d ok", n_ok, len(results))
+    _write_resolved_credentials()
     emit("run_finished", ok=n_ok, total=len(results), status="complete")
 
 

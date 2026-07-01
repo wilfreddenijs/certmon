@@ -190,6 +190,7 @@ class ToolbeltBatchService:
         run.stop_file = str(stop_file)
         list_file = temp_dir / "devices.txt"
         credential_file = temp_dir / "credentials.json"
+        resolved_credentials_file = temp_dir / "resolved-credentials.json"
         try:
             lines = []
             credentials = {}
@@ -223,12 +224,16 @@ class ToolbeltBatchService:
                 str(stop_file),
                 "--device-password-file",
                 str(credential_file),
+                "--resolved-credentials-file",
+                str(resolved_credentials_file),
             ]
             if run.mode == "upload":
                 command.append("--commit")
             self.runner(command, self._handle_event(run))
+            self._save_resolved_credentials(resolved_credentials_file)
             self._finish(run, "stopped" if run.requested_stop else "complete")
         except Exception as exc:
+            self._save_resolved_credentials(resolved_credentials_file)
             message = self._friendly_error(str(exc))
             run.error = message
             self._record_event(run, {"event": "run_failed", "message": message})
@@ -314,6 +319,8 @@ class ToolbeltBatchService:
                 "upload_ok",
                 "upload_failed",
                 "credentials_needed",
+                "credentials_resolved",
+                "serial_column_missing",
                 "device_cancelled",
                 "device_skipped",
             }:
@@ -358,6 +365,23 @@ class ToolbeltBatchService:
             run.status = status
             run.finished_at = utc_now()
             run.current_device = None
+
+    def _save_resolved_credentials(self, path):
+        try:
+            if not path.exists():
+                return
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        for selector, credential in (data or {}).items():
+            username = (credential or {}).get("username") or "admin"
+            password = (credential or {}).get("password")
+            if not selector or not password:
+                continue
+            try:
+                self.save_credentials(selector, username=username, password=password)
+            except Exception:
+                pass
 
     def _credentials_for(self, selector):
         blob = self.database.get_secret(self._secret_id(selector))
