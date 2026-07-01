@@ -981,7 +981,7 @@ def select_device(win, ip, timeout=T_MANAGE):
                 row_y = cy(ip_cell.rectangle())
             serial = discover_serial_from_row(win, ip, row_y)
             if serial:
-                log.info("[%s] using Toolbelt serial candidate %s", ip, _masked_secret(serial))
+                log.info("[%s] prepared Toolbelt serial fallback %s", ip, _masked_secret(serial))
             else:
                 log.warning("[%s] Serial Number column is visible but no serial was read from the row", ip)
         else:
