@@ -245,6 +245,7 @@ def connect_toolbelt(launch_if_needed=True, timeout=60):
     win = app.window(title_re=".*Toolbelt.*", top_level_only=True)
     win.wait("visible", timeout=timeout)
     bring_to_front(win)
+    log.info("connected to Toolbelt window")
     return app, win
 
 
@@ -1556,12 +1557,14 @@ def main():
     log.info("=== Toolbelt uploader: %d device(s), commit=%s, issue=%s ===",
              len(devices), args.commit, args.issue)
     emit("run_started", mode="upload" if args.commit else "dry-run", count=len(devices))
+    log.info("connecting to Toolbelt...")
     app, win = connect_toolbelt()
-    ensure_discovery_started(win, [ip for ip, _ in devices])
     if args.test_serial_column:
+        log.info("running Toolbelt Serial Number column test for %s", devices[0][0])
         ok = test_serial_column(app, win, devices[0][0])
         emit("run_finished", ok=1 if ok else 0, total=1, status="complete")
         return
+    ensure_discovery_started(win, [ip for ip, _ in devices])
 
     results = []
     for idx, (ip, pem_override) in enumerate(devices, 1):
