@@ -1581,7 +1581,7 @@ def main():
     _RESOLVED_CREDENTIALS_FILE = args.resolved_credentials_file
     _JSONL = args.jsonl
     if args.device_password_file:
-        with open(args.device_password_file, encoding="utf-8") as f:
+        with open(args.device_password_file, encoding="utf-8-sig") as f:
             _DEVICE_CREDENTIALS = json.load(f)
 
     setup_logging()
