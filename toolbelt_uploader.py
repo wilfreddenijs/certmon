@@ -990,11 +990,22 @@ def _fill_edit(edit, win, value):
         rect = edit.rectangle()
         mouse.click(coords=(cx(rect), cy(rect)))
         time.sleep(0.2)
-        win.type_keys("^a{BACKSPACE}", set_foreground=True)
-        _paste_text(win, value)
-        return True
+        try:
+            edit.set_edit_text(value)
+            log.info("filled Toolbelt password edit via set_edit_text value=%s", _masked_secret(value))
+            return True
+        except Exception as exc:
+            log.info("set_edit_text failed for Toolbelt password edit: %s", exc)
+        try:
+            edit.type_keys("^a{BACKSPACE}", set_foreground=True)
+        except Exception:
+            win.type_keys("^a{BACKSPACE}", set_foreground=True)
+        if _paste_text(win, value):
+            log.info("filled Toolbelt password edit via keyboard/clipboard value=%s", _masked_secret(value))
+            return True
     except Exception:
-        return False
+        pass
+    return False
 
 
 def _fill_credentials_fields(win, username, password):
@@ -1007,12 +1018,12 @@ def _fill_credentials_fields(win, username, password):
         except Exception:
             continue
     edits = sorted(edits, key=lambda c: (c.rectangle().top, c.rectangle().left))
+    log.info("Toolbelt credentials prompt visible edit count: %d", len(edits))
     if edits:
         # Toolbelt pre-fills username=admin and often disables that field. The
         # password field is the last visible edit in both the first prompt and
         # the "Credentials are Incorrect" retry prompt.
-        _fill_edit(edits[-1], win, password)
-        return True
+        return _fill_edit(edits[-1], win, password)
 
     try:
         import pywinauto.mouse as mouse
