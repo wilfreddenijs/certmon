@@ -1030,10 +1030,15 @@ def _fill_credentials_fields(win, username, password):
 
 def _click_credentials_enter(win):
     for b in win.descendants(control_type="Button"):
-        if (b.window_text() or "").strip() == "Enter" and b.is_visible():
+        text = (b.window_text() or "").strip().lower()
+        if text in {"enter", "ok", "login", "log in", "connect"} and b.is_visible():
             b.click_input()
             return True
-    return False
+    try:
+        win.type_keys("{ENTER}", set_foreground=True)
+        return True
+    except Exception:
+        return False
 
 
 def _credential_candidates(credential, serial):
@@ -1116,6 +1121,7 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
                 )
             log.info("[%s] accepted credentials prompt", ip)
             return True
+        log.info("[%s] Toolbelt credential candidate source=%s was rejected; trying next candidate if available", ip, source)
 
     if _credentials_modal_present(win):
         emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
