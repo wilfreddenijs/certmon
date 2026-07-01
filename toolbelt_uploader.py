@@ -405,6 +405,7 @@ _DEVICE_PASSWORD = None  # optional override; set from --device-password
 _DEVICE_CREDENTIALS = {}
 _RESOLVED_CREDENTIALS = {}
 _RESOLVED_CREDENTIALS_FILE = None
+_LAST_FIELDS_BUTTON_POINT = None
 
 
 def _wants_serial_fallback(ip):
@@ -629,11 +630,7 @@ def _click_fields_by_toolbar_geometry(win):
     return False
 
 
-def _click_filter_overflow_arrow(win):
-    try:
-        import pywinauto.mouse as mouse
-    except Exception:
-        return False
+def _filter_button_rects(win):
     filter_buttons = []
     for c in _iter_toolbelt_controls(win, ("Button", "SplitButton", "Text")):
         try:
@@ -646,7 +643,15 @@ def _click_filter_overflow_arrow(win):
             filter_buttons.append((rect.right, rect.bottom, rect))
         except Exception:
             continue
-    for _, _, rect in sorted(filter_buttons, key=lambda item: item[0], reverse=True):
+    return [rect for _, _, rect in sorted(filter_buttons, key=lambda item: item[0], reverse=True)]
+
+
+def _click_filter_overflow_arrow(win):
+    try:
+        import pywinauto.mouse as mouse
+    except Exception:
+        return None
+    for rect in _filter_button_rects(win):
         for x, y in (
             (rect.right + 28, rect.bottom - 3),
             (rect.right + 24, rect.bottom - 4),
@@ -657,17 +662,44 @@ def _click_filter_overflow_arrow(win):
                 log.info("clicking Toolbelt toolbar overflow divider near Filter at %s,%s", x, y)
                 mouse.click(coords=(x, y))
                 time.sleep(0.8)
-                return True
+                return rect
             except Exception:
                 continue
+    return None
+
+
+def _click_fields_from_filter_overflow_geometry(filter_rect):
+    global _LAST_FIELDS_BUTTON_POINT
+    try:
+        import pywinauto.mouse as mouse
+    except Exception:
+        return False
+    candidates = (
+        (filter_rect.right + 95, filter_rect.bottom + 32),
+        (filter_rect.right + 90, filter_rect.bottom + 38),
+        (filter_rect.right + 105, filter_rect.bottom + 28),
+    )
+    for x, y in candidates:
+        try:
+            log.info("clicking Toolbelt Fields button from overflow geometry at %s,%s", x, y)
+            mouse.click(coords=(x, y))
+            _LAST_FIELDS_BUTTON_POINT = (x, y)
+            time.sleep(0.8)
+            return True
+        except Exception:
+            continue
     return False
 
 
 def _open_fields_menu(win):
     if _click_fields_button(win):
         return True
-    if _click_filter_overflow_arrow(win) and _click_fields_button(win):
-        return True
+    filter_rect = _click_filter_overflow_arrow(win)
+    if filter_rect is not None:
+        if _click_fields_button(win):
+            return True
+        if _click_fields_from_filter_overflow_geometry(filter_rect):
+            return True
     if _click_fields_by_toolbar_geometry(win) and _click_fields_button(win):
         return True
     for overflow in _toolbar_overflow_candidates(win):
@@ -723,6 +755,21 @@ def _enable_serial_number_field_by_geometry(win):
         for x in (left - 12, left - 18, left + 6):
             try:
                 log.info("clicking Toolbelt Serial Number checkbox at %s,%s", x, y)
+                mouse.click(coords=(x, y))
+                time.sleep(0.8)
+                return True
+            except Exception:
+                continue
+    if _LAST_FIELDS_BUTTON_POINT is not None:
+        fields_x, fields_y = _LAST_FIELDS_BUTTON_POINT
+        for x, y in (
+            (fields_x - 22, fields_y + 126),
+            (fields_x - 28, fields_y + 126),
+            (fields_x - 18, fields_y + 118),
+            (fields_x - 18, fields_y + 134),
+        ):
+            try:
+                log.info("clicking Toolbelt Serial Number checkbox from Fields geometry at %s,%s", x, y)
                 mouse.click(coords=(x, y))
                 time.sleep(0.8)
                 return True
