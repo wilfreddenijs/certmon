@@ -64,7 +64,9 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     html = page()
     push_function = html.split("async function pushCert()", 1)[1]
 
-    assert 'id="push-certificate-select"' in html
+    assert 'id="push-target-select"' in html
+    assert 'id="push-certificate-select"' not in html
+    assert 'id="push-device-select"' not in html
     assert 'id="cert-pem"' not in html
     assert 'id="key-pem"' not in html
     assert "certificate_id" in html
@@ -80,15 +82,14 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
 def test_devices_workflow_explains_device_certificate_fields():
     html = page()
 
-    assert "Choose an Extron device and select <b>Create Local CA cert</b>" in html
+    assert "Choose a device and select <b>Create certificate</b>" in html
     assert r"\b(dmp|ipcp|iplp|tlp|ucs|dtx|sme|smp|in\d{3,4}|dvs|dsc)\b" in html
     assert "Use the IP address users enter" in html
     assert "Add this if users connect by DNS name" in html
     assert "Choose Extron/RSA for older devices" in html
-    assert "Create & add to Upload" in html
-    assert "Create Local CA cert" in html
+    assert "Create certificate" in html
     assert "Upload ready" in html
-    assert "Local CA ready" in html
+    assert "Certificate ready" in html
     assert "Use existing" in html
     assert 'value="extron-rsa"' in html
 
@@ -202,8 +203,11 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "one central prepared-device list" in html
     assert "Add device" in html
     assert "Manual upload fallback" in html
+    assert "Download Certificates for Manual Upload" in html
     assert "Toolbelt batch upload" in html
-    assert "Dry-run starts first and is safe" in html
+    assert "Test Toolbelt upload first" in html
+    assert "Test Toolbelt upload" in html
+    assert "Retry dry-run" not in html
     assert 'id="toolbelt-device-list"' in html
     assert 'id="toolbelt-upload-btn"' in html
     assert 'id="toolbelt-stop-btn"' in html
@@ -219,6 +223,16 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "run.error" in html
     assert "errorText" in html
     assert "d.event !== 'device_pending'" in html
+
+
+def test_upload_tab_does_not_auto_start_toolbelt_dry_run():
+    html = page()
+    load_toolbelt = html.split("async function loadToolbeltDevices(forceDryRun)", 1)[1].split(
+        "function toolbeltStatusLabel", 1
+    )[0]
+
+    assert "if (forceDryRun && toolbeltDevices.length)" in load_toolbelt
+    assert "!toolbeltAutoDryRunStarted" not in load_toolbelt
 
 
 def test_upload_rows_can_remove_prepared_local_ca_certificate():

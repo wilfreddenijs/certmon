@@ -56,3 +56,15 @@ def test_wait_for_ui_keeps_polling_transient_toolbelt_errors(monkeypatch, upload
         timeout=1,
     ) is control
     assert time.time() - start < 1
+
+
+def test_credentials_modal_detection_treats_busy_uia_tree_as_not_present(uploader):
+    class BusyWindow:
+        def window_text(self):
+            return ""
+
+        def descendants(self, control_type=None):
+            raise TypeError("argument of type 'bool' is not iterable")
+
+    assert uploader._credentials_modal_text(BusyWindow()) == ""
+    assert uploader._credentials_modal_present(BusyWindow()) is False

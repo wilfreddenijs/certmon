@@ -872,8 +872,9 @@ def _credentials_modal_text(win):
     for control_type in ("Text", "Edit", "Button"):
         try:
             controls = win.descendants(control_type=control_type)
-        except Exception:
-            return True
+        except Exception as exc:
+            log.debug("Toolbelt credentials modal text unavailable while UI is busy: %s", exc)
+            continue
         for c in controls:
             try:
                 texts.append(c.window_text() or "")
