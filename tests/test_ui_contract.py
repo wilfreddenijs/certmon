@@ -64,25 +64,45 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     html = page()
     push_function = html.split("async function pushCert()", 1)[1]
 
-    assert 'id="push-certificate-select"' in html
+    assert 'id="push-target-select"' in html
+    assert 'id="push-certificate-select"' not in html
+    assert 'id="push-device-select"' not in html
     assert 'id="cert-pem"' not in html
     assert 'id="key-pem"' not in html
     assert "certificate_id" in html
     assert "cert_pem" not in push_function
     assert "key_pem" not in push_function
-    assert "Choose the closest target" in html
-    assert "Used only server-side" in html
-    assert "Stored encrypted" in html
+    assert "Each certificate belongs to one device" in html
+    assert "certificate/device pair" in html
     assert "For unsupported devices" in html
     assert "separate private-key.pem download" in html
 
 
-def test_local_ca_ui_explains_device_certificate_fields():
+def test_devices_workflow_explains_device_certificate_fields():
     html = page()
 
+    assert "Choose a device and select <b>Create certificate</b>" in html
+    assert r"\b(dmp|ipcp|iplp|tlp|ucs|dtx|sme|smp|in\d{3,4}|dvs|dsc)\b" in html
     assert "Use the IP address users enter" in html
     assert "Add this if users connect by DNS name" in html
     assert "Choose Extron/RSA for older devices" in html
+    assert "Create certificate" in html
+    assert "Upload ready" in html
+    assert "Certificate ready" in html
+    assert "Use existing" in html
+    assert 'value="extron-rsa"' in html
+
+
+def test_first_tab_is_devices_and_local_ca_is_root_management_only():
+    html = page()
+    ca_panel = html.split('id="tab-ca"', 1)[1].split("<!-- Upload Tab -->", 1)[0]
+
+    assert "switchTab('certs')\">Devices" in html
+    assert "Scanned devices" in html
+    assert "Issue Device Certificate" not in ca_panel
+    assert "Issued Device Certificates" not in ca_panel
+    assert "Generate Local CA" in html
+    assert "Download CA cert" in html
 
 
 def test_external_ca_import_form_submits_generated_and_existing_certificates():
@@ -173,6 +193,66 @@ def test_local_ca_extron_pem_download_uses_private_combined_artifact():
     assert "/api/certificates/${c.certificate_id}/private/combined.pem" in html
     assert "/api/ca/download/${c.certificate_id}" in html
     assert "Extron PEM contains certificate and private key" in html
+
+
+def test_upload_tab_has_toolbelt_batch_upload_flow():
+    html = page()
+
+    assert "Prepared device upload" in html
+    assert "one central prepared-device list" in html
+    assert "Add device" in html
+    assert "Manual upload fallback" in html
+    assert "Download Certificates for Manual Upload" in html
+    assert "Target Devices" not in html
+    assert "Toolbelt batch upload" in html
+    assert "Test Toolbelt upload first" in html
+    assert "Test Toolbelt upload" in html
+    assert "Retry dry-run" not in html
+    assert 'id="toolbelt-device-list"' in html
+    assert 'id="toolbelt-upload-btn"' in html
+    assert 'id="toolbelt-stop-btn"' in html
+    assert "/api/toolbelt/devices" in html
+    assert "/api/toolbelt/default-credentials" in html
+    assert "/api/toolbelt/reset-upload-tab" in html
+    assert "/api/toolbelt/dry-run" in html
+    assert "/api/toolbelt/upload" in html
+    assert "Shared device password" in html
+    assert "tries shared device password, then admin/extron" in html
+    assert "Stop after current device" in html
+    assert "tries admin/extron, then admin/serial from Toolbelt" in html
+    assert "run.error" in html
+    assert "errorText" in html
+    assert "d.event !== 'device_pending'" in html
+
+
+def test_manual_upload_lists_all_certificate_profiles_as_download_targets():
+    html = page()
+    render_select = html.split("function renderCertificateSelect()", 1)[1].split(
+        "function applyPendingDeployment()", 1
+    )[0]
+
+    assert "availableCertificates || []" in render_select
+    assert "filter(c => c.profile !== 'extron-rsa')" not in render_select
+    assert "Download Certificates for Manual Upload" in html
+    assert "certificate/device pair" in html
+
+
+def test_upload_tab_does_not_auto_start_toolbelt_dry_run():
+    html = page()
+    load_toolbelt = html.split("async function loadToolbeltDevices(forceDryRun)", 1)[1].split(
+        "function toolbeltStatusLabel", 1
+    )[0]
+
+    assert "if (forceDryRun && toolbeltDevices.length)" in load_toolbelt
+    assert "!toolbeltAutoDryRunStarted" not in load_toolbelt
+
+
+def test_upload_rows_can_remove_prepared_local_ca_certificate():
+    html = page()
+
+    assert "removePreparedToolbeltDevice" in html
+    assert "/api/ca/issued/${encodeURIComponent(certificateId)}" in html
+    assert "delete the associated Local CA device certificate" in html
 
 
 def test_renewal_resume_actions_surface_errors_inline():

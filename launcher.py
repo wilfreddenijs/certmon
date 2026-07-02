@@ -123,6 +123,22 @@ def make_tray_icon(port):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--toolbelt-uploader":
+        # PyInstaller builds have sys.executable == CertMon.exe. The Toolbelt
+        # batch service therefore re-enters this EXE with a dedicated child mode
+        # instead of launching another tray/server instance.
+        try:
+            sys.argv = [sys.argv[0], *sys.argv[2:]]
+            import toolbelt_uploader
+
+            toolbelt_uploader.main()
+        except Exception as e:
+            print(str(e), flush=True)
+            log(f"TOOLBELT UPLOADER ERROR: {e}")
+            log(traceback.format_exc())
+            sys.exit(2)
+        return
+
     log("CertMon starting")
     port = find_free_port(5000)
     log(f"Using port {port}")

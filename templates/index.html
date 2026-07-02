@@ -171,6 +171,16 @@
 
   .btn-scan:hover { background: #9c6fff; }
   .btn-scan:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+    filter: grayscale(0.35);
+  }
+  .btn:disabled:hover {
+    background: var(--accent);
+    transform: none;
+  }
 
   .host-list, .range-list {
     display: flex;
@@ -711,7 +721,7 @@
   <div class="content">
     <div class="tabs" style="justify-content:space-between">
       <div style="display:flex">
-        <div class="tab active" onclick="switchTab('certs')">Certificates</div>
+        <div class="tab active" onclick="switchTab('certs')">Devices</div>
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
         <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
         <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
@@ -722,9 +732,16 @@
     </div>
 
     <div class="tab-panel active" id="tab-certs">
+      <div class="section-title" style="margin-bottom:10px">Scanned devices</div>
+      <div class="help-text choice-help" style="margin-bottom:16px">
+        Start here: scanned devices are the source for Local CA preparation and Upload. Extron-compatible devices can be prepared for Toolbelt from their device card.
+      </div>
+      <div id="upload-device-guidance" class="help-text choice-help" style="display:none;margin-bottom:16px;border-color:rgba(0,229,255,0.32);background:rgba(0,229,255,0.08)">
+        Choose a device and select <b>Create certificate</b>. The selected profile determines whether it becomes a Toolbelt upload or manual upload certificate.
+      </div>
       <div class="cert-grid" id="cert-grid">
         <div class="empty-state">
-          <h3>No certificates yet</h3>
+          <h3>No devices yet</h3>
           <p>Add a host or run a network scan to get started.</p>
         </div>
       </div>
@@ -745,85 +762,50 @@
 
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
-      <div style="display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start">
-
-        <!-- Left: device list + add form -->
-        <div>
-          <div class="section-title" style="margin-bottom:12px">Target Devices</div>
-
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
-            <div class="form-group">
-              <label class="form-label">Device Name</label>
-              <input type="text" id="ud-name" placeholder="e.g. UCS 303 Boardroom" style="width:100%"/>
+      <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
+          <div>
+            <div class="section-title" style="margin-bottom:8px">Prepared device upload</div>
+            <div class="help-text choice-help">
+              Upload is one central prepared-device list. Devices appear here only after an Extron-compatible Local CA certificate exists for a scanned device.
+              Test Toolbelt upload first; it prepares Toolbelt but does not click Apply or reboot devices.
             </div>
-            <div class="form-group">
-              <label class="form-label">IP Address / Host</label>
-              <input type="text" id="ud-host" placeholder="192.168.0.114" style="width:100%"/>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
-              <div class="form-group">
-                <label class="form-label">Port</label>
-                <input type="number" id="ud-port" value="80" style="width:100%"/>
-              </div>
-              <div class="form-group">
-                <label class="form-label">HTTPS</label>
-                <div style="padding-top:8px"><input type="checkbox" id="ud-https" style="width:16px;height:16px"/></div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Device Type</label>
-              <select id="ud-type" style="width:100%">
-                <option value="generic">Generic / Manual</option>
-                <option value="extron">Extron (UCS 303, etc.)</option>
-                <option value="homeassistant">Home Assistant</option>
-                <option value="synology">Synology NAS</option>
-              </select>
-              <div class="help-text field-note">Choose the closest target. Generic/Manual shows downloadable files and instructions instead of an automatic push.</div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Username</label>
-              <input type="text" id="ud-username" placeholder="admin" style="width:100%"/>
-              <div class="help-text field-note">Used only server-side when CertMon connects to the device.</div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Password</label>
-              <input type="password" id="ud-password" placeholder="extron" style="width:100%"/>
-              <div class="help-text field-note">Stored encrypted. It is not sent back to the browser after saving.</div>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn" style="flex:1" onclick="addUploadDevice()">+ Add Device</button>
-              <button class="btn btn-ghost" style="padding:8px 12px" onclick="testUploadDevice()" title="Test connection">⟳ Test</button>
-            </div>
-            <div id="ud-test-result" style="font-size:11px;margin-top:8px;display:none"></div>
           </div>
-
-          <div id="upload-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
+          <button class="btn btn-ghost" onclick="goToDevicesForUpload()">Add device</button>
         </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" onclick="loadToolbeltDevices(true)">Test Toolbelt upload</button>
+            <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared device password</button>
+            <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
+          </div>
+        </div>
+        <div id="toolbelt-run-status" class="help-text" style="margin-bottom:10px"></div>
+        <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
 
-        <!-- Right: certificate selection + push -->
+      <details id="manual-upload-fallback" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+        <summary style="cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent)">Manual upload fallback</summary>
+        <div class="help-text choice-help" style="margin:10px 0 16px">
+          For unsupported devices only. The automatic Toolbelt prepared-device list above is the primary Upload workflow.
+        </div>
         <div>
-          <div class="section-title" style="margin-bottom:12px">Stored Certificates</div>
+          <div class="section-title" style="margin-bottom:12px">Download Certificates for Manual Upload</div>
 
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
             <div class="form-group">
-              <label class="form-label">Certificate</label>
-              <select id="push-certificate-select" style="width:100%">
-                <option value="">- select a stored certificate -</option>
+              <label class="form-label">Certificate / device</label>
+              <select id="push-target-select" style="width:100%" onchange="selectManualUploadTarget(this.value)">
+                <option value="">— select a certificate/device pair —</option>
               </select>
               <div class="help-text field-note">
-                CertMon deploys by certificate ID. Private keys stay on the server and never cross the browser boundary.
+                Each certificate belongs to one device. For non-Extron devices, CertMon provides downloads, manual install instructions, and a separate private-key.pem download.
               </div>
             </div>
-
-            <div class="form-group">
-              <label class="form-label">Push to Device</label>
-              <select id="push-device-select" style="width:100%">
-                <option value="">— select a device —</option>
-              </select>
-              <div class="help-text field-note">For unsupported devices, CertMon gives manual install files: certificate.pem, chain.pem, full-chain.pem, and a separate private-key.pem download.</div>
-            </div>
-
-            <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">⬆ Push Certificate to Device</button>
+            <button class="btn btn-scan" onclick="pushCert()" id="push-btn" style="width:100%;margin-top:4px">Show certificate downloads</button>
           </div>
 
           <!-- Push log / result -->
@@ -846,6 +828,8 @@
           </div>
 
         </div>
+        </div>
+      </details>
       </div>
     </div>
   </div>
@@ -892,7 +876,7 @@
           <option value="generic-rsa">Generic RSA 2048</option>
           <option value="generic-ecdsa">Generic modern ECDSA P-256</option>
         </select>
-        <div class="help-text field-note">Choose compatibility first. Extron/older devices often need RSA. Modern services can usually use ECDSA.</div>
+        <div class="help-text field-note">Choose compatibility first. Choose Extron/RSA for older devices; they often need RSA. Modern services can usually use ECDSA.</div>
       </div>
       <div id="acme-options">
         <div class="form-label">DNS validation</div>
@@ -1011,6 +995,10 @@
       const udRes = await fetch('/api/upload/devices');
       uploadDevices = await udRes.json();
     } catch (e) { /* keep existing uploadDevices */ }
+    try {
+      const certRes = await fetch('/api/certificates');
+      availableCertificates = await certRes.json();
+    } catch (e) { /* keep existing availableCertificates */ }
     let renewals = [];
     try {
       renewals = await (await fetch('/api/renewals')).json();
@@ -1074,7 +1062,7 @@
     const entries = Object.values(certs);
 
     if (!entries.length) {
-      grid.innerHTML = `<div class="empty-state"><h3>No certificates yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
+      grid.innerHTML = `<div class="empty-state"><h3>No devices yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
       return;
     }
 
@@ -1088,11 +1076,14 @@
       const daysLabel = c.days_remaining !== null
         ? (c.days_remaining < 0 ? `Expired ${Math.abs(c.days_remaining)}d ago` : `${c.days_remaining} days left`)
         : 'N/A';
-      const canRenew = ['warning', 'critical', 'expired'].includes(c.status);
+      const canRenew = c.days_remaining !== null && c.days_remaining < 30;
       const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
-      const hasDevice = (uploadDevices || []).some(d => d.host === c.host);
-      const uploadLabel = hasDevice ? '⬆ Push' : '⬆ Upload';
-      const uploadTitle = hasDevice ? 'Push a cert to this saved device' : 'Add this device to the Upload tab';
+      const localCaCert = findLocalCaCertificate(c);
+      const certificateAction = localCaCert
+        ? (localCaCert.profile === 'extron-rsa'
+          ? `<button class="btn btn-ca" title="Show the prepared Extron-compatible certificate and open Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}','${localCaCert.certificate_id}')">Upload ready</button>`
+          : `<button class="btn btn-upload" title="Open manual certificate downloads for this device" onclick="openManualUploadForCertificate('${localCaCert.certificate_id}')">Upload</button>`)
+        : `<button class="btn btn-ca" title="Create a Local CA certificate for this device" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Create certificate</button>`;
 
       return `
         <div class="cert-card ${c.status}">
@@ -1124,8 +1115,7 @@
           <div class="cert-actions">
             <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
             ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
-            <button class="btn btn-upload" title="${uploadTitle}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${uploadLabel}</button>
-            <button class="btn btn-ca" title="Issue a CA-signed cert for this device (prefills the Local CA tab)" onclick="sendToCA('${c.host}','${escAttr(c.cn || '')}')">🔐 CA</button>
+            ${certificateAction}
             <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
           </div>
         </div>
@@ -1192,7 +1182,7 @@
     if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'cancelled') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
-    if (r.state === 'draft' && r.issuer_type === 'external_ca' && r.metadata?.external_ca_workflow === 'existing') return `<button class="btn" onclick="openExternalImport('${r.id}','existing')">Import certificate</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'draft' && r.issuer_type === 'external_ca' && r.metadata?.external_ca_workflow === 'existing') return `<div class="help-text" style="margin-bottom:8px">Use Import certificate or delete the entry.</div><button class="btn" onclick="openExternalImport('${r.id}','existing')">Import certificate</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'draft') return `<button class="btn" onclick="resumeRenewal('${r.id}','start')">Start renewal</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     return '';
   }
@@ -1568,6 +1558,7 @@
     if (name === 'upload') {
       loadUploadDevices();
       loadAvailableCertificates();
+      loadToolbeltDevices(false);
     }
   }
 
@@ -1661,8 +1652,14 @@
         </div>
       </div>` : '';
 
-    el.innerHTML = caCard + issueForm + issuedSection;
-    applyCAPrefill();  // fill IP/hostname if a cert card requested it
+    const deviceHint = ca.exists ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+        <div class="section-title" style="margin-bottom:10px">Device certificates moved to Devices</div>
+        <div class="help-text choice-help" style="margin-bottom:14px">Use the Devices tab to prepare scanned Extron devices for Upload. This Local CA tab now manages only the root CA for this PC/laptop.</div>
+        <button class="btn btn-ghost" onclick="switchTab('certs')">Open Devices</button>
+      </div>` : '';
+
+    el.innerHTML = caCard + deviceHint;
   }
 
   async function generateCA() {
@@ -1770,7 +1767,13 @@
   let uploadDevices = [];
   let availableCertificates = [];
   let selectedDeviceId = null;
+  let selectedManualTarget = null;
   let pendingDeployment = null;
+  let toolbeltDevices = [];
+  let toolbeltRunId = null;
+  let toolbeltPollTimer = null;
+  let toolbeltAutoDryRunStarted = false;
+  let toolbeltInitialStateReset = false;
 
   // Escape a string for safe use inside a single-quoted HTML attribute
   function escAttr(s) {
@@ -1780,7 +1783,10 @@
   // Guess device type from hostname / CN so the dropdown defaults sensibly
   function guessDeviceType(hostOrCn) {
     const s = (hostOrCn || '').toLowerCase();
-    if (s.includes('ucs') || s.includes('extron')) return 'extron';
+    if (
+      s.includes('extron') ||
+      /\b(dmp|ipcp|iplp|tlp|ucs|dtx|sme|smp|in\d{3,4}|dvs|dsc)\b/.test(s)
+    ) return 'extron';
     if (s.includes('homeassistant') || s.includes('hassio') || s.includes('home-assistant')) return 'homeassistant';
     if (s.includes('synology') || s.includes('diskstation') || s.includes('nas')) return 'synology';
     return 'generic';
@@ -1822,49 +1828,136 @@
     pendingCAPrefill = null;
   }
 
+  function findLocalCaCertificate(device) {
+    const identifiers = [device.host, device.cn, ...(device.sans || [])]
+      .filter(Boolean)
+      .map(v => String(v).toLowerCase());
+    return (availableCertificates || []).find(c =>
+      c.issuer_type === 'local_ca' &&
+      (c.identifiers || []).some(id => identifiers.includes(String(id).toLowerCase()))
+    );
+  }
+
+  function openDeviceLocalCAModal(host, cn, certificateId) {
+    const certificate = (availableCertificates || []).find(c => c.certificate_id === certificateId);
+    const ip = isIp(host) ? host : '';
+    const hostname = (cn && cn !== host && !isIp(cn)) ? cn : (isIp(host) ? '' : host);
+    const overlay = document.createElement('div');
+    overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:220;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = certificate ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:560px;max-width:95vw">
+        <div class="modal-title">Certificate ready</div>
+        <div class="help-text choice-help" style="margin-bottom:14px">This scanned device already has a Local CA certificate. Extron-compatible certificates are prepared for Toolbelt; generic certificates are available for manual upload.</div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px">
+          <div class="help-text">Device: <code>${host}</code></div>
+          <div class="help-text">Identifiers: <code>${(certificate.identifiers || []).join(', ')}</code></div>
+          <div class="help-text">Certificate: <code>${certificate.certificate_id}</code></div>
+          <div class="help-text">Profile: <code>${certificate.profile}</code></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="device-ca-use-existing">${certificate.profile === 'extron-rsa' ? 'Open Upload' : 'Open downloads'}</button>
+          <button class="btn btn-ghost" id="device-ca-reissue">Issue new</button>
+          <button class="btn btn-ghost" id="device-ca-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:600px;max-width:95vw">
+        <div class="modal-title">Prepare Local CA certificate</div>
+        <div class="help-text choice-help" style="margin-bottom:14px">Review the selected scanned device parameters before creating a certificate. The certificate profile determines whether Toolbelt upload or manual upload is used.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div class="form-label">Device IP</div>
+            <input type="text" id="device-ca-ip" value="${ip}" style="width:100%" />
+            <div class="help-text field-note">Use the IP address users enter in the browser/device URL.</div>
+          </div>
+          <div>
+            <div class="form-label">Hostname / CN</div>
+            <input type="text" id="device-ca-hostname" value="${hostname}" style="width:100%" />
+            <div class="help-text field-note">Add this if users connect by DNS name instead of IP.</div>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="form-label">Certificate profile</div>
+          <select id="device-ca-profile" style="width:100%">
+            <option value="extron-rsa" selected>Extron compatible (RSA)</option>
+            <option value="generic-rsa">Generic RSA</option>
+            <option value="generic-ecdsa">Generic modern (ECDSA)</option>
+          </select>
+          <div class="help-text field-note">Choose Extron/RSA for older devices and Toolbelt upload. Private keys remain encrypted server-side.</div>
+        </div>
+        <div id="device-ca-result" class="help-text" style="margin-top:12px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+          <button class="btn" id="device-ca-create">Create certificate</button>
+          <button class="btn btn-ghost" id="device-ca-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#device-ca-cancel').onclick = () => overlay.remove();
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    const useExisting = overlay.querySelector('#device-ca-use-existing');
+    if (useExisting) {
+      useExisting.onclick = () => {
+        overlay.remove();
+        if (certificate.profile === 'extron-rsa') {
+          switchTab('upload');
+          loadToolbeltDevices(false);
+        } else {
+          openManualUploadForCertificate(certificate.certificate_id);
+        }
+      };
+      overlay.querySelector('#device-ca-reissue').onclick = () => {
+        overlay.remove();
+        openDeviceLocalCAModal(host, cn);
+      };
+      return;
+    }
+    overlay.querySelector('#device-ca-create').onclick = async () => {
+      const result = overlay.querySelector('#device-ca-result');
+      const issueIp = overlay.querySelector('#device-ca-ip').value.trim();
+      const issueHostname = overlay.querySelector('#device-ca-hostname').value.trim();
+      const profile = overlay.querySelector('#device-ca-profile').value;
+      if (!issueIp && !issueHostname) { result.style.color = 'var(--warning)'; result.textContent = 'Enter an IP address or hostname.'; return; }
+      result.style.color = 'var(--muted)';
+      result.textContent = 'Creating Local CA certificate...';
+      const res = await fetch('/api/ca/issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: issueIp, hostname: issueHostname, profile, name: cn || host })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { result.style.color = 'var(--critical)'; result.textContent = data.error || 'Could not create certificate'; return; }
+      result.style.color = 'var(--ok)';
+      result.innerHTML = `Created <code>${data.certificate_id}</code>. <button class="btn btn-ghost" id="device-ca-view-upload" style="font-size:11px;padding:5px 10px;margin-left:8px">View upload options</button>`;
+      overlay.querySelector('#device-ca-view-upload').onclick = () => {
+        overlay.remove();
+        openManualOrToolbeltUploadForCertificate(data.certificate_id);
+      };
+      await loadAvailableCertificates();
+      await loadToolbeltDevices(false);
+      loadData();
+    };
+  }
+
+  function sendToCA(host, cn) {
+    openDeviceLocalCAModal(host, cn);
+  }
+
   // Called from the "⬆ Upload / Push" button on a cert card.
   // If a device is already saved for this host, skip the add-device form and
   // jump straight to the certificate/device selectors with that device pre-selected.
   // Otherwise prefill the add-device form.
   async function sendToUpload(host, port, cn) {
-    switchTab('upload');
-    await loadUploadDevices();
-
-    const existing = uploadDevices.find(d => d.host === host);
-    if (existing) {
-      // Saved device — go straight to push
-      selectDevice(existing.id);
-      const pushCard = document.getElementById('push-btn').closest('div[style*="border-radius:10px"]');
-      flashCard(pushCard);
-      document.getElementById('push-certificate-select').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const matchingCertificate = findLocalCaCertificate({ host, cn, sans: [] });
+    if (matchingCertificate) {
+      await openManualUploadForCertificate(matchingCertificate.certificate_id);
       return;
     }
-
-    // No saved device — prefill the add-device form.
-    // Cert was found on `port`; device web UI is usually 80/443.
-    const isHttps = (port === 443 || port === 8443 || port === 4443 || port === 9443);
-
-    document.getElementById('ud-name').value = cn || host;
-    document.getElementById('ud-host').value = host;
-    document.getElementById('ud-port').value = isHttps ? port : 80;
-    document.getElementById('ud-https').checked = isHttps;
-    const guessedType = guessDeviceType(cn || host);
-    document.getElementById('ud-type').value = guessedType === 'extron' ? 'extron' : 'generic';
-
-    // Prefill Extron default password as a convenience
-    if (guessedType === 'extron' && !document.getElementById('ud-password').value) {
-      document.getElementById('ud-password').value = 'extron';
-    }
-
-    flashCard(document.getElementById('ud-name').closest('div[style*="border-radius:10px"]'));
-    document.getElementById('ud-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    openDeviceLocalCAModal(host, cn);
   }
 
   async function loadUploadDevices() {
     const res = await fetch('/api/upload/devices');
     uploadDevices = await res.json();
     renderUploadDevices();
-    renderDeviceSelect();
     applyPendingDeployment();
   }
 
@@ -1875,8 +1968,194 @@
     applyPendingDeployment();
   }
 
+  async function loadToolbeltDevices(forceDryRun) {
+    const list = document.getElementById('toolbelt-device-list');
+    const status = document.getElementById('toolbelt-run-status');
+    if (!list || !status) return;
+    try {
+      let res;
+      if (!toolbeltInitialStateReset && !forceDryRun) {
+        toolbeltInitialStateReset = true;
+        res = await fetch('/api/toolbelt/reset-upload-tab', { method: 'POST' });
+      } else {
+        res = await fetch('/api/toolbelt/devices');
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load Toolbelt devices');
+      toolbeltDevices = data.devices || [];
+      renderToolbeltDevices();
+      if (forceDryRun && toolbeltDevices.length) {
+        toolbeltAutoDryRunStarted = true;
+        startToolbeltDryRun();
+      }
+    } catch (e) {
+      status.textContent = e.message;
+      status.style.color = 'var(--warning)';
+      list.innerHTML = '<div class="help-text">Toolbelt batch upload is unavailable.</div>';
+    }
+  }
+
+  function toolbeltStatusLabel(state) {
+    if (!state) return '<span style="color:var(--muted)">not tested</span>';
+    const color = state.ok ? 'var(--ok)' : 'var(--warning)';
+    return `<span style="color:${color}">${state.ok ? 'OK' : 'attention'}${state.message ? ' — ' + state.message : ''}</span>`;
+  }
+
+  function renderToolbeltDevices() {
+    const list = document.getElementById('toolbelt-device-list');
+    const uploadBtn = document.getElementById('toolbelt-upload-btn');
+    if (!toolbeltDevices.length) {
+      list.innerHTML = '<div class="help-text">No Extron Local CA certificates yet. Generate Extron-compatible Local CA certificates first; they will appear in devices.txt and here.</div>';
+      uploadBtn.disabled = true;
+      return;
+    }
+    const toolbeltCredentialsLabel = d => {
+      if (d.credentials_saved) return 'saved encrypted';
+      if (d.default_credentials_saved) {
+        return 'tries shared device password, then admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
+      }
+      return 'tries admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
+    };
+    list.innerHTML = toolbeltDevices.map(d => `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)">
+        <label style="display:flex;gap:10px;align-items:flex-start">
+          <input type="checkbox" ${d.selected ? 'checked' : ''} onchange="toggleToolbeltDevice('${escAttr(d.selector)}', this.checked)" />
+          <div style="flex:1">
+            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)">${d.label}</div>
+            <div class="help-text">Selector: <code>${d.selector}</code> · certificate: <code>${d.certificate_id}</code></div>
+            <div class="help-text">Local CA: ${d.extron_ready ? 'Extron PEM ready' : 'not Extron-ready'} · credentials: ${toolbeltCredentialsLabel(d)}</div>
+            <div class="help-text">Dry-run status: ${toolbeltStatusLabel(d.dry_run)}</div>
+            <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
+          </div>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Credentials</button>
+          <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Remove from Upload and delete the associated Local CA device certificate" onclick="event.preventDefault();removePreparedToolbeltDevice('${escAttr(d.certificate_id)}','${escAttr(d.label)}')">Remove</button>
+        </label>
+      </div>
+    `).join('');
+    const hasUploadable = toolbeltDevices.some(d => d.selected && d.dry_run && d.dry_run.ok);
+    uploadBtn.disabled = !hasUploadable || !!toolbeltRunId;
+    uploadBtn.classList.toggle('btn-ghost', uploadBtn.disabled);
+  }
+
+  async function toggleToolbeltDevice(selector, checked) {
+    toolbeltDevices = toolbeltDevices.map(d => d.selector === selector ? {...d, selected: checked} : d);
+    await fetch('/api/toolbelt/selection', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectors: toolbeltDevices.filter(d => d.selected).map(d => d.selector) })
+    });
+    renderToolbeltDevices();
+  }
+
+  async function saveToolbeltDefaultCredentials() {
+    const username = prompt('Shared device username', 'admin');
+    if (!username) return;
+    const password = prompt('Shared device password. CertMon tries this before admin/extron and serial fallback. Leave empty to cancel.');
+    if (!password) return;
+    const res = await fetch('/api/toolbelt/default-credentials', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Could not save shared credentials'); return; }
+    toolbeltDevices = data.devices || toolbeltDevices;
+    renderToolbeltDevices();
+  }
+
+  async function saveToolbeltCredentials(selector) {
+    const username = prompt(`Username for ${selector}`, 'admin');
+    if (!username) return;
+    const password = prompt(`Password for ${selector}. Leave this dialog empty to cancel. CertMon stores it encrypted.`);
+    if (!password) return;
+    const res = await fetch(`/api/toolbelt/devices/${encodeURIComponent(selector)}/credentials`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Could not save credentials'); return; }
+    await loadToolbeltDevices(false);
+  }
+
+  async function startToolbeltDryRun() {
+    return startToolbeltRun('dry-run');
+  }
+
+  async function startToolbeltUpload() {
+    return startToolbeltRun('upload');
+  }
+
+  async function startToolbeltRun(mode) {
+    const selected = toolbeltDevices.filter(d => d.selected).map(d => d.selector);
+    const status = document.getElementById('toolbelt-run-status');
+    status.style.color = 'var(--muted)';
+    status.textContent = mode === 'upload' ? 'Starting Toolbelt upload...' : 'Starting safe Toolbelt dry-run...';
+    const res = await fetch(mode === 'upload' ? '/api/toolbelt/upload' : '/api/toolbelt/dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectors: selected })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.style.color = 'var(--warning)';
+      status.textContent = data.error || 'Could not start Toolbelt run';
+      return;
+    }
+    toolbeltRunId = data.run.id;
+    document.getElementById('toolbelt-stop-btn').disabled = false;
+    document.getElementById('toolbelt-upload-btn').disabled = true;
+    pollToolbeltRun();
+  }
+
+  async function pollToolbeltRun() {
+    if (!toolbeltRunId) return;
+    const res = await fetch(`/api/toolbelt/runs/${toolbeltRunId}`);
+    const run = await res.json();
+    const status = document.getElementById('toolbelt-run-status');
+    const done = Object.values(run.devices || {}).filter(d => d.ok).length;
+    const failed = Object.values(run.devices || {}).filter(d => d.event && d.event !== 'device_pending' && !d.ok).length;
+    status.style.color = run.status === 'failed' ? 'var(--warning)' : 'var(--muted)';
+    const errorText = run.error ? ` — ${run.error}` : '';
+    status.textContent = `Run ${run.mode}: ${run.status}. Current: ${run.current_device || '-'} · OK ${done} · attention ${failed}${errorText}`;
+    if (run.status === 'running') {
+      clearTimeout(toolbeltPollTimer);
+      toolbeltPollTimer = setTimeout(pollToolbeltRun, 1500);
+      return;
+    }
+    toolbeltRunId = null;
+    document.getElementById('toolbelt-stop-btn').disabled = true;
+    await loadToolbeltDevices(false);
+  }
+
+  async function stopToolbeltRun() {
+    if (!toolbeltRunId) return;
+    await fetch(`/api/toolbelt/runs/${toolbeltRunId}/stop`, { method: 'POST' });
+    document.getElementById('toolbelt-run-status').textContent = 'Stop requested. CertMon will stop before the next device.';
+  }
+
+  function goToDevicesForUpload() {
+    switchTab('certs');
+    const guidance = document.getElementById('upload-device-guidance');
+    if (guidance) guidance.style.display = 'block';
+    const grid = document.getElementById('cert-grid');
+    if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function removePreparedToolbeltDevice(certificateId, label) {
+    const ok = confirm(`Remove ${label} from Upload?\n\nThis will delete the associated Local CA device certificate. The scanned device remains visible on Devices.`);
+    if (!ok) return;
+    const res = await fetch(`/api/ca/issued/${encodeURIComponent(certificateId)}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) { alert(data.error || 'Could not remove prepared device'); return; }
+    await loadAvailableCertificates();
+    await loadToolbeltDevices(false);
+    loadData();
+  }
+
   function renderUploadDevices() {
     const list = document.getElementById('upload-device-list');
+    if (!list) return;
     if (!uploadDevices.length) {
       list.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px">No devices yet — add one above.</div>';
       return;
@@ -1893,67 +2172,59 @@
     `).join('');
   }
 
-  function renderDeviceSelect() {
-    const sel = document.getElementById('push-device-select');
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— select a device —</option>' +
-      uploadDevices.map(d => `<option value="${d.id}"${d.id === cur ? ' selected' : ''}>${d.name} (${d.host})</option>`).join('');
-  }
-
   function renderCertificateSelect() {
-    const sel = document.getElementById('push-certificate-select');
+    const sel = document.getElementById('push-target-select');
+    if (!sel) return;
     const cur = sel.value;
-    sel.innerHTML = '<option value="">— select a stored certificate —</option>' +
-      availableCertificates.map(c => {
-        const label = `${(c.identifiers || [c.certificate_id])[0]} · ${c.issuer_type} · ${c.certificate_id}`;
+    const manualCertificates = availableCertificates || [];
+    sel.innerHTML = '<option value="">— select a certificate/device pair —</option>' +
+      manualCertificates.map(c => {
+        const identifiers = c.identifiers || [];
+        const device = identifiers[0] || c.certificate_id;
+        const label = `${device} · ${c.profile || c.issuer_type || 'certificate'} · ${c.certificate_id}`;
         return `<option value="${c.certificate_id}"${c.certificate_id === cur ? ' selected' : ''}>${label}</option>`;
       }).join('');
   }
 
   function applyPendingDeployment() {
     if (!pendingDeployment) return;
-    if (pendingDeployment.deviceId) {
-      selectedDeviceId = pendingDeployment.deviceId;
-      document.getElementById('push-device-select').value = pendingDeployment.deviceId;
-      renderUploadDevices();
-    }
-    if (pendingDeployment.certificateId && document.getElementById('push-certificate-select')) {
-      document.getElementById('push-certificate-select').value = pendingDeployment.certificateId;
+    if (pendingDeployment.certificateId && document.getElementById('push-target-select')) {
+      document.getElementById('push-target-select').value = pendingDeployment.certificateId;
+      selectedManualTarget = pendingDeployment.certificateId;
     }
   }
 
   function selectDevice(id) {
     selectedDeviceId = id;
-    document.getElementById('push-device-select').value = id;
     renderUploadDevices();
   }
 
-  async function addUploadDevice() {
-    const name = document.getElementById('ud-name').value.trim();
-    const host = document.getElementById('ud-host').value.trim();
-    const port = parseInt(document.getElementById('ud-port').value) || 80;
-    const https = document.getElementById('ud-https').checked;
-    const device_type = document.getElementById('ud-type').value;
-    const username = document.getElementById('ud-username').value.trim();
-    const password = document.getElementById('ud-password').value;
+  function selectManualUploadTarget(certificateId) {
+    selectedManualTarget = certificateId || null;
+  }
 
-    if (!name || !host) { alert('Name and host are required'); return; }
+  async function openManualUploadForCertificate(certificateId) {
+    switchTab('upload');
+    const manual = document.getElementById('manual-upload-fallback');
+    if (manual) manual.open = true;
+    await loadAvailableCertificates();
+    const select = document.getElementById('push-target-select');
+    if (select) select.value = certificateId;
+    selectedManualTarget = certificateId;
+    const pushCard = document.getElementById('push-btn')?.closest('div[style*="border-radius:10px"]');
+    flashCard(pushCard);
+    if (select) select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
-    const res = await fetch('/api/upload/devices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, host, port, https, device_type, username, password })
-    });
-    const data = await res.json();
-    if (data.error) { alert(data.error); return; }
-
-    // Clear form
-    ['ud-name','ud-host','ud-username','ud-password'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('ud-port').value = '80';
-    document.getElementById('ud-https').checked = false;
-
-    await loadUploadDevices();
-    loadData();  // refresh cert cards so they show "Push" for this host
+  async function openManualOrToolbeltUploadForCertificate(certificateId) {
+    await loadAvailableCertificates();
+    const certificate = (availableCertificates || []).find(c => c.certificate_id === certificateId);
+    if (certificate && certificate.profile === 'extron-rsa') {
+      switchTab('upload');
+      await loadToolbeltDevices(false);
+      return;
+    }
+    openManualUploadForCertificate(certificateId);
   }
 
   async function removeUploadDevice(id) {
@@ -1963,50 +2234,17 @@
     loadData();  // refresh cert cards (back to "Upload" if no device left)
   }
 
-  async function testUploadDevice() {
-    const host = document.getElementById('ud-host').value.trim();
-    const port = parseInt(document.getElementById('ud-port').value) || 80;
-    const https = document.getElementById('ud-https').checked;
-    if (!host) { alert('Enter a host first'); return; }
-
-    const el = document.getElementById('ud-test-result');
-    el.style.display = 'block';
-    el.style.color = 'var(--muted)';
-    el.textContent = 'Testing connection...';
-
-    const res = await fetch('/api/upload/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host, port, https })
-    });
-    const data = await res.json();
-    el.style.color = data.ok ? 'var(--ok)' : 'var(--critical)';
-    el.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
-  }
-
   async function pushCert() {
-    const certificate_id = document.getElementById('push-certificate-select').value;
-    const device_id = document.getElementById('push-device-select').value;
+    const certificate_id = document.getElementById('push-target-select').value;
 
-    if (!certificate_id) { alert('Please select a stored certificate'); return; }
-    if (!device_id) { alert('Please select a target device'); return; }
+    if (!certificate_id) { alert('Please select a certificate/device pair'); return; }
 
     const btn = document.getElementById('push-btn');
     btn.disabled = true;
-    btn.textContent = '⟳ Pushing...';
-
-    const res = await fetch('/api/upload/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        device_id,
-        certificate_id,
-      })
-    });
-    const data = await res.json();
+    btn.textContent = 'Preparing downloads...';
 
     btn.disabled = false;
-    btn.textContent = '⬆ Push Certificate to Device';
+    btn.textContent = 'Show certificate downloads';
 
     const resultDiv = document.getElementById('push-result');
     const titleEl = document.getElementById('push-result-title');
@@ -2019,48 +2257,26 @@
     const instrText = document.getElementById('push-instructions-text');
 
     resultDiv.style.display = 'block';
-    titleEl.style.color = data.ok ? 'var(--ok)' : 'var(--warning)';
-    titleEl.textContent = data.ok ? '✓ Certificate pushed successfully' : '⚠ Deployment needs attention';
-    logEl.innerHTML = (data.log || []).map(l => `<div>${l}</div>`).join('');
+    titleEl.style.color = 'var(--accent)';
+    titleEl.textContent = 'Certificate downloads ready';
+    logEl.innerHTML = '<div>Manual upload selected. CertMon does not connect to this device automatically.</div>';
 
-    const publicArtifacts = data.public_artifacts || {};
-    const publicEntries = Object.entries(publicArtifacts);
-    if (publicEntries.length) {
-      publicArtifactsDiv.style.display = 'block';
-      publicArtifactsEl.innerHTML = publicEntries.map(([name, url]) =>
-        `<a class="btn btn-ghost" href="${url}" download style="font-size:11px;padding:6px 10px">${name}</a>`
-      ).join('');
-    } else {
-      publicArtifactsDiv.style.display = 'none';
-      publicArtifactsEl.innerHTML = '';
-    }
+    publicArtifactsDiv.style.display = 'block';
+    publicArtifactsEl.innerHTML = ['certificate.pem', 'chain.pem', 'full-chain.pem'].map(name =>
+      `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/public/${name}" download style="font-size:11px;padding:6px 10px">${name}</a>`
+    ).join('');
 
-    if (data.instructions && certificate_id) {
-      privateArtifactsDiv.style.display = 'block';
-      privateArtifactsEl.innerHTML =
-        `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
-    } else {
-      privateArtifactsDiv.style.display = 'none';
-      privateArtifactsEl.innerHTML = '';
-    }
+    privateArtifactsDiv.style.display = 'block';
+    privateArtifactsEl.innerHTML =
+      `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
 
-    if (data.instructions) {
-      instrDiv.style.display = 'block';
-      instrText.textContent = data.instructions;
-    } else {
-      instrDiv.style.display = 'none';
-    }
-
-    if (data.ok) {
-      pendingDeployment = null;
-      loadData();
-    } else if (data.job && data.job.certificate_id) {
-      pendingDeployment = {
-        certificateId: data.job.certificate_id,
-        deviceId,
-      };
-      loadData();
-    }
+    instrDiv.style.display = 'block';
+    instrText.textContent = [
+      '1. Download certificate.pem and private-key.pem.',
+      '2. Download chain.pem or full-chain.pem if the device asks for a CA chain.',
+      '3. Import the certificate and matching private key in the device web interface.',
+      '4. Keep private-key.pem secret and remove local copies after import.'
+    ].join('\n');
 
     resultDiv.scrollIntoView({ behavior: 'smooth' });
   }

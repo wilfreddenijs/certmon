@@ -167,6 +167,10 @@ def test_delete_issued_certificate_uses_certificate_id(
     assert response.get_json() == {"ok": True, "removed": ["cert-1"]}
     assert artifacts.deleted == ["cert-1"]
     assert database.deleted == ["cert-1"]
+    assert database.last_event == (
+        "local_ca_certificate_deleted",
+        {"certificate_id": "cert-1"},
+    )
 
 
 def test_external_completion_response_contains_only_certificate_id(
@@ -186,3 +190,14 @@ def test_external_completion_response_contains_only_certificate_id(
 
     assert response.status_code == 200
     assert response.get_json() == {"ok": True, "certificate_id": "cert-2"}
+
+def test_devices_txt_prefers_ip_identifier_for_toolbelt_selector(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    database.certificates["cert-1"]["identifiers"] = ["IPLP", "192.168.0.20"]
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().get("/api/ca/devices-txt")
+
+    assert response.status_code == 200
+    assert response.text == "192.168.0.20,cert-1\n"
