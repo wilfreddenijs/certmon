@@ -46,6 +46,8 @@ Implemented a first vertical Toolbelt batch upload flow for Extron Local CA cert
   - `--jsonl` machine-readable progress events;
   - `--stop-file` safe cancellation between devices;
   - `--device-password-file` so credentials do not appear on the command line;
+  - automatic admin/serial fallback by reading and enabling the Toolbelt Serial Number column when needed;
+  - longer Toolbelt UI waits for slower devices after accepted credentials;
   - dry-run events without `--commit` and upload events with `--commit`.
 - Added a Toolbelt batch section in the Upload tab:
   - visible device list from CertMon `devices.txt` / Local CA Extron mapping;
@@ -53,13 +55,15 @@ Implemented a first vertical Toolbelt batch upload flow for Extron Local CA cert
   - selected-device upload only after dry-run OK;
   - per-device dry-run/upload status;
   - stop-after-current-device control;
-  - encrypted per-device credential prompt.
+  - encrypted per-device credential prompt;
+  - encrypted shared device password fallback before `admin` / `extron` and serial fallback.
 - Documented first-run Toolbelt requirements and UAT steps in `README.md`.
 
 ## Security Notes
 
 - Private Extron combined PEM material is materialized only server-side in a temporary run directory and removed after run completion/failure/stop cleanup.
 - Toolbelt credentials are encrypted through the existing vault/database secret path.
+- Device credential fallback order is explicit: saved per-device credentials, shared device password, `admin` / `extron`, then `admin` / serial number from Toolbelt discovery.
 - Browser APIs use selectors and certificate IDs only; private PEM material is rejected in Toolbelt request bodies.
 - Upload is blocked until a selected device has a latest dry-run OK result.
 
@@ -78,17 +82,31 @@ py -3 -m pytest -m "not acme_staging" -q --basetemp .tmp\pytest -p no:cacheprovi
 # 148 passed, 1 deselected
 
 py -3 -m compileall app.py launcher.py toolbelt_uploader.py certmon tests
+
+py -3 -m pytest tests/test_toolbelt_service.py tests/test_toolbelt_api.py tests/test_ui_contract.py -q --basetemp .tmp\pytest -p no:cacheprovider
+# 32 passed
+
+py -3 -m pytest tests/test_ui_contract.py tests/test_toolbelt_service.py -q --basetemp .tmp\pytest -p no:cacheprovider
+# 28 passed
 ```
+
+Windows Toolbelt / Extron hardware UAT also passed after follow-up fixes:
+
+- Toolbelt overflow opens the hidden Fields button and enables Serial Number.
+- Serial Number is read from the discovery row.
+- `admin` / `extron` is tried first when no shared/device-specific password is saved.
+- `admin` / serial number is retried after an auth failure and reused for upload when accepted.
+- Shared device password can be configured and is tried before `admin` / `extron`.
+- The final Windows EXE build completed successfully on commit `e56cb63`.
 
 ## Deviations from Plan
 
 - `certmon/db.py` and `certmon/vault.py` did not need code changes; the service reuses existing settings/secrets APIs.
 - `tests/test_toolbelt_uploader.py` was not added; the JSONL/subprocess behavior is covered through `tests/test_toolbelt_service.py`, and UI/API coverage is in `tests/test_toolbelt_api.py` and `tests/test_ui_contract.py`.
-- Automatic serial-number password discovery is not complete in this slice. The UI and README instruct the operator to enable/check the serial-number column in Toolbelt and save that value as encrypted per-device credentials when needed.
-- Real Extron Toolbelt/device UAT is still required because CI cannot prove Windows GUI automation against a physical Extron device.
+- Automatic serial-number password discovery was completed as a follow-up within this phase after real Toolbelt testing exposed the hidden Fields overflow and slow-device login timing details.
 
 ## Next Phase Readiness
 
-Ready for build and Windows UAT on real Toolbelt/Extron hardware.
+Ready to move to Phase 04. Phase 04 should address the remaining Phase 01 UAT gap by simplifying the Upload tab into a single prepared-device workflow and moving normal Extron Local CA preparation into Devices.
 
 ## Self-Check: PASSED
