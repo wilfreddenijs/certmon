@@ -82,6 +82,15 @@ def test_select_device_opens_serial_column_only_after_rejected_credentials(uploa
     assert first_manage < serial_enable < serial_read
 
 
+def test_serial_column_detection_accepts_ipv4_address_header(uploader):
+    source = inspect.getsource(uploader._serial_column_center)
+    header_source = inspect.getsource(uploader._grid_header_cells)
+
+    assert '"ipv4 address"' in header_source
+    assert '{"ip address", "ipv4 address"} & labels' in source
+    assert '"model name" not in labels' not in source
+
+
 def test_open_fields_menu_prefers_visible_fields_button_geometry(monkeypatch, uploader):
     clicks = []
     mouse = types.ModuleType("pywinauto.mouse")

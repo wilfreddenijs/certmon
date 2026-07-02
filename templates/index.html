@@ -2195,7 +2195,9 @@
       manualCertificates.map(c => {
         const identifiers = c.identifiers || [];
         const device = identifiers[0] || c.certificate_id;
-        const label = `${device} · ${c.profile || c.issuer_type || 'certificate'} · ${c.certificate_id}`;
+        const deviceIp = identifiers.find(id => isIp(id));
+        const deviceLabel = deviceIp && deviceIp !== device ? `${device} (${deviceIp})` : device;
+        const label = `${deviceLabel} · ${c.profile || c.issuer_type || 'certificate'} · ${c.certificate_id}`;
         return `<option value="${c.certificate_id}"${c.certificate_id === cur ? ' selected' : ''}>${label}</option>`;
       }).join('');
   }

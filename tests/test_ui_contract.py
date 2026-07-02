@@ -234,6 +234,8 @@ def test_manual_upload_lists_all_certificate_profiles_as_download_targets():
 
     assert "availableCertificates || []" in render_select
     assert "filter(c => c.profile !== 'extron-rsa')" not in render_select
+    assert "const deviceIp = identifiers.find(id => isIp(id))" in render_select
+    assert "`${device} (${deviceIp})`" in render_select
     assert "Download Certificates for Manual Upload" in html
     assert "certificate/device pair" in html
 

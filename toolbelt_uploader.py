@@ -463,6 +463,7 @@ def _grid_header_cells(win, row_y=None):
                 lower = text.lower()
                 if lower not in {
                     "ip address",
+                    "ipv4 address",
                     "actions",
                     "model name",
                     "mac address",
@@ -489,7 +490,7 @@ def _serial_column_center(win, row_y=None):
         bands.setdefault(band, []).append((left, right, text))
     for cells in bands.values():
         labels = {text for _, _, text in cells}
-        if "ip address" not in labels or "model name" not in labels:
+        if not ({"ip address", "ipv4 address"} & labels):
             continue
         for left, right, text in cells:
             if text in {"serial", "serial number"}:
