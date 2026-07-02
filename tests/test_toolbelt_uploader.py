@@ -91,6 +91,50 @@ def test_serial_column_detection_accepts_ipv4_address_header(uploader):
     assert '"model name" not in labels' not in source
 
 
+def test_serial_column_detection_handles_rows_far_below_header(uploader):
+    class Rect:
+        def __init__(self, left, top, right, bottom):
+            self.left = left
+            self.top = top
+            self.right = right
+            self.bottom = bottom
+
+    class ElementInfo:
+        name = ""
+        automation_id = ""
+        runtime_id = None
+
+    class Control:
+        handle = 1
+
+        def __init__(self, label, rect):
+            self.label = label
+            self._rect = rect
+            self.element_info = ElementInfo()
+
+        def window_text(self):
+            return self.label
+
+        def rectangle(self):
+            return self._rect
+
+        def is_visible(self):
+            return True
+
+    class Window:
+        def descendants(self, control_type=None):
+            if control_type not in {"Text", "Header", "HeaderItem", "DataItem"}:
+                return []
+            return [
+                Control("IPv4 Address", Rect(100, 112, 190, 148)),
+                Control("Hostname", Rect(360, 112, 535, 148)),
+                Control("Firmware Version", Rect(995, 112, 1090, 148)),
+                Control("Serial Number", Rect(1120, 112, 1180, 148)),
+            ]
+
+    assert uploader._serial_column_center(Window(), row_y=350) == 1150
+
+
 def test_open_fields_menu_prefers_visible_fields_button_geometry(monkeypatch, uploader):
     clicks = []
     mouse = types.ModuleType("pywinauto.mouse")
