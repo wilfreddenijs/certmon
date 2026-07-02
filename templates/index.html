@@ -1840,7 +1840,10 @@
   // Guess device type from hostname / CN so the dropdown defaults sensibly
   function guessDeviceType(hostOrCn) {
     const s = (hostOrCn || '').toLowerCase();
-    if (s.includes('ucs') || s.includes('extron')) return 'extron';
+    if (
+      s.includes('extron') ||
+      /\b(dmp|ipcp|iplp|tlp|ucs|dtx|sme|smp|in\d{3,4}|dvs|dsc)\b/.test(s)
+    ) return 'extron';
     if (s.includes('homeassistant') || s.includes('hassio') || s.includes('home-assistant')) return 'homeassistant';
     if (s.includes('synology') || s.includes('diskstation') || s.includes('nas')) return 'synology';
     return 'generic';

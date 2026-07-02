@@ -1236,7 +1236,7 @@ def _wait_for_ui(win, ip, label, predicate, timeout=T_MANAGE):
     while time.time() < deadline:
         try:
             result = predicate()
-            if result:
+            if result is not None and result is not False:
                 return result
         except Exception as exc:
             now = time.time()

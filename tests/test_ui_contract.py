@@ -81,6 +81,7 @@ def test_devices_workflow_explains_device_certificate_fields():
     html = page()
 
     assert "Choose an Extron device and select <b>Create Local CA cert</b>" in html
+    assert r"\b(dmp|ipcp|iplp|tlp|ucs|dtx|sme|smp|in\d{3,4}|dvs|dsc)\b" in html
     assert "Use the IP address users enter" in html
     assert "Add this if users connect by DNS name" in html
     assert "Choose Extron/RSA for older devices" in html
