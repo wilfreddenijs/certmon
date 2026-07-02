@@ -71,8 +71,12 @@ def test_credentials_modal_detection_treats_busy_uia_tree_as_not_present(uploade
     assert uploader._credentials_modal_present(BusyWindow()) is False
 
 
-def test_select_device_does_not_open_serial_column_before_manage(uploader):
+def test_select_device_opens_serial_column_only_after_rejected_credentials(uploader):
     source = inspect.getsource(uploader.select_device)
 
-    assert "ensure_serial_column_visible" not in source
-    assert "discover_serial_from_row" not in source
+    first_manage = source.index("manage.click_input()")
+    serial_enable = source.index("ensure_serial_column_visible")
+    serial_read = source.index("discover_serial_from_row")
+
+    assert "except SerialFallbackNeeded" in source
+    assert first_manage < serial_enable < serial_read

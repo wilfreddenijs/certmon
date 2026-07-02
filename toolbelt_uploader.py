@@ -409,6 +409,10 @@ _RESOLVED_CREDENTIALS_FILE = None
 _LAST_FIELDS_BUTTON_POINT = None
 
 
+class SerialFallbackNeeded(RuntimeError):
+    pass
+
+
 def _wants_serial_fallback(ip):
     credential = _DEVICE_CREDENTIALS.get(ip) or {}
     return "__SERIAL__" in (credential.get("password_candidates") or [])
@@ -1169,18 +1173,6 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
         ip,
         ", ".join(source for _, source in candidates) or "prefilled",
     )
-    if "__SERIAL__" in raw_candidates and not serial:
-        emit(
-            "serial_column_missing",
-            selector=ip,
-            message=(
-                "Serial-number password fallback needs the Serial Number column "
-                "enabled in the Toolbelt discovery list. Choose Fields > Serial "
-                "Number; if Fields is hidden, open the toolbar overflow menu, "
-                "and if the column is off-screen, scroll right or move the splitter."
-            ),
-        )
-
     if not candidates:
         candidates = [(None, "prefilled")]
 
@@ -1210,8 +1202,15 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
         log.info("[%s] Toolbelt credential candidate source=%s was rejected; trying next candidate if available", ip, source)
 
     if _credentials_modal_present(win):
-        emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
         dismiss_credentials_prompt(win)
+        if "__SERIAL__" in raw_candidates and not serial:
+            emit(
+                "serial_fallback_needed",
+                selector=ip,
+                message="Credentials were rejected; trying serial number from Toolbelt discovery",
+            )
+            raise SerialFallbackNeeded(ip)
+        emit("credentials_needed", selector=ip, message="Credentials were rejected or are required")
         raise RuntimeError(
             "credentials rejected for %s - all known Toolbelt credential attempts failed. "
             "If the device uses the serial number, choose Fields > Serial Number "
@@ -1282,7 +1281,42 @@ def select_device(win, ip, timeout=T_MANAGE):
 
     # An unauthenticated device shows a credentials modal that blocks the page —
     # accept it (prefilled admin/extron) before anything else.
-    accept_credentials_prompt(win, ip, serial=serial)
+    try:
+        accept_credentials_prompt(win, ip, serial=serial)
+    except SerialFallbackNeeded:
+        if not ensure_serial_column_visible(win, row_y=row_y):
+            raise RuntimeError(
+                "credentials rejected for %s - serial-number fallback was requested, "
+                "but the Toolbelt Serial Number column could not be enabled. If Fields "
+                "is hidden, open the toolbar overflow menu; if the column is off-screen, "
+                "scroll right or move the splitter." % ip
+            )
+        refreshed_cell = find_device_cell(win, ip)
+        if refreshed_cell is not None:
+            ip_cell = refreshed_cell
+            row_y = cy(ip_cell.rectangle())
+        serial = discover_serial_from_row(win, ip, row_y)
+        if not serial:
+            raise RuntimeError(
+                "credentials rejected for %s - serial-number fallback was requested, "
+                "but no serial number could be read from the Toolbelt row." % ip
+            )
+        log.info("[%s] retrying Toolbelt credentials with serial fallback %s", ip, _masked_secret(serial))
+        ip_cell.click_input()
+        time.sleep(0.5)
+        manage = None
+        for b in win.descendants(control_type="Button"):
+            try:
+                aid = b.element_info.automation_id or ""
+            except Exception:
+                aid = ""
+            if aid == "DeviceDiscoveryUserControl_ManageButton" and abs(cy(b.rectangle()) - row_y) < 30:
+                manage = b
+                break
+        if manage is None:
+            raise RuntimeError("Manage button not found for %s after serial fallback" % ip)
+        manage.click_input()
+        accept_credentials_prompt(win, ip, serial=serial)
 
     # Wait for the Utilities tab to be available, then click it. Slow devices
     # can keep Toolbelt's UIA tree busy for over a minute after authentication.
