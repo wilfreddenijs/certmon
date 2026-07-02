@@ -1721,7 +1721,8 @@
   async function deleteIssued(certificateId, cn) {
     if (!confirm(`Delete the stored certificate for ${cn}?\nThe device keeps any certificate already installed.`)) return;
     await fetch('/api/ca/issued/' + encodeURIComponent(certificateId), { method: 'DELETE' });
-    loadCA();
+    await loadCA();
+    await refreshCertificateWorkflow();
   }
 
   function showUploadGuide(cn) {
@@ -1853,6 +1854,7 @@
           <div class="help-text">Identifiers: <code>${(certificate.identifiers || []).join(', ')}</code></div>
           <div class="help-text">Certificate: <code>${certificate.certificate_id}</code></div>
           <div class="help-text">Profile: <code>${certificate.profile}</code></div>
+          <div class="help-text">Expires: <code>${certificate.not_after ? new Date(certificate.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : 'unknown'}</code></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="device-ca-use-existing">${certificate.profile === 'extron-rsa' ? 'Open Upload' : 'Open downloads'}</button>
@@ -1931,9 +1933,7 @@
         overlay.remove();
         openManualOrToolbeltUploadForCertificate(data.certificate_id);
       };
-      await loadAvailableCertificates();
-      await loadToolbeltDevices(false);
-      loadData();
+      await refreshCertificateWorkflow();
     };
   }
 
@@ -1966,6 +1966,12 @@
     availableCertificates = await res.json();
     renderCertificateSelect();
     applyPendingDeployment();
+  }
+
+  async function refreshCertificateWorkflow() {
+    await loadAvailableCertificates();
+    await loadToolbeltDevices(false);
+    await loadData();
   }
 
   async function loadToolbeltDevices(forceDryRun) {
@@ -2148,9 +2154,7 @@
     const res = await fetch(`/api/ca/issued/${encodeURIComponent(certificateId)}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) { alert(data.error || 'Could not remove prepared device'); return; }
-    await loadAvailableCertificates();
-    await loadToolbeltDevices(false);
-    loadData();
+    await refreshCertificateWorkflow();
   }
 
   function renderUploadDevices() {

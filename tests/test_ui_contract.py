@@ -90,6 +90,7 @@ def test_devices_workflow_explains_device_certificate_fields():
     assert "Upload ready" in html
     assert "Certificate ready" in html
     assert "Use existing" in html
+    assert "Expires:" in html
     assert 'value="extron-rsa"' in html
 
 
@@ -249,10 +250,15 @@ def test_upload_tab_does_not_auto_start_toolbelt_dry_run():
 
 def test_upload_rows_can_remove_prepared_local_ca_certificate():
     html = page()
+    remove_function = html.split("async function removePreparedToolbeltDevice", 1)[1].split(
+        "function renderUploadDevices", 1
+    )[0]
 
     assert "removePreparedToolbeltDevice" in html
     assert "/api/ca/issued/${encodeURIComponent(certificateId)}" in html
     assert "delete the associated Local CA device certificate" in html
+    assert "await refreshCertificateWorkflow()" in remove_function
+    assert "loadData();" not in remove_function
 
 
 def test_renewal_resume_actions_surface_errors_inline():
