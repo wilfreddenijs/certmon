@@ -80,3 +80,56 @@ def test_select_device_opens_serial_column_only_after_rejected_credentials(uploa
 
     assert "except SerialFallbackNeeded" in source
     assert first_manage < serial_enable < serial_read
+
+
+def test_open_fields_menu_prefers_visible_fields_button_geometry(monkeypatch, uploader):
+    clicks = []
+    mouse = types.ModuleType("pywinauto.mouse")
+    mouse.click = lambda coords: clicks.append(coords)
+    monkeypatch.setitem(__import__("sys").modules, "pywinauto.mouse", mouse)
+    monkeypatch.setattr(uploader, "POLL", 0)
+
+    class Rect:
+        def __init__(self, left, top, right, bottom):
+            self.left = left
+            self.top = top
+            self.right = right
+            self.bottom = bottom
+
+        def width(self):
+            return self.right - self.left
+
+        def height(self):
+            return self.bottom - self.top
+
+    class Control:
+        handle = 1
+
+        def __init__(self, label, rect):
+            self.label = label
+            self._rect = rect
+            self.element_info = types.SimpleNamespace(runtime_id=(label, rect.left))
+
+        def window_text(self):
+            return self.label
+
+        def rectangle(self):
+            return self._rect
+
+        def is_visible(self):
+            return True
+
+    class Window:
+        def descendants(self, control_type=None):
+            if control_type == "Text":
+                return [
+                    Control("Filter", Rect(360, 46, 426, 102)),
+                    Control("Fields", Rect(505, 70, 550, 100)),
+                ]
+            if control_type in {"Button", "SplitButton", "MenuItem"}:
+                return []
+            return []
+
+    assert uploader._open_fields_menu(Window()) is True
+    assert clicks
+    assert clicks[0][0] >= 500

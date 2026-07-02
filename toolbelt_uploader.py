@@ -605,6 +605,47 @@ def _click_fields_button(win):
     return False
 
 
+def _fields_button_rects(win):
+    rects = []
+    for c in _iter_toolbelt_controls(win, ("Button", "SplitButton", "Text")):
+        try:
+            text = _control_label(c).lower()
+            if text != "fields":
+                continue
+            if hasattr(c, "is_visible") and not c.is_visible():
+                continue
+            rect = c.rectangle()
+            if rect.top > 170:
+                continue
+            rects.append(rect)
+        except Exception:
+            continue
+    return sorted(rects, key=lambda rect: rect.right, reverse=True)
+
+
+def _click_visible_fields_by_geometry(win):
+    try:
+        import pywinauto.mouse as mouse
+    except Exception:
+        return False
+    for rect in _fields_button_rects(win):
+        candidates = (
+            (cx(rect), cy(rect)),
+            (rect.right + 18, cy(rect)),
+            (rect.right + 28, rect.bottom - 4),
+            (rect.left + 18, rect.top - 20),
+        )
+        for x, y in candidates:
+            try:
+                log.info("clicking visible Toolbelt Fields button at %s,%s", x, y)
+                mouse.click(coords=(x, y))
+                time.sleep(0.8)
+                return True
+            except Exception:
+                continue
+    return False
+
+
 def _click_fields_by_toolbar_geometry(win):
     try:
         import pywinauto.mouse as mouse
@@ -698,6 +739,8 @@ def _click_fields_from_filter_overflow_geometry(filter_rect):
 
 def _open_fields_menu(win):
     if _click_fields_button(win):
+        return True
+    if _click_visible_fields_by_geometry(win):
         return True
     filter_rect = _click_filter_overflow_arrow(win)
     if filter_rect is not None:
