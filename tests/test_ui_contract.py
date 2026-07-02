@@ -77,12 +77,28 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "separate private-key.pem download" in html
 
 
-def test_local_ca_ui_explains_device_certificate_fields():
+def test_devices_workflow_explains_device_certificate_fields():
     html = page()
 
     assert "Use the IP address users enter" in html
     assert "Add this if users connect by DNS name" in html
     assert "Choose Extron/RSA for older devices" in html
+    assert "Create & add to Upload" in html
+    assert "Local CA ready" in html
+    assert "Use existing" in html
+    assert 'value="extron-rsa"' in html
+
+
+def test_first_tab_is_devices_and_local_ca_is_root_management_only():
+    html = page()
+    ca_panel = html.split('id="tab-ca"', 1)[1].split("<!-- Upload Tab -->", 1)[0]
+
+    assert "switchTab('certs')\">Devices" in html
+    assert "Scanned devices" in html
+    assert "Issue Device Certificate" not in ca_panel
+    assert "Issued Device Certificates" not in ca_panel
+    assert "Generate Local CA" in html
+    assert "Download CA cert" in html
 
 
 def test_external_ca_import_form_submits_generated_and_existing_certificates():
@@ -178,8 +194,11 @@ def test_local_ca_extron_pem_download_uses_private_combined_artifact():
 def test_upload_tab_has_toolbelt_batch_upload_flow():
     html = page()
 
+    assert "Prepared device upload" in html
+    assert "one central prepared-device list" in html
+    assert "Add device" in html
+    assert "Manual upload fallback" in html
     assert "Toolbelt batch upload" in html
-    assert "devices.txt" in html
     assert "Dry-run starts first and is safe" in html
     assert 'id="toolbelt-device-list"' in html
     assert 'id="toolbelt-upload-btn"' in html
@@ -196,6 +215,14 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "run.error" in html
     assert "errorText" in html
     assert "d.event !== 'device_pending'" in html
+
+
+def test_upload_rows_can_remove_prepared_local_ca_certificate():
+    html = page()
+
+    assert "removePreparedToolbeltDevice" in html
+    assert "/api/ca/issued/${encodeURIComponent(certificateId)}" in html
+    assert "delete the associated Local CA device certificate" in html
 
 
 def test_renewal_resume_actions_surface_errors_inline():

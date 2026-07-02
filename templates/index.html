@@ -711,7 +711,7 @@
   <div class="content">
     <div class="tabs" style="justify-content:space-between">
       <div style="display:flex">
-        <div class="tab active" onclick="switchTab('certs')">Certificates</div>
+        <div class="tab active" onclick="switchTab('certs')">Devices</div>
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
         <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
         <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
@@ -722,9 +722,13 @@
     </div>
 
     <div class="tab-panel active" id="tab-certs">
+      <div class="section-title" style="margin-bottom:10px">Scanned devices</div>
+      <div class="help-text choice-help" style="margin-bottom:16px">
+        Start here: scanned devices are the source for Local CA preparation and Upload. Extron-compatible devices can be prepared for Toolbelt from their device card.
+      </div>
       <div class="cert-grid" id="cert-grid">
         <div class="empty-state">
-          <h3>No certificates yet</h3>
+          <h3>No devices yet</h3>
           <p>Add a host or run a network scan to get started.</p>
         </div>
       </div>
@@ -745,7 +749,33 @@
 
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
-      <div style="display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start">
+      <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
+          <div>
+            <div class="section-title" style="margin-bottom:8px">Prepared device upload</div>
+            <div class="help-text choice-help">
+              Upload is one central prepared-device list. Devices appear here only after an Extron-compatible Local CA certificate exists for a scanned device.
+              Dry-run starts first and is safe: it prepares Toolbelt but does not click Apply or reboot devices.
+            </div>
+          </div>
+          <button class="btn btn-ghost" onclick="goToDevicesForUpload()">Add device</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-ghost" onclick="loadToolbeltDevices(true)">Retry dry-run</button>
+          <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared device password</button>
+          <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
+          <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
+        </div>
+        <div id="toolbelt-run-status" class="help-text" style="margin-bottom:10px"></div>
+        <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+
+      <details id="manual-upload-fallback" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+        <summary style="cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent)">Manual upload fallback</summary>
+        <div class="help-text choice-help" style="margin:10px 0 16px">
+          For unsupported devices only. The automatic Toolbelt prepared-device list above is the primary Upload workflow.
+        </div>
+        <div style="display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start">
 
         <!-- Left: device list + add form -->
         <div>
@@ -845,24 +875,9 @@
             </div>
           </div>
 
-          <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-top:16px">
-            <div class="section-title" style="margin-bottom:8px">Toolbelt batch upload</div>
-            <div class="help-text choice-help" style="margin-bottom:12px">
-              This list comes from CertMon's <code>devices.txt</code> / Local CA Extron certificate mapping.
-              Dry-run starts first and is safe: it prepares Toolbelt but does not click Apply or reboot devices.
-              Real upload is only enabled for selected devices whose dry-run is OK.
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-              <button class="btn btn-ghost" onclick="loadToolbeltDevices(true)">Retry dry-run</button>
-              <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared device password</button>
-              <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
-              <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
-            </div>
-            <div id="toolbelt-run-status" class="help-text" style="margin-bottom:10px"></div>
-            <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
-          </div>
-
         </div>
+        </div>
+      </details>
       </div>
     </div>
   </div>
@@ -1028,6 +1043,10 @@
       const udRes = await fetch('/api/upload/devices');
       uploadDevices = await udRes.json();
     } catch (e) { /* keep existing uploadDevices */ }
+    try {
+      const certRes = await fetch('/api/certificates');
+      availableCertificates = await certRes.json();
+    } catch (e) { /* keep existing availableCertificates */ }
     let renewals = [];
     try {
       renewals = await (await fetch('/api/renewals')).json();
@@ -1091,7 +1110,7 @@
     const entries = Object.values(certs);
 
     if (!entries.length) {
-      grid.innerHTML = `<div class="empty-state"><h3>No certificates yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
+      grid.innerHTML = `<div class="empty-state"><h3>No devices yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
       return;
     }
 
@@ -1110,6 +1129,14 @@
       const hasDevice = (uploadDevices || []).some(d => d.host === c.host);
       const uploadLabel = hasDevice ? '⬆ Push' : '⬆ Upload';
       const uploadTitle = hasDevice ? 'Push a cert to this saved device' : 'Add this device to the Upload tab';
+
+      const localCaCert = findExtronLocalCaCertificate(c);
+      const deviceType = guessDeviceType(c.cn || c.host);
+      const localCaAction = deviceType === 'extron'
+        ? (localCaCert
+          ? `<button class="btn btn-ca" title="Show existing Extron Local CA certificate details" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}','${localCaCert.certificate_id}')">Local CA ready</button>`
+          : `<button class="btn btn-ca" title="Prepare an Extron-compatible Local CA certificate for Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Local CA</button>`)
+        : '';
 
       return `
         <div class="cert-card ${c.status}">
@@ -1142,7 +1169,7 @@
             <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
             ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
             <button class="btn btn-upload" title="${uploadTitle}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${uploadLabel}</button>
-            <button class="btn btn-ca" title="Issue a CA-signed cert for this device (prefills the Local CA tab)" onclick="sendToCA('${c.host}','${escAttr(c.cn || '')}')">🔐 CA</button>
+            ${localCaAction}
             <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
           </div>
         </div>
@@ -1679,8 +1706,14 @@
         </div>
       </div>` : '';
 
-    el.innerHTML = caCard + issueForm + issuedSection;
-    applyCAPrefill();  // fill IP/hostname if a cert card requested it
+    const deviceHint = ca.exists ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+        <div class="section-title" style="margin-bottom:10px">Device certificates moved to Devices</div>
+        <div class="help-text choice-help" style="margin-bottom:14px">Use the Devices tab to prepare scanned Extron devices for Upload. This Local CA tab now manages only the root CA for this PC/laptop.</div>
+        <button class="btn btn-ghost" onclick="switchTab('certs')">Open Devices</button>
+      </div>` : '';
+
+    el.innerHTML = caCard + deviceHint;
   }
 
   async function generateCA() {
@@ -1845,6 +1878,108 @@
     pendingCAPrefill = null;
   }
 
+  function findExtronLocalCaCertificate(device) {
+    const identifiers = [device.host, device.cn, ...(device.sans || [])]
+      .filter(Boolean)
+      .map(v => String(v).toLowerCase());
+    return (availableCertificates || []).find(c =>
+      c.issuer_type === 'local_ca' &&
+      c.profile === 'extron-rsa' &&
+      (c.identifiers || []).some(id => identifiers.includes(String(id).toLowerCase()))
+    );
+  }
+
+  function openDeviceLocalCAModal(host, cn, certificateId) {
+    const certificate = (availableCertificates || []).find(c => c.certificate_id === certificateId);
+    const ip = isIp(host) ? host : '';
+    const hostname = (cn && cn !== host && !isIp(cn)) ? cn : (isIp(host) ? '' : host);
+    const overlay = document.createElement('div');
+    overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:220;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = certificate ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:560px;max-width:95vw">
+        <div class="modal-title">Local CA ready</div>
+        <div class="help-text choice-help" style="margin-bottom:14px">This scanned Extron device already has an Extron-compatible Local CA certificate prepared for Upload.</div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px">
+          <div class="help-text">Device: <code>${host}</code></div>
+          <div class="help-text">Identifiers: <code>${(certificate.identifiers || []).join(', ')}</code></div>
+          <div class="help-text">Certificate: <code>${certificate.certificate_id}</code></div>
+          <div class="help-text">Profile: <code>${certificate.profile}</code></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="device-ca-use-existing">Use existing</button>
+          <button class="btn btn-ghost" id="device-ca-reissue">Issue new</button>
+          <button class="btn btn-ghost" id="device-ca-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:600px;max-width:95vw">
+        <div class="modal-title">Prepare Local CA certificate</div>
+        <div class="help-text choice-help" style="margin-bottom:14px">Review the selected scanned device parameters before creating an Extron-compatible certificate for Upload.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div class="form-label">Device IP</div>
+            <input type="text" id="device-ca-ip" value="${ip}" style="width:100%" />
+            <div class="help-text field-note">Use the IP address users enter in the browser/device URL.</div>
+          </div>
+          <div>
+            <div class="form-label">Hostname / CN</div>
+            <input type="text" id="device-ca-hostname" value="${hostname}" style="width:100%" />
+            <div class="help-text field-note">Add this if users connect by DNS name instead of IP.</div>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="form-label">Certificate profile</div>
+          <select id="device-ca-profile" style="width:100%">
+            <option value="extron-rsa" selected>Extron compatible (RSA)</option>
+            <option value="generic-rsa">Generic RSA</option>
+            <option value="generic-ecdsa">Generic modern (ECDSA)</option>
+          </select>
+          <div class="help-text field-note">Choose Extron/RSA for older devices and Toolbelt upload. Private keys remain encrypted server-side.</div>
+        </div>
+        <div id="device-ca-result" class="help-text" style="margin-top:12px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+          <button class="btn" id="device-ca-create">Create & add to Upload</button>
+          <button class="btn btn-ghost" id="device-ca-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#device-ca-cancel').onclick = () => overlay.remove();
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    const useExisting = overlay.querySelector('#device-ca-use-existing');
+    if (useExisting) {
+      useExisting.onclick = () => { overlay.remove(); switchTab('upload'); loadToolbeltDevices(true); };
+      overlay.querySelector('#device-ca-reissue').onclick = () => {
+        overlay.remove();
+        openDeviceLocalCAModal(host, cn);
+      };
+      return;
+    }
+    overlay.querySelector('#device-ca-create').onclick = async () => {
+      const result = overlay.querySelector('#device-ca-result');
+      const issueIp = overlay.querySelector('#device-ca-ip').value.trim();
+      const issueHostname = overlay.querySelector('#device-ca-hostname').value.trim();
+      const profile = overlay.querySelector('#device-ca-profile').value;
+      if (!issueIp && !issueHostname) { result.style.color = 'var(--warning)'; result.textContent = 'Enter an IP address or hostname.'; return; }
+      result.style.color = 'var(--muted)';
+      result.textContent = 'Creating Local CA certificate...';
+      const res = await fetch('/api/ca/issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: issueIp, hostname: issueHostname, profile, name: cn || host })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { result.style.color = 'var(--critical)'; result.textContent = data.error || 'Could not create certificate'; return; }
+      result.style.color = 'var(--ok)';
+      result.innerHTML = `Created <code>${data.certificate_id}</code>. <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:8px" onclick="switchTab('upload')">View Upload</button>`;
+      await loadAvailableCertificates();
+      await loadToolbeltDevices(false);
+      loadData();
+    };
+  }
+
+  function sendToCA(host, cn) {
+    openDeviceLocalCAModal(host, cn);
+  }
+
   // Called from the "⬆ Upload / Push" button on a cert card.
   // If a device is already saved for this host, skip the add-device form and
   // jump straight to the certificate/device selectors with that device pre-selected.
@@ -1958,6 +2093,7 @@
             <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
           </div>
           <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Credentials</button>
+          <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Remove from Upload and delete the associated Local CA device certificate" onclick="event.preventDefault();removePreparedToolbeltDevice('${escAttr(d.certificate_id)}','${escAttr(d.label)}')">Remove</button>
         </label>
       </div>
     `).join('');
@@ -2062,6 +2198,23 @@
     document.getElementById('toolbelt-run-status').textContent = 'Stop requested. CertMon will stop before the next device.';
   }
 
+  function goToDevicesForUpload() {
+    switchTab('certs');
+    const grid = document.getElementById('cert-grid');
+    if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function removePreparedToolbeltDevice(certificateId, label) {
+    const ok = confirm(`Remove ${label} from Upload?\n\nThis will delete the associated Local CA device certificate. The scanned device remains visible on Devices.`);
+    if (!ok) return;
+    const res = await fetch(`/api/ca/issued/${encodeURIComponent(certificateId)}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) { alert(data.error || 'Could not remove prepared device'); return; }
+    await loadAvailableCertificates();
+    await loadToolbeltDevices(false);
+    loadData();
+  }
+
   function renderUploadDevices() {
     const list = document.getElementById('upload-device-list');
     if (!uploadDevices.length) {
@@ -2082,6 +2235,7 @@
 
   function renderDeviceSelect() {
     const sel = document.getElementById('push-device-select');
+    if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = '<option value="">— select a device —</option>' +
       uploadDevices.map(d => `<option value="${d.id}"${d.id === cur ? ' selected' : ''}>${d.name} (${d.host})</option>`).join('');
@@ -2089,6 +2243,7 @@
 
   function renderCertificateSelect() {
     const sel = document.getElementById('push-certificate-select');
+    if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = '<option value="">— select a stored certificate —</option>' +
       availableCertificates.map(c => {
@@ -2099,9 +2254,10 @@
 
   function applyPendingDeployment() {
     if (!pendingDeployment) return;
-    if (pendingDeployment.deviceId) {
+    const deviceSelect = document.getElementById('push-device-select');
+    if (pendingDeployment.deviceId && deviceSelect) {
       selectedDeviceId = pendingDeployment.deviceId;
-      document.getElementById('push-device-select').value = pendingDeployment.deviceId;
+      deviceSelect.value = pendingDeployment.deviceId;
       renderUploadDevices();
     }
     if (pendingDeployment.certificateId && document.getElementById('push-certificate-select')) {

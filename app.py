@@ -922,6 +922,10 @@ def ca_delete_issued(certificate_id):
     if artifact_store is not None:
         artifact_store.delete_certificate_set(certificate_id)
     database.delete_certificate(certificate_id)
+    if hasattr(database, "record_event"):
+        database.record_event(
+            "local_ca_certificate_deleted", {"certificate_id": certificate_id}
+        )
     return jsonify({"ok": True, "removed": [certificate_id]})
 
 

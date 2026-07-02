@@ -167,6 +167,10 @@ def test_delete_issued_certificate_uses_certificate_id(
     assert response.get_json() == {"ok": True, "removed": ["cert-1"]}
     assert artifacts.deleted == ["cert-1"]
     assert database.deleted == ["cert-1"]
+    assert database.last_event == (
+        "local_ca_certificate_deleted",
+        {"certificate_id": "cert-1"},
+    )
 
 
 def test_external_completion_response_contains_only_certificate_id(
