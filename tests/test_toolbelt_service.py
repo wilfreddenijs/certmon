@@ -46,6 +46,9 @@ class FakeDatabase:
     def put_secret(self, secret_id, blob, metadata=None):
         self.secrets[secret_id] = blob
 
+    def delete_secret(self, secret_id):
+        self.secrets.pop(secret_id, None)
+
 
 class FakeArtifacts:
     def __init__(self, tmp_path):
@@ -132,6 +135,24 @@ def test_toolbelt_service_credentials_are_encrypted_and_not_returned(tmp_path):
     payload = json.dumps(devices)
     assert '"password"' not in payload
     assert "admin" not in payload
+
+
+def test_toolbelt_service_can_delete_device_credentials(tmp_path):
+    database = FakeDatabase()
+    service = ToolbeltBatchService(
+        database,
+        FakeArtifacts(tmp_path),
+        FakeVault(),
+        script_path=tmp_path / "toolbelt_uploader.py",
+        runner=lambda command, on_event: None,
+    )
+
+    service.save_credentials("192.168.0.10", username="admin", password="serial")
+    assert database.get_secret("toolbelt-device-credentials:192.168.0.10") is not None
+
+    service.delete_credentials("192.168.0.10")
+
+    assert database.get_secret("toolbelt-device-credentials:192.168.0.10") is None
 
 
 def test_toolbelt_service_uses_shared_password_before_factory_and_serial(tmp_path):

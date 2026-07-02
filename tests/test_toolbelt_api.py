@@ -11,6 +11,7 @@ class FakeToolbeltService:
     def __init__(self):
         self.selection = None
         self.credentials = None
+        self.deleted_credentials = []
         self.default_credentials = None
         self.started = []
         self.run = {
@@ -46,6 +47,9 @@ class FakeToolbeltService:
 
     def save_credentials(self, selector, *, username, password):
         self.credentials = (selector, username, password)
+
+    def delete_credentials(self, selector):
+        self.deleted_credentials.append(selector)
 
     def save_default_credentials(self, *, username, password):
         self.default_credentials = (username, password)
@@ -129,6 +133,14 @@ def test_toolbelt_upload_stop_selection_and_credentials_routes(tmp_data_dir):
         json={"username": "admin", "password": "extron"},
     ).status_code == 200
     assert service.credentials == ("192.168.0.10", "admin", "extron")
+
+    clear_response = client.patch(
+        "/api/toolbelt/devices/192.168.0.10/credentials",
+        json={"username": "admin", "password": ""},
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.get_json()["credentials_saved"] is False
+    assert service.deleted_credentials == ["192.168.0.10"]
 
     default_response = client.patch(
         "/api/toolbelt/default-credentials",

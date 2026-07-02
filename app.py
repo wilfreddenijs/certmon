@@ -922,6 +922,20 @@ def ca_delete_issued(certificate_id):
     if artifact_store is not None:
         artifact_store.delete_certificate_set(certificate_id)
     database.delete_certificate(certificate_id)
+    if toolbelt_service is not None:
+        identifiers = metadata.get("identifiers") or []
+        def is_ip(value):
+            try:
+                ipaddress.ip_address(value)
+                return True
+            except ValueError:
+                return False
+
+        selector = next((i for i in identifiers if is_ip(i)), None)
+        if not selector and identifiers:
+            selector = identifiers[0]
+        if selector and hasattr(toolbelt_service, "delete_credentials"):
+            toolbelt_service.delete_credentials(selector)
     if hasattr(database, "record_event"):
         database.record_event(
             "local_ca_certificate_deleted", {"certificate_id": certificate_id}
@@ -1196,6 +1210,10 @@ def toolbelt_credentials(selector):
     password = body.get("password")
     if password is None:
         return jsonify({"error": "password is required"}), 400
+    if username == "admin" and str(password) == "":
+        if hasattr(toolbelt_service, "delete_credentials"):
+            toolbelt_service.delete_credentials(selector)
+        return jsonify({"ok": True, "credentials_saved": False})
     toolbelt_service.save_credentials(
         selector, username=username, password=str(password)
     )

@@ -85,6 +85,14 @@ class FakeExternalCA:
         return "cert-2"
 
 
+class FakeToolbeltService:
+    def __init__(self):
+        self.deleted_credentials = []
+
+    def delete_credentials(self, selector):
+        self.deleted_credentials.append(selector)
+
+
 def load_app(tmp_data_dir):
     import app
 
@@ -158,8 +166,10 @@ def test_delete_issued_certificate_uses_certificate_id(
     module = load_app(tmp_data_dir)
     artifacts = FakeArtifacts()
     database = FakeCertificateDatabase()
+    toolbelt = FakeToolbeltService()
     monkeypatch.setattr(module, "artifact_store", artifacts)
     monkeypatch.setattr(module, "database", database)
+    monkeypatch.setattr(module, "toolbelt_service", toolbelt)
 
     response = module.app.test_client().delete("/api/ca/issued/cert-1")
 
@@ -167,6 +177,7 @@ def test_delete_issued_certificate_uses_certificate_id(
     assert response.get_json() == {"ok": True, "removed": ["cert-1"]}
     assert artifacts.deleted == ["cert-1"]
     assert database.deleted == ["cert-1"]
+    assert toolbelt.deleted_credentials == ["192.168.0.10"]
     assert database.last_event == (
         "local_ca_certificate_deleted",
         {"certificate_id": "cert-1"},

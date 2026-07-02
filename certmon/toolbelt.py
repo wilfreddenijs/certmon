@@ -129,6 +129,11 @@ class ToolbeltBatchService:
             self._secret_id(selector), blob, {"selector": selector, "username": username}
         )
 
+    def delete_credentials(self, selector):
+        if not selector:
+            return
+        self.database.delete_secret(self._secret_id(selector))
+
     def save_default_credentials(self, *, username, password):
         if not username or password is None:
             raise ValueError("username and password are required")
