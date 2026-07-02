@@ -792,62 +792,6 @@
         <div class="help-text choice-help" style="margin:10px 0 16px">
           For unsupported devices only. The automatic Toolbelt prepared-device list above is the primary Upload workflow.
         </div>
-        <div style="display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start">
-
-        <!-- Left: device list + add form -->
-        <div>
-          <div class="section-title" style="margin-bottom:12px">Target Devices</div>
-
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
-            <div class="form-group">
-              <label class="form-label">Device Name</label>
-              <input type="text" id="ud-name" placeholder="e.g. UCS 303 Boardroom" style="width:100%"/>
-            </div>
-            <div class="form-group">
-              <label class="form-label">IP Address / Host</label>
-              <input type="text" id="ud-host" placeholder="192.168.0.114" style="width:100%"/>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
-              <div class="form-group">
-                <label class="form-label">Port</label>
-                <input type="number" id="ud-port" value="80" style="width:100%"/>
-              </div>
-              <div class="form-group">
-                <label class="form-label">HTTPS</label>
-                <div style="padding-top:8px"><input type="checkbox" id="ud-https" style="width:16px;height:16px"/></div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Device Type</label>
-              <select id="ud-type" style="width:100%">
-                <option value="generic">Generic / Manual</option>
-                <option value="extron">Extron (UCS 303, etc.)</option>
-                <option value="homeassistant">Home Assistant</option>
-                <option value="synology">Synology NAS</option>
-              </select>
-              <div class="help-text field-note">Choose the closest target. Generic/Manual shows downloadable files and instructions instead of an automatic push.</div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Username</label>
-              <input type="text" id="ud-username" placeholder="admin" style="width:100%"/>
-              <div class="help-text field-note">Used only server-side when CertMon connects to the device.</div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Password</label>
-              <input type="password" id="ud-password" placeholder="extron" style="width:100%"/>
-              <div class="help-text field-note">Stored encrypted. It is not sent back to the browser after saving.</div>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn" style="flex:1" onclick="addUploadDevice()">+ Add Device</button>
-              <button class="btn btn-ghost" style="padding:8px 12px" onclick="testUploadDevice()" title="Test connection">⟳ Test</button>
-            </div>
-            <div id="ud-test-result" style="font-size:11px;margin-top:8px;display:none"></div>
-          </div>
-
-          <div id="upload-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
-        </div>
-
-        <!-- Right: certificate selection + push -->
         <div>
           <div class="section-title" style="margin-bottom:12px">Download Certificates for Manual Upload</div>
 
@@ -1982,7 +1926,11 @@
       const data = await res.json();
       if (!res.ok || data.error) { result.style.color = 'var(--critical)'; result.textContent = data.error || 'Could not create certificate'; return; }
       result.style.color = 'var(--ok)';
-      result.innerHTML = `Created <code>${data.certificate_id}</code>. <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:8px" onclick="openManualOrToolbeltUploadForCertificate('${data.certificate_id}')">View upload options</button>`;
+      result.innerHTML = `Created <code>${data.certificate_id}</code>. <button class="btn btn-ghost" id="device-ca-view-upload" style="font-size:11px;padding:5px 10px;margin-left:8px">View upload options</button>`;
+      overlay.querySelector('#device-ca-view-upload').onclick = () => {
+        overlay.remove();
+        openManualOrToolbeltUploadForCertificate(data.certificate_id);
+      };
       await loadAvailableCertificates();
       await loadToolbeltDevices(false);
       loadData();
@@ -1998,36 +1946,12 @@
   // jump straight to the certificate/device selectors with that device pre-selected.
   // Otherwise prefill the add-device form.
   async function sendToUpload(host, port, cn) {
-    switchTab('upload');
-    await loadUploadDevices();
-
-    const existing = uploadDevices.find(d => d.host === host);
-    if (existing) {
-      const matchingCertificate = findLocalCaCertificate({ host, cn, sans: [] });
-      if (matchingCertificate) {
-        await openManualUploadForCertificate(matchingCertificate.certificate_id);
-      }
+    const matchingCertificate = findLocalCaCertificate({ host, cn, sans: [] });
+    if (matchingCertificate) {
+      await openManualUploadForCertificate(matchingCertificate.certificate_id);
       return;
     }
-
-    // No saved device — prefill the add-device form.
-    // Cert was found on `port`; device web UI is usually 80/443.
-    const isHttps = (port === 443 || port === 8443 || port === 4443 || port === 9443);
-
-    document.getElementById('ud-name').value = cn || host;
-    document.getElementById('ud-host').value = host;
-    document.getElementById('ud-port').value = isHttps ? port : 80;
-    document.getElementById('ud-https').checked = isHttps;
-    const guessedType = guessDeviceType(cn || host);
-    document.getElementById('ud-type').value = guessedType === 'extron' ? 'extron' : 'generic';
-
-    // Prefill Extron default password as a convenience
-    if (guessedType === 'extron' && !document.getElementById('ud-password').value) {
-      document.getElementById('ud-password').value = 'extron';
-    }
-
-    flashCard(document.getElementById('ud-name').closest('div[style*="border-radius:10px"]'));
-    document.getElementById('ud-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    openDeviceLocalCAModal(host, cn);
   }
 
   async function loadUploadDevices() {
@@ -2231,6 +2155,7 @@
 
   function renderUploadDevices() {
     const list = document.getElementById('upload-device-list');
+    if (!list) return;
     if (!uploadDevices.length) {
       list.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px">No devices yet — add one above.</div>';
       return;
@@ -2251,7 +2176,7 @@
     const sel = document.getElementById('push-target-select');
     if (!sel) return;
     const cur = sel.value;
-    const manualCertificates = (availableCertificates || []).filter(c => c.profile !== 'extron-rsa');
+    const manualCertificates = availableCertificates || [];
     sel.innerHTML = '<option value="">— select a certificate/device pair —</option>' +
       manualCertificates.map(c => {
         const identifiers = c.identifiers || [];
@@ -2302,60 +2227,11 @@
     openManualUploadForCertificate(certificateId);
   }
 
-  async function addUploadDevice() {
-    const name = document.getElementById('ud-name').value.trim();
-    const host = document.getElementById('ud-host').value.trim();
-    const port = parseInt(document.getElementById('ud-port').value) || 80;
-    const https = document.getElementById('ud-https').checked;
-    const device_type = document.getElementById('ud-type').value;
-    const username = document.getElementById('ud-username').value.trim();
-    const password = document.getElementById('ud-password').value;
-
-    if (!name || !host) { alert('Name and host are required'); return; }
-
-    const res = await fetch('/api/upload/devices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, host, port, https, device_type, username, password })
-    });
-    const data = await res.json();
-    if (data.error) { alert(data.error); return; }
-
-    // Clear form
-    ['ud-name','ud-host','ud-username','ud-password'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('ud-port').value = '80';
-    document.getElementById('ud-https').checked = false;
-
-    await loadUploadDevices();
-    loadData();  // refresh cert cards so they show "Push" for this host
-  }
-
   async function removeUploadDevice(id) {
     await fetch(`/api/upload/devices/${id}`, { method: 'DELETE' });
     if (selectedDeviceId === id) selectedDeviceId = null;
     await loadUploadDevices();
     loadData();  // refresh cert cards (back to "Upload" if no device left)
-  }
-
-  async function testUploadDevice() {
-    const host = document.getElementById('ud-host').value.trim();
-    const port = parseInt(document.getElementById('ud-port').value) || 80;
-    const https = document.getElementById('ud-https').checked;
-    if (!host) { alert('Enter a host first'); return; }
-
-    const el = document.getElementById('ud-test-result');
-    el.style.display = 'block';
-    el.style.color = 'var(--muted)';
-    el.textContent = 'Testing connection...';
-
-    const res = await fetch('/api/upload/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host, port, https })
-    });
-    const data = await res.json();
-    el.style.color = data.ok ? 'var(--ok)' : 'var(--critical)';
-    el.textContent = (data.ok ? '✓ ' : '✗ ') + data.message;
   }
 
   async function pushCert() {

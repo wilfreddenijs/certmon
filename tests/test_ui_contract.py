@@ -72,9 +72,8 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "certificate_id" in html
     assert "cert_pem" not in push_function
     assert "key_pem" not in push_function
-    assert "Choose the closest target" in html
-    assert "Used only server-side" in html
-    assert "Stored encrypted" in html
+    assert "Each certificate belongs to one device" in html
+    assert "certificate/device pair" in html
     assert "For unsupported devices" in html
     assert "separate private-key.pem download" in html
 
@@ -204,6 +203,7 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "Add device" in html
     assert "Manual upload fallback" in html
     assert "Download Certificates for Manual Upload" in html
+    assert "Target Devices" not in html
     assert "Toolbelt batch upload" in html
     assert "Test Toolbelt upload first" in html
     assert "Test Toolbelt upload" in html
@@ -223,6 +223,18 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "run.error" in html
     assert "errorText" in html
     assert "d.event !== 'device_pending'" in html
+
+
+def test_manual_upload_lists_all_certificate_profiles_as_download_targets():
+    html = page()
+    render_select = html.split("function renderCertificateSelect()", 1)[1].split(
+        "function applyPendingDeployment()", 1
+    )[0]
+
+    assert "availableCertificates || []" in render_select
+    assert "filter(c => c.profile !== 'extron-rsa')" not in render_select
+    assert "Download Certificates for Manual Upload" in html
+    assert "certificate/device pair" in html
 
 
 def test_upload_tab_does_not_auto_start_toolbelt_dry_run():

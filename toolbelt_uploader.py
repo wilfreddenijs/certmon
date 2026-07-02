@@ -1262,19 +1262,6 @@ def select_device(win, ip, timeout=T_MANAGE):
 
     row_y = cy(ip_cell.rectangle())
     serial = None
-    if _wants_serial_fallback(ip):
-        if ensure_serial_column_visible(win, row_y=row_y):
-            refreshed_cell = find_device_cell(win, ip)
-            if refreshed_cell is not None:
-                ip_cell = refreshed_cell
-                row_y = cy(ip_cell.rectangle())
-            serial = discover_serial_from_row(win, ip, row_y)
-            if serial:
-                log.info("[%s] prepared Toolbelt serial fallback %s", ip, _masked_secret(serial))
-            else:
-                log.warning("[%s] Serial Number column is visible but no serial was read from the row", ip)
-        else:
-            log.warning("[%s] Serial Number column is not visible; skipping serial password fallback", ip)
     # Click the row to select it
     ip_cell.click_input()
     time.sleep(0.5)

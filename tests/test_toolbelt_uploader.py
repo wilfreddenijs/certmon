@@ -1,5 +1,6 @@
 import time
 import types
+import inspect
 
 import pytest
 
@@ -68,3 +69,10 @@ def test_credentials_modal_detection_treats_busy_uia_tree_as_not_present(uploade
 
     assert uploader._credentials_modal_text(BusyWindow()) == ""
     assert uploader._credentials_modal_present(BusyWindow()) is False
+
+
+def test_select_device_does_not_open_serial_column_before_manage(uploader):
+    source = inspect.getsource(uploader.select_device)
+
+    assert "ensure_serial_column_visible" not in source
+    assert "discover_serial_from_row" not in source
