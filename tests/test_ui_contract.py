@@ -248,6 +248,29 @@ def test_upload_tab_does_not_auto_start_toolbelt_dry_run():
     assert "!toolbeltAutoDryRunStarted" not in load_toolbelt
 
 
+def test_device_card_local_ca_match_requires_device_ip_when_present():
+    html = page()
+    finder = html.split("function findLocalCaCertificate(device)", 1)[1].split(
+        "function openDeviceLocalCAModal", 1
+    )[0]
+
+    assert "const deviceIp = isIp(device.host)" in finder
+    assert "if (deviceIp) return certIdentifiers.includes(deviceIp)" in finder
+    assert "return certIdentifiers.some(id => identifiers.includes(id))" in finder
+
+
+def test_toolbelt_dry_run_clears_visible_stale_status_before_posting():
+    html = page()
+    runner = html.split("async function startToolbeltRun(mode)", 1)[1].split(
+        "async function pollToolbeltRun", 1
+    )[0]
+
+    assert "if (mode === 'dry-run')" in runner
+    assert "dry_run: null" in runner
+    assert "upload: null" in runner
+    assert "renderToolbeltDevices();" in runner.split("fetch(", 1)[0]
+
+
 def test_upload_rows_can_remove_prepared_local_ca_certificate():
     html = page()
     remove_function = html.split("async function removePreparedToolbeltDevice", 1)[1].split(

@@ -1833,10 +1833,13 @@
     const identifiers = [device.host, device.cn, ...(device.sans || [])]
       .filter(Boolean)
       .map(v => String(v).toLowerCase());
-    return (availableCertificates || []).find(c =>
-      c.issuer_type === 'local_ca' &&
-      (c.identifiers || []).some(id => identifiers.includes(String(id).toLowerCase()))
-    );
+    const deviceIp = isIp(device.host) ? String(device.host).toLowerCase() : '';
+    return (availableCertificates || []).find(c => {
+      if (c.issuer_type !== 'local_ca') return false;
+      const certIdentifiers = (c.identifiers || []).map(id => String(id).toLowerCase());
+      if (deviceIp) return certIdentifiers.includes(deviceIp);
+      return certIdentifiers.some(id => identifiers.includes(id));
+    });
   }
 
   function openDeviceLocalCAModal(host, cn, certificateId) {
@@ -2097,6 +2100,13 @@
     const status = document.getElementById('toolbelt-run-status');
     status.style.color = 'var(--muted)';
     status.textContent = mode === 'upload' ? 'Starting Toolbelt upload...' : 'Starting safe Toolbelt dry-run...';
+    if (mode === 'dry-run') {
+      const selectedSet = new Set(selected);
+      toolbeltDevices = toolbeltDevices.map(d =>
+        selectedSet.has(d.selector) ? { ...d, dry_run: null, upload: null } : d
+      );
+      renderToolbeltDevices();
+    }
     const res = await fetch(mode === 'upload' ? '/api/toolbelt/upload' : '/api/toolbelt/dry-run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
