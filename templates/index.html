@@ -854,7 +854,7 @@
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
               <button class="btn btn-ghost" onclick="loadToolbeltDevices(true)">Retry dry-run</button>
-              <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared password</button>
+              <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared device password</button>
               <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
               <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
             </div>
@@ -1942,7 +1942,7 @@
     const toolbeltCredentialsLabel = d => {
       if (d.credentials_saved) return 'saved encrypted';
       if (d.default_credentials_saved) {
-        return 'tries shared password, then admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
+        return 'tries shared device password, then admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
       }
       return 'tries admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
     };
@@ -1976,9 +1976,9 @@
   }
 
   async function saveToolbeltDefaultCredentials() {
-    const username = prompt('Shared Toolbelt username', 'admin');
+    const username = prompt('Shared device username', 'admin');
     if (!username) return;
-    const password = prompt('Shared Toolbelt password. CertMon tries this before admin/extron and serial fallback. Leave empty to cancel.');
+    const password = prompt('Shared device password. CertMon tries this before admin/extron and serial fallback. Leave empty to cancel.');
     if (!password) return;
     const res = await fetch('/api/toolbelt/default-credentials', {
       method: 'PATCH',

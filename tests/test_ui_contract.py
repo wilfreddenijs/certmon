@@ -189,8 +189,8 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "/api/toolbelt/reset-upload-tab" in html
     assert "/api/toolbelt/dry-run" in html
     assert "/api/toolbelt/upload" in html
-    assert "Shared password" in html
-    assert "tries shared password, then admin/extron" in html
+    assert "Shared device password" in html
+    assert "tries shared device password, then admin/extron" in html
     assert "Stop after current device" in html
     assert "tries admin/extron, then admin/serial from Toolbelt" in html
     assert "run.error" in html

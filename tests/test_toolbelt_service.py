@@ -379,8 +379,8 @@ def test_toolbelt_service_reset_upload_tab_state_clears_status_and_selection(tmp
 
 
 def test_toolbelt_service_sanitizer_does_not_redact_password_substrings():
-    message = {"message": "all known Toolbelt passwords failed"}
+    message = {"message": "all known device passwords failed"}
 
     sanitized = ToolbeltBatchService._sanitize(message)
 
-    assert sanitized["message"] == "all known Toolbelt passwords failed"
+    assert sanitized["message"] == "all known device passwords failed"
