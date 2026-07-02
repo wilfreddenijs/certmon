@@ -80,10 +80,13 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
 def test_devices_workflow_explains_device_certificate_fields():
     html = page()
 
+    assert "Choose an Extron device and select <b>Create Local CA cert</b>" in html
     assert "Use the IP address users enter" in html
     assert "Add this if users connect by DNS name" in html
     assert "Choose Extron/RSA for older devices" in html
     assert "Create & add to Upload" in html
+    assert "Create Local CA cert" in html
+    assert "Upload ready" in html
     assert "Local CA ready" in html
     assert "Use existing" in html
     assert 'value="extron-rsa"' in html

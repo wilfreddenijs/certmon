@@ -726,6 +726,9 @@
       <div class="help-text choice-help" style="margin-bottom:16px">
         Start here: scanned devices are the source for Local CA preparation and Upload. Extron-compatible devices can be prepared for Toolbelt from their device card.
       </div>
+      <div id="upload-device-guidance" class="help-text choice-help" style="display:none;margin-bottom:16px;border-color:rgba(0,229,255,0.32);background:rgba(0,229,255,0.08)">
+        Choose an Extron device and select <b>Create Local CA cert</b>. After review, CertMon creates the device certificate and adds it to the Upload list.
+      </div>
       <div class="cert-grid" id="cert-grid">
         <div class="empty-state">
           <h3>No devices yet</h3>
@@ -1127,16 +1130,17 @@
       const canRenew = ['warning', 'critical', 'expired'].includes(c.status);
       const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
       const hasDevice = (uploadDevices || []).some(d => d.host === c.host);
-      const uploadLabel = hasDevice ? '⬆ Push' : '⬆ Upload';
-      const uploadTitle = hasDevice ? 'Push a cert to this saved device' : 'Add this device to the Upload tab';
 
       const localCaCert = findExtronLocalCaCertificate(c);
       const deviceType = guessDeviceType(c.cn || c.host);
       const localCaAction = deviceType === 'extron'
         ? (localCaCert
-          ? `<button class="btn btn-ca" title="Show existing Extron Local CA certificate details" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}','${localCaCert.certificate_id}')">Local CA ready</button>`
-          : `<button class="btn btn-ca" title="Prepare an Extron-compatible Local CA certificate for Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Local CA</button>`)
+          ? `<button class="btn btn-ca" title="Show the prepared Extron Local CA certificate and open Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}','${localCaCert.certificate_id}')">Upload ready</button>`
+          : `<button class="btn btn-ca" title="Create an Extron-compatible Local CA certificate and add this device to Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Create Local CA cert</button>`)
         : '';
+      const uploadAction = deviceType === 'extron'
+        ? ''
+        : `<button class="btn btn-upload" title="${hasDevice ? 'Push a cert to this saved device' : 'Add this device to the manual Upload fallback'}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${hasDevice ? '⬆ Push' : '⬆ Upload'}</button>`;
 
       return `
         <div class="cert-card ${c.status}">
@@ -1168,7 +1172,7 @@
           <div class="cert-actions">
             <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
             ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
-            <button class="btn btn-upload" title="${uploadTitle}" onclick="sendToUpload('${c.host}',${c.port},'${escAttr(c.cn || '')}')">${uploadLabel}</button>
+            ${uploadAction}
             ${localCaAction}
             <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
           </div>
@@ -2200,6 +2204,8 @@
 
   function goToDevicesForUpload() {
     switchTab('certs');
+    const guidance = document.getElementById('upload-device-guidance');
+    if (guidance) guidance.style.display = 'block';
     const grid = document.getElementById('cert-grid');
     if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
