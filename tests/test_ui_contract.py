@@ -94,6 +94,31 @@ def test_devices_workflow_explains_device_certificate_fields():
     assert 'value="extron-rsa"' in html
 
 
+def test_devices_overview_has_filters_sticky_tabs_and_bulk_certificate_selection():
+    html = page()
+
+    for required in (
+        'id="device-status-filter"',
+        'id="device-certificate-filter"',
+        'id="device-select-filtered"',
+        'id="device-bulk-create-btn"',
+        "setDeviceStatusFilter(this.value)",
+        "setDeviceCertificateFilter(this.value)",
+        "toggleFilteredDevices(this.checked)",
+        "clearFilteredDeviceSelection()",
+        "bulkCreateSelectedDeviceCertificates()",
+        "selectedDeviceKeys",
+        "filteredDeviceEntries()",
+        "profile: 'extron-rsa'",
+        "position: sticky",
+    ):
+        assert required in html
+
+    assert "Certificate made" in html
+    assert "No certificate" in html
+    assert "Select filtered" in html
+
+
 def test_first_tab_is_devices_and_local_ca_is_root_management_only():
     html = page()
     ca_panel = html.split('id="tab-ca"', 1)[1].split("<!-- Upload Tab -->", 1)[0]

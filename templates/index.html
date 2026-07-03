@@ -234,6 +234,11 @@
     gap: 0;
     border-bottom: 1px solid var(--border);
     margin-bottom: 24px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--bg);
+    padding-top: 2px;
   }
 
   .tab {
@@ -255,6 +260,26 @@
 
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+
+  .device-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    background: var(--surface);
+  }
+
+  .device-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
 
   /* Cert grid */
   .cert-grid {
@@ -739,6 +764,32 @@
       <div id="upload-device-guidance" class="help-text choice-help" style="display:none;margin-bottom:16px;border-color:rgba(0,229,255,0.32);background:rgba(0,229,255,0.08)">
         Choose a device and select <b>Create certificate</b>. The selected profile determines whether it becomes a Toolbelt upload or manual upload certificate.
       </div>
+      <div class="device-filter-bar">
+        <div class="device-filter-group">
+          <span class="form-label" style="margin:0">Filter</span>
+          <select id="device-status-filter" onchange="setDeviceStatusFilter(this.value)">
+            <option value="all">All validity</option>
+            <option value="ok">OK</option>
+            <option value="warning">Warning</option>
+            <option value="critical">Critical</option>
+            <option value="expired">Expired</option>
+          </select>
+          <select id="device-certificate-filter" onchange="setDeviceCertificateFilter(this.value)">
+            <option value="all">All certificates</option>
+            <option value="with">Certificate made</option>
+            <option value="without">No certificate</option>
+          </select>
+          <span class="help-text" id="device-filter-count"></span>
+        </div>
+        <div class="device-filter-group">
+          <label style="display:flex;gap:8px;align-items:center">
+            <input id="device-select-filtered" type="checkbox" onchange="toggleFilteredDevices(this.checked)" />
+            <span style="font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--text)">Select filtered</span>
+          </label>
+          <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px" onclick="clearFilteredDeviceSelection()">Select none</button>
+          <button class="btn" id="device-bulk-create-btn" style="font-size:11px;padding:6px 10px" onclick="bulkCreateSelectedDeviceCertificates()" disabled>Create certificates</button>
+        </div>
+      </div>
       <div class="cert-grid" id="cert-grid">
         <div class="empty-state">
           <h3>No devices yet</h3>
@@ -985,6 +1036,10 @@
   let currentRenewalStep = 1;
   let currentRenewalJobId = null;
   let scanPollInterval = null;
+  let currentCertificates = {};
+  let deviceStatusFilter = 'all';
+  let deviceCertificateFilter = 'all';
+  const selectedDeviceKeys = new Set();
   const renewalActionResults = {};
 
   async function loadData() {
@@ -1004,7 +1059,8 @@
       renewals = await (await fetch('/api/renewals')).json();
     } catch (e) { /* show no renewal jobs */ }
     renderSidebar(data);
-    renderCerts(data.certificates || {});
+    currentCertificates = data.certificates || {};
+    renderCerts(currentCertificates);
     renderRenewals(renewals);
     updateStats(data.certificates || {});
   }
@@ -1057,12 +1113,103 @@
     return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
+  function deviceKey(c) {
+    return `${c.host}|${c.port || 443}`;
+  }
+
+  function filteredDeviceEntries() {
+    return Object.values(currentCertificates || {}).filter(c => {
+      const statusMatch = deviceStatusFilter === 'all' || c.status === deviceStatusFilter;
+      const hasLocalCa = !!findLocalCaCertificate(c);
+      const certMatch = deviceCertificateFilter === 'all' ||
+        (deviceCertificateFilter === 'with' && hasLocalCa) ||
+        (deviceCertificateFilter === 'without' && !hasLocalCa);
+      return statusMatch && certMatch;
+    });
+  }
+
+  function setDeviceStatusFilter(value) {
+    deviceStatusFilter = value;
+    renderCerts(currentCertificates);
+  }
+
+  function setDeviceCertificateFilter(value) {
+    deviceCertificateFilter = value;
+    renderCerts(currentCertificates);
+  }
+
+  function toggleDeviceSelection(key, checked) {
+    if (checked) selectedDeviceKeys.add(key);
+    else selectedDeviceKeys.delete(key);
+    renderCerts(currentCertificates);
+  }
+
+  function toggleFilteredDevices(checked) {
+    filteredDeviceEntries().forEach(c => {
+      const key = deviceKey(c);
+      if (checked) selectedDeviceKeys.add(key);
+      else selectedDeviceKeys.delete(key);
+    });
+    renderCerts(currentCertificates);
+  }
+
+  function clearFilteredDeviceSelection() {
+    filteredDeviceEntries().forEach(c => selectedDeviceKeys.delete(deviceKey(c)));
+    renderCerts(currentCertificates);
+  }
+
+  async function bulkCreateSelectedDeviceCertificates() {
+    const targets = filteredDeviceEntries().filter(c =>
+      selectedDeviceKeys.has(deviceKey(c)) && !findLocalCaCertificate(c)
+    );
+    if (!targets.length) return;
+    const ok = confirm(`Create Extron-compatible Local CA certificates for ${targets.length} selected device(s)?`);
+    if (!ok) return;
+    const button = document.getElementById('device-bulk-create-btn');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Creating...';
+    }
+    for (const c of targets) {
+      const ip = isIp(c.host) ? c.host : '';
+      const hostname = (c.cn && c.cn !== c.host && !isIp(c.cn)) ? c.cn : (isIp(c.host) ? '' : c.host);
+      await fetch('/api/ca/issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, hostname, profile: 'extron-rsa', name: c.cn || c.host })
+      });
+      selectedDeviceKeys.delete(deviceKey(c));
+    }
+    await refreshCertificateWorkflow();
+  }
+
   function renderCerts(certs) {
     const grid = document.getElementById('cert-grid');
-    const entries = Object.values(certs);
+    currentCertificates = certs || {};
+    const entries = filteredDeviceEntries();
+    const allEntries = Object.values(currentCertificates);
+    const selectedFilteredCount = entries.filter(c => selectedDeviceKeys.has(deviceKey(c))).length;
+    const createTargets = entries.filter(c => selectedDeviceKeys.has(deviceKey(c)) && !findLocalCaCertificate(c));
+    [...selectedDeviceKeys].forEach(key => {
+      if (!allEntries.some(c => deviceKey(c) === key)) selectedDeviceKeys.delete(key);
+    });
+    const countEl = document.getElementById('device-filter-count');
+    if (countEl) countEl.textContent = `${entries.length}/${allEntries.length} shown · ${selectedFilteredCount} selected`;
+    const selectFiltered = document.getElementById('device-select-filtered');
+    if (selectFiltered) {
+      selectFiltered.checked = entries.length > 0 && selectedFilteredCount === entries.length;
+      selectFiltered.indeterminate = selectedFilteredCount > 0 && selectedFilteredCount < entries.length;
+    }
+    const bulkBtn = document.getElementById('device-bulk-create-btn');
+    if (bulkBtn) {
+      bulkBtn.disabled = !createTargets.length;
+      bulkBtn.textContent = createTargets.length ? `Create certificates (${createTargets.length})` : 'Create certificates';
+    }
 
     if (!entries.length) {
-      grid.innerHTML = `<div class="empty-state"><h3>No devices yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
+      grid.innerHTML = allEntries.length
+        ? `<div class="empty-state"><h3>No matching devices</h3><p>Adjust the filters.</p></div>`
+        : `<div class="empty-state"><h3>No devices yet</h3><p>Add a host or run a network scan to get started.</p></div>`;
       return;
     }
 
@@ -1073,6 +1220,7 @@
     grid.innerHTML = entries.map(c => {
       const color = statusColor(c.status);
       const barW = daysBarWidth(c.days_remaining);
+      const key = deviceKey(c);
       const daysLabel = c.days_remaining !== null
         ? (c.days_remaining < 0 ? `Expired ${Math.abs(c.days_remaining)}d ago` : `${c.days_remaining} days left`)
         : 'N/A';
@@ -1088,7 +1236,9 @@
       return `
         <div class="cert-card ${c.status}">
           <div class="cert-header">
-            <div>
+            <div style="display:flex;gap:10px;align-items:flex-start;min-width:0">
+              <input type="checkbox" ${selectedDeviceKeys.has(key) ? 'checked' : ''} onchange="toggleDeviceSelection('${escAttr(key)}', this.checked)" title="Select for bulk certificate creation" />
+              <div style="min-width:0">
               <div class="cert-host">${c.cn || c.host}</div>
               <div class="cert-port">${c.host}:${c.port}</div>
               <div style="margin-top:4px">
@@ -1097,6 +1247,7 @@
                   color:${c.self_signed ? 'var(--warning)' : 'var(--ok)'}">
                   ${c.cert_type || (c.self_signed ? 'Self-signed' : 'CA-signed')}
                 </span>
+              </div>
               </div>
             </div>
             <div class="status-badge ${c.status}">${daysLabel}</div>
