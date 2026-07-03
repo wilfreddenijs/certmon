@@ -504,6 +504,15 @@ def _serial_column_visible(win, row_y=None):
     return _serial_column_center(win, row_y=row_y) is not None
 
 
+def _wait_for_serial_column_visible(win, row_y=None, timeout=4):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _serial_column_visible(win, row_y=row_y):
+            return True
+        time.sleep(POLL)
+    return _serial_column_visible(win, row_y=row_y)
+
+
 def _toolbelt_search_roots(win):
     roots = [win]
     try:
@@ -845,11 +854,11 @@ def ensure_serial_column_visible(win, row_y=None):
     if not _open_fields_menu(win):
         log.warning("could not open Toolbelt Fields menu")
         return False
-    _enable_serial_number_field(win)
-    visible = _serial_column_visible(win, row_y=row_y)
-    if not visible:
+    used_control_click = _enable_serial_number_field(win)
+    visible = _wait_for_serial_column_visible(win, row_y=row_y)
+    if not visible and not used_control_click:
         _enable_serial_number_field_by_geometry(win)
-        visible = _serial_column_visible(win, row_y=row_y)
+        visible = _wait_for_serial_column_visible(win, row_y=row_y)
     if not visible:
         log.warning("could not enable Toolbelt Serial Number field")
         return False

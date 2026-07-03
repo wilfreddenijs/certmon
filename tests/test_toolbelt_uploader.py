@@ -206,3 +206,23 @@ def test_serial_column_enable_is_attempted_once_per_run(monkeypatch, uploader):
     assert uploader.ensure_serial_column_visible(object(), row_y=100) is False
     assert uploader.ensure_serial_column_visible(object(), row_y=100) is False
     assert calls["open"] == 1
+
+
+def test_serial_column_control_click_does_not_follow_with_geometry_click(monkeypatch, uploader):
+    calls = {"geometry": 0}
+
+    monkeypatch.setattr(uploader, "_SERIAL_COLUMN_ATTEMPTED", False)
+    monkeypatch.setattr(uploader, "_SERIAL_COLUMN_READY", False)
+    monkeypatch.setattr(uploader, "_serial_column_visible", lambda win, row_y=None: False)
+    monkeypatch.setattr(uploader, "_wait_for_serial_column_visible", lambda win, row_y=None: False)
+    monkeypatch.setattr(uploader, "_open_fields_menu", lambda win: True)
+    monkeypatch.setattr(uploader, "_enable_serial_number_field", lambda win: True)
+
+    def geometry_click(_win):
+        calls["geometry"] += 1
+        return True
+
+    monkeypatch.setattr(uploader, "_enable_serial_number_field_by_geometry", geometry_click)
+
+    assert uploader.ensure_serial_column_visible(object(), row_y=100) is False
+    assert calls["geometry"] == 0
