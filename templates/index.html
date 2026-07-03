@@ -2025,7 +2025,15 @@
       }
       return 'tries admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
     };
-    list.innerHTML = toolbeltDevices.map(d => `
+    const selectedCount = toolbeltDevices.filter(d => d.selected).length;
+    const allSelected = selectedCount === toolbeltDevices.length;
+    list.innerHTML = `
+      <label style="display:flex;gap:10px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:rgba(0,229,255,0.05)">
+        <input id="toolbelt-select-all" type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllToolbeltDevices(this.checked)" />
+        <span style="font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--text)">Select all devices</span>
+        <span class="help-text" style="margin-left:auto">${selectedCount}/${toolbeltDevices.length} selected</span>
+      </label>
+    ` + toolbeltDevices.map(d => `
       <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)">
         <label style="display:flex;gap:10px;align-items:flex-start">
           <input type="checkbox" ${d.selected ? 'checked' : ''} onchange="toggleToolbeltDevice('${escAttr(d.selector)}', this.checked)" />
@@ -2041,18 +2049,30 @@
         </label>
       </div>
     `).join('');
+    const selectAll = document.getElementById('toolbelt-select-all');
+    if (selectAll) selectAll.indeterminate = selectedCount > 0 && selectedCount < toolbeltDevices.length;
     const hasUploadable = toolbeltDevices.some(d => d.selected && d.dry_run && d.dry_run.ok);
     uploadBtn.disabled = !hasUploadable || !!toolbeltRunId;
     uploadBtn.classList.toggle('btn-ghost', uploadBtn.disabled);
   }
 
-  async function toggleToolbeltDevice(selector, checked) {
-    toolbeltDevices = toolbeltDevices.map(d => d.selector === selector ? {...d, selected: checked} : d);
+  async function persistToolbeltSelection() {
     await fetch('/api/toolbelt/selection', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ selectors: toolbeltDevices.filter(d => d.selected).map(d => d.selector) })
     });
+  }
+
+  async function toggleToolbeltDevice(selector, checked) {
+    toolbeltDevices = toolbeltDevices.map(d => d.selector === selector ? {...d, selected: checked} : d);
+    await persistToolbeltSelection();
+    renderToolbeltDevices();
+  }
+
+  async function toggleAllToolbeltDevices(checked) {
+    toolbeltDevices = toolbeltDevices.map(d => ({...d, selected: checked}));
+    await persistToolbeltSelection();
     renderToolbeltDevices();
   }
 

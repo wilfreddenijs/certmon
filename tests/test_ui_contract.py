@@ -220,6 +220,11 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "Shared device password" in html
     assert "tries shared device password, then admin/extron" in html
     assert "Stop after current device" in html
+    assert 'id="toolbelt-select-all"' in html
+    assert "toggleAllToolbeltDevices(this.checked)" in html
+    assert "Select all devices" in html
+    assert "selectAll.indeterminate" in html
+    assert "async function persistToolbeltSelection()" in html
     assert "tries admin/extron, then admin/serial from Toolbelt" in html
     assert "run.error" in html
     assert "errorText" in html
