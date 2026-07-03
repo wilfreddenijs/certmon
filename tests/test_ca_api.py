@@ -1,4 +1,5 @@
 import importlib
+import io
 
 
 class FakeArtifacts:
@@ -74,6 +75,23 @@ class FakeLocalCA:
     def issue(self, **kwargs):
         assert kwargs["profile_name"] == "extron-rsa"
         return {"certificate_id": "cert-1", "not_after": "2030-01-01T00:00:00+00:00"}
+
+
+class FakeLocalCABackup:
+    def __init__(self):
+        self.imported = None
+
+    def export_package(self, passphrase):
+        assert passphrase == "secret"
+        return b'{"format":"certmon-local-ca-backup"}'
+
+    def import_package(self, package, passphrase, *, replace=False):
+        self.imported = (package, passphrase, replace)
+        return {
+            "certificate_id": "local-ca",
+            "fingerprint_sha256": "abc123",
+            "not_after": "2030-01-01T00:00:00+00:00",
+        }
 
 
 class FakeExternalCA:
@@ -158,6 +176,51 @@ def test_devices_txt_exports_certificate_ids_not_private_paths(
     assert response.status_code == 200
     assert response.text == "192.168.0.10,cert-1\n"
     assert ".pem" not in response.text
+
+
+def test_local_ca_backup_export_returns_attachment_without_private_json(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    monkeypatch.setattr(module, "local_ca_backup_service", FakeLocalCABackup())
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().post(
+        "/api/ca/backup/export",
+        json={"passphrase": "secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.data == b'{"format":"certmon-local-ca-backup"}'
+    assert "attachment" in response.headers["Content-Disposition"]
+    assert b"PRIVATE KEY" not in response.data
+    assert database.last_event == ("local_ca_backup_exported", {})
+
+
+def test_local_ca_backup_import_accepts_file_passphrase_and_replace(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    service = FakeLocalCABackup()
+    monkeypatch.setattr(module, "local_ca_backup_service", service)
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().post(
+        "/api/ca/backup/import",
+        data={
+            "backup": (io.BytesIO(b"package"), "backup.json"),
+            "passphrase": "secret",
+            "replace": "true",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["certificate_id"] == "local-ca"
+    assert service.imported == (b"package", "secret", True)
+    assert database.last_event == ("local_ca_backup_imported", {"replace": True})
 
 
 def test_delete_issued_certificate_uses_certificate_id(

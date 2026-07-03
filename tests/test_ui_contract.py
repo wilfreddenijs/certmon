@@ -135,6 +135,11 @@ def test_first_tab_is_devices_and_local_ca_is_root_management_only():
     assert "Issued Device Certificates" not in ca_panel
     assert "Generate Local CA" in html
     assert "Download CA cert" in html
+    assert "Export CA backup" in html
+    assert "Import CA backup" in html
+    assert "/api/ca/backup/export" in html
+    assert "/api/ca/backup/import" in html
+    assert "without baking private keys into the executable" in html
 
 
 def test_external_ca_import_form_submits_generated_and_existing_certificates():

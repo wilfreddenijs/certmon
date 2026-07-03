@@ -1768,13 +1768,19 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
           <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
           <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>
         </div>
+        <div class="help-text field-note" style="margin-top:10px">Use an encrypted CA backup to share one Local CA between trusted CertMon desktops without baking private keys into the executable.</div>
         <div id="ca-install-result" style="margin-top:10px;font-size:12px"></div>
       </div>` : `
       <div class="cert-card error" style="margin-bottom:20px;padding:24px">
         <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">No Local CA yet</div>
         <div style="color:var(--muted);font-size:13px;margin-bottom:16px">Generate a local CA once — then install it in Windows so all browsers trust your device certificates.</div>
-        <button class="btn" onclick="generateCA()">⚡ Generate Local CA</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn" onclick="generateCA()">⚡ Generate Local CA</button>
+          <button class="btn btn-ghost" onclick="importLocalCABackup(false)">Import CA backup</button>
+        </div>
         <div id="ca-generate-result" style="margin-top:12px;font-size:12px"></div>
       </div>`;
 
@@ -1864,6 +1870,82 @@
     } else {
       document.getElementById('ca-install-result').innerHTML = `<span style="color:var(--critical)">✕ ${data.error} — try running CertMon as Administrator.</span>`;
     }
+  }
+
+  function readErrorMessage(data, fallback) {
+    if (data && data.error) return data.error;
+    return fallback || 'Request failed';
+  }
+
+  async function exportLocalCABackup() {
+    const passphrase = prompt('Choose a passphrase for this encrypted Local CA backup.');
+    if (!passphrase) return;
+    const resultEl = document.getElementById('ca-install-result');
+    if (resultEl) resultEl.textContent = 'Creating encrypted CA backup...';
+
+    const res = await fetch('/api/ca/backup/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({passphrase})
+    });
+    if (!res.ok) {
+      let data = {};
+      try { data = await res.json(); } catch (error) {}
+      const message = readErrorMessage(data, 'Could not export Local CA backup');
+      if (resultEl) resultEl.innerHTML = `<span style="color:var(--critical)">Error: ${message}</span>`;
+      alert(message);
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'certmon-local-ca-backup.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    if (resultEl) resultEl.innerHTML = `<span style="color:var(--ok)">Encrypted CA backup exported.</span>`;
+  }
+
+  async function importLocalCABackup(replaceExisting) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const passphrase = prompt('Enter the Local CA backup passphrase.');
+      if (!passphrase) return;
+      if (replaceExisting) {
+        const ok = confirm('Replace the current Local CA? This removes prepared Local CA device certificates so they can be recreated from the imported CA.');
+        if (!ok) return;
+      }
+
+      const targetId = replaceExisting ? 'ca-install-result' : 'ca-generate-result';
+      const resultEl = document.getElementById(targetId);
+      if (resultEl) resultEl.textContent = 'Importing encrypted CA backup...';
+      const form = new FormData();
+      form.append('backup', file);
+      form.append('passphrase', passphrase);
+      form.append('replace', replaceExisting ? 'true' : 'false');
+
+      const res = await fetch('/api/ca/backup/import', {method: 'POST', body: form});
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        const message = readErrorMessage(data, 'Could not import Local CA backup');
+        if (resultEl) resultEl.innerHTML = `<span style="color:var(--critical)">Error: ${message}</span>`;
+        alert(message);
+        return;
+      }
+
+      if (resultEl) resultEl.innerHTML = `<span style="color:var(--ok)">Local CA backup imported.</span>`;
+      await loadCA();
+      if (typeof loadData === 'function') await loadData();
+      if (typeof renderUploadTab === 'function') renderUploadTab();
+    };
+    input.click();
   }
 
   async function issueCert() {

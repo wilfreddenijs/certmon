@@ -34,6 +34,7 @@ from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
 from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
+from certmon.local_ca_backup import LocalCABackupError, LocalCABackupService
 from certmon.naming import safe_slug
 from certmon.permissions import Permission, authorize
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
@@ -106,6 +107,7 @@ def bootstrap_services(
         (Path(r"C:\CertMon\CA"), root / "CA"),
     )
     local_ca_service = LocalCAService(database, artifact_store)
+    local_ca_backup_service = LocalCABackupService(database, artifact_store)
     external_ca_service = ExternalCAService(database, artifact_store)
     acme_account_service = ACMEAccountService(
         database, vault, NativeACMEAccountClient
@@ -141,6 +143,7 @@ def bootstrap_services(
         "vault": vault,
         "artifact_store": artifact_store,
         "local_ca_service": local_ca_service,
+        "local_ca_backup_service": local_ca_backup_service,
         "external_ca_service": external_ca_service,
         "renewal_service": renewal_service,
         "acme_account_service": acme_account_service,
@@ -154,6 +157,7 @@ def bootstrap_services(
 vault = None
 artifact_store = None
 local_ca_service = None
+local_ca_backup_service = None
 external_ca_service = None
 renewal_service = RenewalService(database)
 acme_account_service = None
@@ -859,6 +863,48 @@ def ca_download_cert():
     response = Response(data, status=200, mimetype="application/x-pem-file")
     response.headers["Content-Disposition"] = 'attachment; filename="certmon-ca.crt"'
     return response
+
+
+@app.route("/api/ca/backup/export", methods=["POST"])
+def ca_backup_export():
+    if local_ca_backup_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    passphrase = body.get("passphrase") or ""
+    try:
+        package = local_ca_backup_service.export_package(passphrase)
+    except LocalCABackupError as error:
+        return jsonify({"error": str(error)}), 400
+    database.record_event("local_ca_backup_exported", {})
+    return send_file(
+        io.BytesIO(package),
+        mimetype="application/json",
+        as_attachment=True,
+        download_name="certmon-local-ca-backup.json",
+    )
+
+
+@app.route("/api/ca/backup/import", methods=["POST"])
+def ca_backup_import():
+    if local_ca_backup_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    upload = request.files.get("backup")
+    passphrase = request.form.get("passphrase") or ""
+    replace = request.form.get("replace") in {"1", "true", "yes", "on"}
+    if upload is None:
+        return jsonify({"error": "Backup file is required"}), 400
+    try:
+        result = local_ca_backup_service.import_package(
+            upload.read(),
+            passphrase,
+            replace=replace,
+        )
+    except LocalCABackupError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        return jsonify({"error": "Could not import Local CA backup. Check the file and passphrase."}), 400
+    database.record_event("local_ca_backup_imported", {"replace": replace})
+    return jsonify({"ok": True, **result})
 
 
 @app.route("/api/ca/issue", methods=["POST"])
