@@ -407,6 +407,8 @@ _DEVICE_CREDENTIALS = {}
 _RESOLVED_CREDENTIALS = {}
 _RESOLVED_CREDENTIALS_FILE = None
 _LAST_FIELDS_BUTTON_POINT = None
+_SERIAL_COLUMN_ATTEMPTED = False
+_SERIAL_COLUMN_READY = False
 
 
 class SerialFallbackNeeded(RuntimeError):
@@ -625,6 +627,7 @@ def _fields_button_rects(win):
 
 
 def _click_visible_fields_by_geometry(win):
+    global _LAST_FIELDS_BUTTON_POINT
     try:
         import pywinauto.mouse as mouse
     except Exception:
@@ -640,6 +643,7 @@ def _click_visible_fields_by_geometry(win):
             try:
                 log.info("clicking visible Toolbelt Fields button at %s,%s", x, y)
                 mouse.click(coords=(x, y))
+                _LAST_FIELDS_BUTTON_POINT = (x, y)
                 time.sleep(0.8)
                 return True
             except Exception:
@@ -828,21 +832,28 @@ def _enable_serial_number_field_by_geometry(win):
 
 
 def ensure_serial_column_visible(win, row_y=None):
+    global _SERIAL_COLUMN_ATTEMPTED, _SERIAL_COLUMN_READY
     if _serial_column_visible(win, row_y=row_y):
         log.info("Toolbelt Serial Number column is visible")
+        _SERIAL_COLUMN_ATTEMPTED = True
+        _SERIAL_COLUMN_READY = True
         return True
+    if _SERIAL_COLUMN_READY or _SERIAL_COLUMN_ATTEMPTED:
+        log.warning("Toolbelt Serial Number column was already handled earlier in this run; not toggling Fields again")
+        return False
+    _SERIAL_COLUMN_ATTEMPTED = True
     if not _open_fields_menu(win):
         log.warning("could not open Toolbelt Fields menu")
         return False
     _enable_serial_number_field(win)
     visible = _serial_column_visible(win, row_y=row_y)
     if not visible:
-        _open_fields_menu(win)
         _enable_serial_number_field_by_geometry(win)
         visible = _serial_column_visible(win, row_y=row_y)
     if not visible:
         log.warning("could not enable Toolbelt Serial Number field")
         return False
+    _SERIAL_COLUMN_READY = True
     log.info("Toolbelt Serial Number column visible after Fields toggle: %s", visible)
     return visible
 

@@ -186,3 +186,23 @@ def test_open_fields_menu_prefers_visible_fields_button_geometry(monkeypatch, up
     assert uploader._open_fields_menu(Window()) is True
     assert clicks
     assert clicks[0][0] >= 500
+    assert uploader._LAST_FIELDS_BUTTON_POINT == clicks[0]
+
+
+def test_serial_column_enable_is_attempted_once_per_run(monkeypatch, uploader):
+    calls = {"open": 0}
+
+    def open_fields(_win):
+        calls["open"] += 1
+        return True
+
+    monkeypatch.setattr(uploader, "_SERIAL_COLUMN_ATTEMPTED", False)
+    monkeypatch.setattr(uploader, "_SERIAL_COLUMN_READY", False)
+    monkeypatch.setattr(uploader, "_serial_column_visible", lambda win, row_y=None: False)
+    monkeypatch.setattr(uploader, "_open_fields_menu", open_fields)
+    monkeypatch.setattr(uploader, "_enable_serial_number_field", lambda win: False)
+    monkeypatch.setattr(uploader, "_enable_serial_number_field_by_geometry", lambda win: False)
+
+    assert uploader.ensure_serial_column_visible(object(), row_y=100) is False
+    assert uploader.ensure_serial_column_visible(object(), row_y=100) is False
+    assert calls["open"] == 1
