@@ -281,6 +281,17 @@
     flex-wrap: wrap;
   }
 
+  .device-filter-options {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .device-filter-options select {
+    min-width: 150px;
+  }
+
   /* Cert grid */
   .cert-grid {
     display: grid;
@@ -690,10 +701,10 @@
 <header>
   <div class="logo">Cert<span>/</span>Mon</div>
   <div class="header-stats" id="header-stats">
-    <div class="stat-pill"><div class="stat-dot" style="background:var(--ok)"></div><span id="stat-ok">0 OK</span></div>
-    <div class="stat-pill"><div class="stat-dot" style="background:var(--warning)"></div><span id="stat-warn">0 Warning</span></div>
-    <div class="stat-pill"><div class="stat-dot" style="background:var(--critical)"></div><span id="stat-crit">0 Critical</span></div>
-    <div class="stat-pill"><div class="stat-dot" style="background:var(--expired)"></div><span id="stat-exp">0 Expired</span></div>
+    <div class="stat-pill" style="cursor:pointer" title="Filter Devices by OK" onclick="filterDeviceStatusFromSummary('ok')"><div class="stat-dot" style="background:var(--ok)"></div><span id="stat-ok">0 OK</span></div>
+    <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Warning" onclick="filterDeviceStatusFromSummary('warning')"><div class="stat-dot" style="background:var(--warning)"></div><span id="stat-warn">0 Warning</span></div>
+    <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Critical" onclick="filterDeviceStatusFromSummary('critical')"><div class="stat-dot" style="background:var(--critical)"></div><span id="stat-crit">0 Critical</span></div>
+    <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Expired" onclick="filterDeviceStatusFromSummary('expired')"><div class="stat-dot" style="background:var(--expired)"></div><span id="stat-exp">0 Expired</span></div>
   </div>
 </header>
 
@@ -767,18 +778,26 @@
       <div class="device-filter-bar">
         <div class="device-filter-group">
           <span class="form-label" style="margin:0">Filter</span>
-          <select id="device-status-filter" onchange="setDeviceStatusFilter(this.value)">
-            <option value="all">All validity</option>
-            <option value="ok">OK</option>
-            <option value="warning">Warning</option>
-            <option value="critical">Critical</option>
-            <option value="expired">Expired</option>
-          </select>
-          <select id="device-certificate-filter" onchange="setDeviceCertificateFilter(this.value)">
-            <option value="all">All certificates</option>
-            <option value="with">Certificate made</option>
-            <option value="without">No certificate</option>
-          </select>
+          <span class="device-filter-options">
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span class="help-text">Certificate validity</span>
+              <select id="device-status-filter" onchange="setDeviceStatusFilter(this.value)">
+              <option value="all">Show all</option>
+              <option value="ok">OK</option>
+              <option value="warning">Warning</option>
+              <option value="critical">Critical</option>
+              <option value="expired">Expired</option>
+              </select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span class="help-text">Local CA certificate</span>
+              <select id="device-certificate-filter" onchange="setDeviceCertificateFilter(this.value)">
+                <option value="all">Show all</option>
+                <option value="with">Created</option>
+                <option value="without">Not created</option>
+              </select>
+            </label>
+          </span>
           <span class="help-text" id="device-filter-count"></span>
         </div>
         <div class="device-filter-group">
@@ -830,7 +849,8 @@
             <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared device password</button>
+            <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared Device Credentials</button>
+            <button class="btn btn-danger" onclick="removeAllPreparedToolbeltDevices()">Remove all</button>
             <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
           </div>
         </div>
@@ -1133,6 +1153,12 @@
     renderCerts(currentCertificates);
   }
 
+  function filterDeviceStatusFromSummary(value) {
+    switchTab('certs');
+    deviceStatusFilter = deviceStatusFilter === value ? 'all' : value;
+    renderCerts(currentCertificates);
+  }
+
   function setDeviceCertificateFilter(value) {
     deviceCertificateFilter = value;
     renderCerts(currentCertificates);
@@ -1195,6 +1221,10 @@
     });
     const countEl = document.getElementById('device-filter-count');
     if (countEl) countEl.textContent = `${entries.length}/${allEntries.length} shown · ${selectedFilteredCount} selected`;
+    const statusFilter = document.getElementById('device-status-filter');
+    if (statusFilter) statusFilter.value = deviceStatusFilter;
+    const certificateFilter = document.getElementById('device-certificate-filter');
+    if (certificateFilter) certificateFilter.value = deviceCertificateFilter;
     const selectFiltered = document.getElementById('device-select-filtered');
     if (selectFiltered) {
       selectFiltered.checked = entries.length > 0 && selectedFilteredCount === entries.length;
@@ -2195,7 +2225,7 @@
             <div class="help-text">Dry-run status: ${toolbeltStatusLabel(d.dry_run)}</div>
             <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
           </div>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Credentials</button>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Device Credentials</button>
           <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Remove from Upload and delete the associated Local CA device certificate" onclick="event.preventDefault();removePreparedToolbeltDevice('${escAttr(d.certificate_id)}','${escAttr(d.label)}')">Remove</button>
         </label>
       </div>
@@ -2335,6 +2365,21 @@
     const res = await fetch(`/api/ca/issued/${encodeURIComponent(certificateId)}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) { alert(data.error || 'Could not remove prepared device'); return; }
+    await refreshCertificateWorkflow();
+  }
+
+  async function removeAllPreparedToolbeltDevices() {
+    if (!toolbeltDevices.length) return;
+    const ok = confirm(`Remove all ${toolbeltDevices.length} prepared upload device(s)?\n\nThis will delete their associated Local CA device certificates. Scanned devices remain visible on Devices.`);
+    if (!ok) return;
+    for (const device of toolbeltDevices) {
+      const res = await fetch(`/api/ca/issued/${encodeURIComponent(device.certificate_id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || `Could not remove ${device.label}`);
+        break;
+      }
+    }
     await refreshCertificateWorkflow();
   }
 

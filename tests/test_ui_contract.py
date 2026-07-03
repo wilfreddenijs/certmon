@@ -100,13 +100,16 @@ def test_devices_overview_has_filters_sticky_tabs_and_bulk_certificate_selection
     for required in (
         'id="device-status-filter"',
         'id="device-certificate-filter"',
+        'class="device-filter-options"',
         'id="device-select-filtered"',
         'id="device-bulk-create-btn"',
         "setDeviceStatusFilter(this.value)",
         "setDeviceCertificateFilter(this.value)",
+        "filterDeviceStatusFromSummary('ok')",
         "toggleFilteredDevices(this.checked)",
         "clearFilteredDeviceSelection()",
         "bulkCreateSelectedDeviceCertificates()",
+        "removeAllPreparedToolbeltDevices()",
         "selectedDeviceKeys",
         "filteredDeviceEntries()",
         "profile: 'extron-rsa'",
@@ -114,8 +117,11 @@ def test_devices_overview_has_filters_sticky_tabs_and_bulk_certificate_selection
     ):
         assert required in html
 
-    assert "Certificate made" in html
-    assert "No certificate" in html
+    assert "Certificate validity" in html
+    assert "Local CA certificate" in html
+    assert "Show all" in html
+    assert "Created" in html
+    assert "Not created" in html
     assert "Select filtered" in html
 
 
@@ -242,7 +248,9 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "/api/toolbelt/reset-upload-tab" in html
     assert "/api/toolbelt/dry-run" in html
     assert "/api/toolbelt/upload" in html
-    assert "Shared device password" in html
+    assert "Shared Device Credentials" in html
+    assert "Device Credentials" in html
+    assert "Remove all" in html
     assert "tries shared device password, then admin/extron" in html
     assert "Stop after current device" in html
     assert 'id="toolbelt-select-all"' in html
