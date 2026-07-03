@@ -425,7 +425,7 @@ def _looks_like_serial(value):
     if len(text) < 5 or len(text) > 32:
         return False
     lower = text.lower()
-    if lower in {"serial", "serial number", "model", "ip address", "device", "name"}:
+    if lower in {"serial", "serial number", "model", "ip address", "ipv4 address", "device", "name"}:
         return False
     if "." in text or ":" in text or "/" in text or " " in text:
         return False
@@ -476,8 +476,6 @@ def _grid_header_cells(win, row_y=None):
                 }:
                     continue
                 rect = c.rectangle()
-                if row_y is not None and not (rect.bottom < row_y and row_y - rect.bottom < 320):
-                    continue
                 headers.append((rect.top, rect.left, rect.right, lower))
             except Exception:
                 continue

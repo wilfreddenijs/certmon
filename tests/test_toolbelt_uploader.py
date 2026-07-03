@@ -133,6 +133,7 @@ def test_serial_column_detection_handles_rows_far_below_header(uploader):
             ]
 
     assert uploader._serial_column_center(Window(), row_y=350) == 1150
+    assert uploader._serial_column_center(Window(), row_y=720) == 1150
 
 
 def test_open_fields_menu_prefers_visible_fields_button_geometry(monkeypatch, uploader):
