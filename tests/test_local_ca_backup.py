@@ -39,8 +39,26 @@ def test_local_ca_backup_rejects_wrong_passphrase(tmp_path):
     package = LocalCABackupService(database, store).export_package("correct")
 
     target_database, target_store, _ = make_service(tmp_path / "target")
-    with pytest.raises(Exception):
+    with pytest.raises(LocalCABackupError, match="decrypt"):
         LocalCABackupService(target_database, target_store).import_package(package, "wrong")
+
+
+def test_local_ca_backup_import_tolerates_prompt_whitespace_and_pem_line_endings(tmp_path):
+    database, store, service = make_service(tmp_path / "source")
+    service.generate_ca()
+    package = LocalCABackupService(database, store).export_package(" extron ")
+    payload = json.loads(package.decode("utf-8"))
+    payload["ca"]["certificate_pem"] = payload["ca"]["certificate_pem"].replace("\n", "\r\n")
+    transferred_package = json.dumps(payload).encode("utf-8")
+
+    target_database, target_store, _ = make_service(tmp_path / "target")
+    result = LocalCABackupService(target_database, target_store).import_package(
+        transferred_package,
+        "extron\r\n",
+    )
+
+    assert result["certificate_id"] == "local-ca"
+    assert target_store.has_certificate("local-ca")
 
 
 def test_local_ca_backup_import_requires_replace_when_ca_exists(tmp_path):

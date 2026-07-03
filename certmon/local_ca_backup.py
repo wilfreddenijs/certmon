@@ -26,6 +26,7 @@ class LocalCABackupService:
         self.artifacts = artifacts
 
     def export_package(self, passphrase):
+        passphrase = _normalize_passphrase(passphrase)
         if not passphrase:
             raise LocalCABackupError("Passphrase is required")
         if not self.artifacts.has_certificate(LocalCAService.CA_CERTIFICATE_ID):
@@ -68,21 +69,13 @@ class LocalCABackupService:
         return json.dumps(package, indent=2, sort_keys=True).encode("utf-8")
 
     def import_package(self, package_bytes, passphrase, *, replace=False):
+        passphrase = _normalize_passphrase(passphrase)
         if not passphrase:
             raise LocalCABackupError("Passphrase is required")
         package = _load_package(package_bytes)
         certificate_pem = package["ca"]["certificate_pem"].encode("utf-8")
         encrypted = package["private_key"]
-        try:
-            private_key_pem = AESGCM(
-                _derive_key(passphrase, _unb64(encrypted["salt"]), encrypted["iterations"])
-            ).decrypt(
-                _unb64(encrypted["nonce"]), _unb64(encrypted["ciphertext"]), certificate_pem
-            )
-        except (InvalidTag, KeyError, ValueError) as exc:
-            raise LocalCABackupError(
-                "Could not decrypt Local CA backup. Check the file and passphrase."
-            ) from exc
+        private_key_pem = _decrypt_private_key(encrypted, passphrase, certificate_pem)
 
         certificate = x509.load_pem_x509_certificate(certificate_pem)
         _validate_ca_key_pair(certificate, private_key_pem)
@@ -134,6 +127,36 @@ def _load_package(package_bytes):
     return package
 
 
+def _decrypt_private_key(encrypted, passphrase, certificate_pem):
+    try:
+        key = _derive_key(passphrase, _unb64(encrypted["salt"]), encrypted["iterations"])
+        nonce = _unb64(encrypted["nonce"])
+        ciphertext = _unb64(encrypted["ciphertext"])
+    except (KeyError, ValueError) as exc:
+        raise LocalCABackupError("Incomplete Local CA backup package") from exc
+
+    aesgcm = AESGCM(key)
+    errors = []
+    for aad in _certificate_aad_candidates(certificate_pem):
+        try:
+            return aesgcm.decrypt(nonce, ciphertext, aad)
+        except InvalidTag as exc:
+            errors.append(exc)
+    raise LocalCABackupError(
+        "Could not decrypt Local CA backup. Check the file and passphrase."
+    ) from (errors[-1] if errors else None)
+
+
+def _certificate_aad_candidates(certificate_pem):
+    normalized_lf = certificate_pem.replace(b"\r\n", b"\n")
+    normalized_crlf = normalized_lf.replace(b"\n", b"\r\n")
+    candidates = []
+    for value in (certificate_pem, normalized_lf, normalized_crlf, None):
+        if value not in candidates:
+            candidates.append(value)
+    return candidates
+
+
 def _validate_ca_key_pair(certificate, private_key_pem):
     from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
@@ -176,6 +199,12 @@ def _derive_key(passphrase, salt, iterations=KDF_ITERATIONS):
         salt=salt,
         iterations=int(iterations),
     ).derive(passphrase.encode("utf-8"))
+
+
+def _normalize_passphrase(passphrase):
+    if passphrase is None:
+        return ""
+    return str(passphrase).strip()
 
 
 def _b64(value):
