@@ -1198,28 +1198,35 @@
       button.textContent = 'Creating...';
     }
     if (countEl) countEl.textContent = `Creating certificates for ${targets.length} selected device(s)...`;
-    const failures = [];
-    let created = 0;
+    let result = { created: [], failed: [] };
     try {
-      for (const c of targets) {
-        const ip = isIp(c.host) ? c.host : '';
-        const hostname = (c.cn && c.cn !== c.host && !isIp(c.cn)) ? c.cn : (isIp(c.host) ? '' : c.host);
-        const res = await fetch('/api/ca/issue', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ip, hostname, profile: 'extron-rsa', name: c.cn || c.host })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.error) {
-          failures.push(`${c.cn || c.host}: ${data.error || 'Could not create certificate'}`);
-          continue;
-        }
-        created += 1;
-        selectedDeviceKeys.delete(deviceKey(c));
+      const devices = targets.map(c => ({
+        ip: isIp(c.host) ? c.host : '',
+        hostname: (c.cn && c.cn !== c.host && !isIp(c.cn)) ? c.cn : (isIp(c.host) ? '' : c.host),
+        profile: 'extron-rsa',
+        name: c.cn || c.host,
+        key: deviceKey(c)
+      }));
+      const res = await fetch('/api/ca/issue-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ devices })
+      });
+      result = await res.json().catch(() => ({}));
+      if (!res.ok || result.error) {
+        result = { created: [], failed: [{ name: 'Bulk create', error: result.error || 'Could not create certificates' }] };
       }
+      const createdKeys = new Set((result.created || []).map(item => item.key));
+      devices.forEach(device => {
+        if (createdKeys.has(device.key)) selectedDeviceKeys.delete(device.key);
+      });
+    } catch (error) {
+      result = { created: [], failed: [{ name: 'Bulk create', error: error.message || 'Could not create certificates' }] };
     } finally {
       await refreshCertificateWorkflow();
     }
+    const created = (result.created || []).length;
+    const failures = (result.failed || []).map(item => `${item.name || 'device'}: ${item.error || 'Could not create certificate'}`);
     if (failures.length) {
       alert(`Created ${created}/${targets.length} certificate(s).\n\nFailed:\n${failures.join('\n')}`);
     } else {

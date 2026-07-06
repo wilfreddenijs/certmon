@@ -934,6 +934,45 @@ def ca_issue():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ca/issue-bulk", methods=["POST"])
+def ca_issue_bulk():
+    """Issue multiple Local CA device certificates and report per-device failures."""
+    if not ca_exists():
+        return jsonify({"error": "No CA found. Generate one first."}), 400
+    if local_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    devices = body.get("devices") or []
+    if not isinstance(devices, list) or not devices:
+        return jsonify({"error": "Provide at least one device"}), 400
+
+    created = []
+    failed = []
+    for device in devices:
+        ip = (device.get("ip") or "").strip()
+        hostname = (device.get("hostname") or "").strip()
+        identifiers = tuple(value for value in (hostname, ip) if value)
+        label = device.get("name") or hostname or ip or "device"
+        client_key = device.get("key")
+        if not identifiers:
+            failed.append({"name": label, "key": client_key, "error": "Provide at least an IP or hostname"})
+            continue
+        try:
+            result = local_ca_service.issue(
+                identifiers=identifiers,
+                profile_name=device.get("profile") or "extron-rsa",
+                device_name=label,
+            )
+            created.append({"name": label, "key": client_key, "cn": hostname or ip, **result})
+        except (KeyError, ValueError, FileExistsError) as error:
+            failed.append({"name": label, "key": client_key, "error": str(error)})
+        except Exception as error:
+            app.logger.exception("Unexpected Local CA bulk issue failure")
+            failed.append({"name": label, "key": client_key, "error": str(error)})
+
+    return jsonify({"ok": not failed, "created": created, "failed": failed})
+
+
 @app.route("/api/ca/devices-txt")
 def ca_devices_txt():
     """List of `ip,pemfile` for every issued device cert that has a .pem —

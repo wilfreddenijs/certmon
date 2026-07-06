@@ -72,9 +72,16 @@ class FakeCertificateDatabase:
 
 
 class FakeLocalCA:
+    def __init__(self):
+        self.issues = []
+
     def issue(self, **kwargs):
+        self.issues.append(kwargs)
         assert kwargs["profile_name"] == "extron-rsa"
-        return {"certificate_id": "cert-1", "not_after": "2030-01-01T00:00:00+00:00"}
+        return {
+            "certificate_id": f"cert-{len(self.issues)}",
+            "not_after": "2030-01-01T00:00:00+00:00",
+        }
 
 
 class FakeLocalCABackup:
@@ -120,7 +127,8 @@ def load_app(tmp_data_dir):
 def test_local_ca_issue_response_contains_no_private_material(tmp_data_dir, monkeypatch):
     module = load_app(tmp_data_dir)
     monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
-    monkeypatch.setattr(module, "local_ca_service", FakeLocalCA())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, "local_ca_service", fake_ca)
 
     response = module.app.test_client().post(
         "/api/ca/issue",
@@ -131,6 +139,61 @@ def test_local_ca_issue_response_contains_no_private_material(tmp_data_dir, monk
     payload = response.get_json()
     assert payload["certificate_id"] == "cert-1"
     assert not {"key_pem", "passphrase", "key_path", "pem_path"} & payload.keys()
+
+
+def test_local_ca_issue_allows_multiple_bulk_style_requests(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, "local_ca_service", fake_ca)
+    client = module.app.test_client()
+
+    first = client.post(
+        "/api/ca/issue",
+        json={"hostname": "IPLP", "ip": "10.10.116.172", "profile": "extron-rsa", "name": "IPLP"},
+    )
+    second = client.post(
+        "/api/ca/issue",
+        json={"hostname": "IPLP", "ip": "10.10.116.199", "profile": "extron-rsa", "name": "IPLP"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.get_json()["certificate_id"] == "cert-1"
+    assert second.get_json()["certificate_id"] == "cert-2"
+    assert fake_ca.issues[0]["identifiers"] == ("IPLP", "10.10.116.172")
+    assert fake_ca.issues[1]["identifiers"] == ("IPLP", "10.10.116.199")
+
+
+def test_local_ca_issue_bulk_returns_created_and_failed_items(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, "local_ca_service", fake_ca)
+
+    response = module.app.test_client().post(
+        "/api/ca/issue-bulk",
+        json={
+            "devices": [
+                {
+                    "hostname": "IPLP",
+                    "ip": "10.10.116.172",
+                    "profile": "extron-rsa",
+                    "name": "IPLP",
+                    "key": "10.10.116.172|443",
+                },
+                {"name": "missing-identifiers", "key": "missing|443"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["created"][0]["certificate_id"] == "cert-1"
+    assert payload["created"][0]["key"] == "10.10.116.172|443"
+    assert payload["failed"][0]["name"] == "missing-identifiers"
+    assert payload["failed"][0]["key"] == "missing|443"
 
 
 def test_public_download_never_reads_private_artifact(tmp_data_dir, monkeypatch):

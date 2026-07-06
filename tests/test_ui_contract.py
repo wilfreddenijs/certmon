@@ -131,10 +131,11 @@ def test_bulk_device_certificate_creation_reports_results_and_recovers_button_st
         "function renderCerts", 1
     )[0]
 
-    assert "const failures = []" in bulk_function
-    assert "let created = 0" in bulk_function
-    assert "if (!res.ok || data.error)" in bulk_function
-    assert "failures.push" in bulk_function
+    assert "/api/ca/issue-bulk" in bulk_function
+    assert "body: JSON.stringify({ devices })" in bulk_function
+    assert "const createdKeys = new Set" in bulk_function
+    assert "selectedDeviceKeys.delete(device.key)" in bulk_function
+    assert "result.failed" in bulk_function
     assert "} finally {" in bulk_function
     assert "await refreshCertificateWorkflow()" in bulk_function
     assert "Created ${created}" in bulk_function
