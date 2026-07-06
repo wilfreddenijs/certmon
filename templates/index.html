@@ -1767,7 +1767,10 @@
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
           <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
-          <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
+          <span style="display:inline-flex;align-items:center;gap:6px">
+            <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
+            <span title="Windows manual trust install: download the CA cert, double-click the .crt, choose Install Certificate, choose Local Machine for all users or Current User for only you, select Place all certificates in the following store, browse to Trusted Root Certification Authorities, finish, confirm the warning, then restart the browser. Install only the public CA certificate, not a private key or backup file." style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--border);border-radius:50%;color:var(--accent);font-size:12px;font-weight:700;cursor:help">i</span>
+          </span>
           <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
           <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>
         </div>
@@ -2195,6 +2198,7 @@
       if (!res.ok || data.error) { result.style.color = 'var(--critical)'; result.textContent = data.error || 'Could not create certificate'; return; }
       result.style.color = 'var(--ok)';
       result.innerHTML = `Created <code>${data.certificate_id}</code>. <button class="btn btn-ghost" id="device-ca-view-upload" style="font-size:11px;padding:5px 10px;margin-left:8px">View upload options</button>`;
+      overlay.querySelector('#device-ca-cancel').textContent = 'Close';
       overlay.querySelector('#device-ca-view-upload').onclick = () => {
         overlay.remove();
         openManualOrToolbeltUploadForCertificate(data.certificate_id);
