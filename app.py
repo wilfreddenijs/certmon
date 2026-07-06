@@ -14,6 +14,7 @@ import ipaddress
 import io
 import base64
 import uuid
+import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -992,6 +993,45 @@ def ca_devices_txt():
     response = Response(body, status=200, mimetype="text/plain")
     response.headers["Content-Disposition"] = 'attachment; filename="devices.txt"'
     return response
+
+
+@app.route("/api/ca/extron-combined-zip")
+def ca_extron_combined_zip():
+    authorize(Permission.DOWNLOAD_PRIVATE_KEY)
+    if artifact_store is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    buffer = io.BytesIO()
+    count = 0
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for metadata in database.list_certificates():
+            if (
+                metadata.get("kind") != "leaf"
+                or metadata.get("issuer_type") != "local_ca"
+                or metadata.get("profile") != "extron-rsa"
+            ):
+                continue
+            certificate_id = metadata["id"]
+            try:
+                with artifact_store.materialize_private(certificate_id, "combined.pem") as path:
+                    data = path.read_bytes()
+            except (FileNotFoundError, ValueError, PermissionError):
+                continue
+            filename = _certificate_download_filename(certificate_id, "combined.pem")
+            archive.writestr(filename, data)
+            count += 1
+            database.record_event(
+                "private_artifact_downloaded",
+                {"certificate_id": certificate_id, "artifact_name": "combined.pem", "bundle": "extron_zip"},
+            )
+    if count == 0:
+        return jsonify({"error": "No Extron combined PEM certificates are available"}), 404
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="certmon-extron-combined-pems.zip",
+    )
 
 
 @app.route("/api/ca/issued/<certificate_id>", methods=["DELETE"])

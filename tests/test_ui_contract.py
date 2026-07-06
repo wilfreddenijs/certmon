@@ -263,6 +263,9 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert "Add device" in html
     assert "Manual upload fallback" in html
     assert "Download Certificates for Manual Upload" in html
+    assert "/api/ca/extron-combined-zip" in html
+    assert "Download all Extron PEMs (.zip)" in html
+    assert "These files contain private keys" in html
     assert "Target Devices" not in html
     assert "Toolbelt batch upload" in html
     assert "Test Toolbelt upload first" in html

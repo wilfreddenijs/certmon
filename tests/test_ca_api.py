@@ -1,5 +1,6 @@
 import importlib
 import io
+import zipfile
 
 
 class FakeArtifacts:
@@ -22,7 +23,9 @@ class FakeArtifacts:
         @contextmanager
         def _ctx():
             with tempfile.NamedTemporaryFile(delete=False) as handle:
-                handle.write(b"-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----\n")
+                handle.write(
+                    f"-----BEGIN {name}-----\n{certificate_id}\n-----END {name}-----\n".encode()
+                )
                 path = Path(handle.name)
             try:
                 yield path
@@ -338,3 +341,36 @@ def test_devices_txt_prefers_ip_identifier_for_toolbelt_selector(tmp_data_dir, m
 
     assert response.status_code == 200
     assert response.text == "192.168.0.20,cert-1\n"
+
+
+def test_extron_combined_zip_contains_only_extron_local_ca_combined_pems(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    artifacts = FakeArtifacts()
+    database = FakeCertificateDatabase()
+    database.certificates["generic-1"] = {
+        "id": "generic-1",
+        "kind": "leaf",
+        "issuer_type": "local_ca",
+        "profile": "generic-rsa",
+        "device_name": "Generic",
+        "identifiers": ["10.0.0.50"],
+        "not_after": "2030-01-01T00:00:00+00:00",
+    }
+    monkeypatch.setattr(module, "artifact_store", artifacts)
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().get("/api/ca/extron-combined-zip")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    assert "certmon-extron-combined-pems.zip" in response.headers["Content-Disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        names = archive.namelist()
+        assert len(names) == 1
+        assert names[0].endswith("extron-combined.pem")
+        assert archive.read(names[0]).startswith(b"-----BEGIN combined.pem-----")
+    assert artifacts.requested == []
+    assert database.last_event == (
+        "private_artifact_downloaded",
+        {"certificate_id": "cert-1", "artifact_name": "combined.pem", "bundle": "extron_zip"},
+    )
