@@ -80,10 +80,16 @@ class LocalCABackupService:
         certificate = x509.load_pem_x509_certificate(certificate_pem)
         _validate_ca_key_pair(certificate, private_key_pem)
 
-        if self.artifacts.has_certificate(LocalCAService.CA_CERTIFICATE_ID):
+        existing_local_ca = self.artifacts.has_certificate(
+            LocalCAService.CA_CERTIFICATE_ID
+        ) or self.database.get_certificate(LocalCAService.CA_CERTIFICATE_ID) is not None
+        if existing_local_ca:
             if not replace:
                 raise LocalCABackupError("Local CA already exists")
             self._delete_existing_local_ca_material()
+        else:
+            self.artifacts.delete_certificate_set(LocalCAService.CA_CERTIFICATE_ID)
+            self.database.delete_certificate(LocalCAService.CA_CERTIFICATE_ID)
 
         metadata = {
             "kind": "local_ca",
@@ -106,15 +112,17 @@ class LocalCABackupService:
         }
 
     def _delete_existing_local_ca_material(self):
+        self.artifacts.delete_certificate_set(LocalCAService.CA_CERTIFICATE_ID)
+        self.database.delete_certificate(LocalCAService.CA_CERTIFICATE_ID)
         for cert in list(self.database.list_certificates()):
-            if cert.get("id") == LocalCAService.CA_CERTIFICATE_ID or cert.get("issuer_type") == "local_ca":
+            if cert.get("issuer_type") == "local_ca":
                 self.artifacts.delete_certificate_set(cert["id"])
                 self.database.delete_certificate(cert["id"])
 
 
 def _load_package(package_bytes):
     try:
-        package = json.loads(package_bytes.decode("utf-8"))
+        package = json.loads(package_bytes.decode("utf-8-sig"))
     except Exception as exc:
         raise LocalCABackupError("Invalid Local CA backup package") from exc
     if package.get("format") != "certmon-local-ca-backup" or package.get("version") != PACKAGE_VERSION:

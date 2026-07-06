@@ -902,6 +902,7 @@ def ca_backup_import():
     except LocalCABackupError as error:
         return jsonify({"error": str(error)}), 400
     except Exception:
+        app.logger.exception("Unexpected Local CA backup import failure")
         return jsonify({"error": "Could not import Local CA backup. Check the file and passphrase."}), 400
     database.record_event("local_ca_backup_imported", {"replace": replace})
     return jsonify({"ok": True, **result})
