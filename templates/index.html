@@ -2244,6 +2244,17 @@
     await loadData();
   }
 
+  function removeCertificateFromClientState(certificateId) {
+    availableCertificates = (availableCertificates || []).filter(
+      c => c.certificate_id !== certificateId
+    );
+    toolbeltDevices = (toolbeltDevices || []).filter(
+      d => d.certificate_id !== certificateId
+    );
+    renderCerts(currentCertificates);
+    if (document.getElementById('toolbelt-device-list')) renderToolbeltDevices();
+  }
+
   async function loadToolbeltDevices(forceDryRun) {
     const list = document.getElementById('toolbelt-device-list');
     const status = document.getElementById('toolbelt-run-status');
@@ -2451,6 +2462,7 @@
     const res = await fetch(`/api/ca/issued/${encodeURIComponent(certificateId)}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) { alert(data.error || 'Could not remove prepared device'); return; }
+    removeCertificateFromClientState(certificateId);
     await refreshCertificateWorkflow();
   }
 
@@ -2465,6 +2477,7 @@
         alert(data.error || `Could not remove ${device.label}`);
         break;
       }
+      removeCertificateFromClientState(device.certificate_id);
     }
     await refreshCertificateWorkflow();
   }

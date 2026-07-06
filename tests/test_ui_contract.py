@@ -332,6 +332,12 @@ def test_upload_rows_can_remove_prepared_local_ca_certificate():
     assert "removePreparedToolbeltDevice" in html
     assert "/api/ca/issued/${encodeURIComponent(certificateId)}" in html
     assert "delete the associated Local CA device certificate" in html
+    assert "function removeCertificateFromClientState(certificateId)" in html
+    assert "availableCertificates = (availableCertificates || []).filter" in html
+    assert "toolbeltDevices = (toolbeltDevices || []).filter" in html
+    assert "removeCertificateFromClientState(certificateId)" in remove_function
+    assert "removeCertificateFromClientState(device.certificate_id)" in remove_function
+    assert "renderCerts(currentCertificates)" in html
     assert "await refreshCertificateWorkflow()" in remove_function
     assert "loadData();" not in remove_function
 
