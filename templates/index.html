@@ -2578,6 +2578,8 @@
     titleEl.style.color = 'var(--accent)';
     titleEl.textContent = 'Certificate downloads ready';
     logEl.innerHTML = '<div>Manual upload selected. CertMon does not connect to this device automatically.</div>';
+    const selectedCertificate = (availableCertificates || []).find(c => c.certificate_id === certificate_id) || {};
+    const isExtronProfile = selectedCertificate.profile === 'extron-rsa';
 
     publicArtifactsDiv.style.display = 'block';
     publicArtifactsEl.innerHTML = ['certificate.pem', 'chain.pem', 'full-chain.pem'].map(name =>
@@ -2585,16 +2587,23 @@
     ).join('');
 
     privateArtifactsDiv.style.display = 'block';
-    privateArtifactsEl.innerHTML =
-      `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
+    privateArtifactsEl.innerHTML = isExtronProfile
+      ? `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/combined.pem" download style="font-size:11px;padding:6px 10px;color:var(--warning);border-color:var(--warning)" title="Extron combined PEM contains certificate and private key. Keep it secret.">extron-combined.pem</a>`
+      : `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
 
     instrDiv.style.display = 'block';
-    instrText.textContent = [
-      '1. Download certificate.pem and private-key.pem.',
-      '2. Download chain.pem or full-chain.pem if the device asks for a CA chain.',
-      '3. Import the certificate and matching private key in the device web interface.',
-      '4. Keep private-key.pem secret and remove local copies after import.'
-    ].join('\n');
+    instrText.textContent = isExtronProfile
+      ? [
+          '1. Download extron-combined.pem.',
+          '2. Upload that combined PEM in Extron Toolbelt or the device interface that expects a combined certificate/private-key PEM.',
+          '3. Keep extron-combined.pem secret and remove local copies after import.'
+        ].join('\n')
+      : [
+          '1. Download certificate.pem and private-key.pem.',
+          '2. Download chain.pem or full-chain.pem if the device asks for a CA chain.',
+          '3. Import the certificate and matching private key in the device web interface.',
+          '4. Keep private-key.pem secret and remove local copies after import.'
+        ].join('\n');
 
     resultDiv.scrollIntoView({ behavior: 'smooth' });
   }

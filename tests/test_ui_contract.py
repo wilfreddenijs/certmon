@@ -219,6 +219,10 @@ def test_deployment_result_offers_private_key_download_without_storing_key_mater
     assert 'id="push-private-artifacts"' in html
     assert 'id="push-private-artifact-links"' in html
     assert "/api/certificates/${certificate_id}/private/private-key.pem" in html
+    assert "selectedCertificate.profile === 'extron-rsa'" in html
+    assert "/api/certificates/${certificate_id}/private/combined.pem" in html
+    assert "extron-combined.pem" in html
+    assert "combined certificate/private-key PEM" in html
     assert "privateKeyPem" not in html
 
 
