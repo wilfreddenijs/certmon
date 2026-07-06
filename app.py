@@ -772,12 +772,25 @@ def _filename_part(value):
     return safe_slug(value, max_length=80)
 
 
+def _is_ip_identifier(value):
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
 def _certificate_download_filename(certificate_id, artifact_name):
     metadata = database.get_certificate(certificate_id) if database else None
     metadata = metadata or {"id": certificate_id}
     identifiers = metadata.get("identifiers") or []
     parts = []
-    for value in (metadata.get("device_name"), identifiers[0] if identifiers else None):
+    filename_values = [
+        metadata.get("device_name"),
+        identifiers[0] if identifiers else None,
+        *[identifier for identifier in identifiers if _is_ip_identifier(identifier)],
+    ]
+    for value in filename_values:
         part = _filename_part(value)
         if part and part not in parts:
             parts.append(part)

@@ -231,6 +231,31 @@ def test_private_download_uses_friendly_extron_filename(tmp_data_dir, monkeypatc
     )
 
 
+def test_extron_combined_filename_includes_ip_when_hostname_is_first_identifier(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    database.certificates["cert-1"].update(
+        {
+            "device_name": "IPLP",
+            "identifiers": ["IPLP", "10.10.116.199"],
+        }
+    )
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().get(
+        "/api/certificates/cert-1/private/combined.pem"
+    )
+
+    assert response.status_code == 200
+    assert (
+        'filename="iplp-10.10.116.199-extron-cert-1-extron-combined.pem"'
+        in response.headers["Content-Disposition"]
+    )
+
+
 def test_devices_txt_exports_certificate_ids_not_private_paths(
     tmp_data_dir, monkeypatch
 ):
@@ -347,6 +372,9 @@ def test_extron_combined_zip_contains_only_extron_local_ca_combined_pems(tmp_dat
     module = load_app(tmp_data_dir)
     artifacts = FakeArtifacts()
     database = FakeCertificateDatabase()
+    database.certificates["cert-1"].update(
+        {"device_name": "IPLP", "identifiers": ["IPLP", "10.10.116.199"]}
+    )
     database.certificates["generic-1"] = {
         "id": "generic-1",
         "kind": "leaf",
@@ -367,7 +395,7 @@ def test_extron_combined_zip_contains_only_extron_local_ca_combined_pems(tmp_dat
     with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
         names = archive.namelist()
         assert len(names) == 1
-        assert names[0].endswith("extron-combined.pem")
+        assert names[0] == "iplp-10.10.116.199-extron-cert-1-extron-combined.pem"
         assert archive.read(names[0]).startswith(b"-----BEGIN combined.pem-----")
     assert artifacts.requested == []
     assert database.last_event == (
