@@ -1192,21 +1192,39 @@
     const ok = confirm(`Create Extron-compatible Local CA certificates for ${targets.length} selected device(s)?`);
     if (!ok) return;
     const button = document.getElementById('device-bulk-create-btn');
+    const countEl = document.getElementById('device-filter-count');
     if (button) {
       button.disabled = true;
       button.textContent = 'Creating...';
     }
-    for (const c of targets) {
-      const ip = isIp(c.host) ? c.host : '';
-      const hostname = (c.cn && c.cn !== c.host && !isIp(c.cn)) ? c.cn : (isIp(c.host) ? '' : c.host);
-      await fetch('/api/ca/issue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip, hostname, profile: 'extron-rsa', name: c.cn || c.host })
-      });
-      selectedDeviceKeys.delete(deviceKey(c));
+    if (countEl) countEl.textContent = `Creating certificates for ${targets.length} selected device(s)...`;
+    const failures = [];
+    let created = 0;
+    try {
+      for (const c of targets) {
+        const ip = isIp(c.host) ? c.host : '';
+        const hostname = (c.cn && c.cn !== c.host && !isIp(c.cn)) ? c.cn : (isIp(c.host) ? '' : c.host);
+        const res = await fetch('/api/ca/issue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, hostname, profile: 'extron-rsa', name: c.cn || c.host })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) {
+          failures.push(`${c.cn || c.host}: ${data.error || 'Could not create certificate'}`);
+          continue;
+        }
+        created += 1;
+        selectedDeviceKeys.delete(deviceKey(c));
+      }
+    } finally {
+      await refreshCertificateWorkflow();
     }
-    await refreshCertificateWorkflow();
+    if (failures.length) {
+      alert(`Created ${created}/${targets.length} certificate(s).\n\nFailed:\n${failures.join('\n')}`);
+    } else {
+      alert(`Created ${created} certificate(s). They are now available in the Upload list.`);
+    }
   }
 
   function renderCerts(certs) {

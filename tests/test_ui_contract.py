@@ -125,6 +125,21 @@ def test_devices_overview_has_filters_sticky_tabs_and_bulk_certificate_selection
     assert "Select filtered" in html
 
 
+def test_bulk_device_certificate_creation_reports_results_and_recovers_button_state():
+    html = page()
+    bulk_function = html.split("async function bulkCreateSelectedDeviceCertificates()", 1)[1].split(
+        "function renderCerts", 1
+    )[0]
+
+    assert "const failures = []" in bulk_function
+    assert "let created = 0" in bulk_function
+    assert "if (!res.ok || data.error)" in bulk_function
+    assert "failures.push" in bulk_function
+    assert "} finally {" in bulk_function
+    assert "await refreshCertificateWorkflow()" in bulk_function
+    assert "Created ${created}" in bulk_function
+
+
 def test_first_tab_is_devices_and_local_ca_is_root_management_only():
     html = page()
     ca_panel = html.split('id="tab-ca"', 1)[1].split("<!-- Upload Tab -->", 1)[0]
