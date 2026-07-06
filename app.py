@@ -14,6 +14,7 @@ import ipaddress
 import io
 import base64
 import uuid
+import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -34,16 +35,34 @@ from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
 from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
+from certmon.local_ca_backup import LocalCABackupError, LocalCABackupService
 from certmon.naming import safe_slug
 from certmon.permissions import Permission, authorize
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
+from certmon.toolbelt import ToolbeltBatchService
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
+
+
+APP_VERSION = "1.0"
 
 
 def resource_path(relative):
     """Get absolute path — works for dev and PyInstaller bundle."""
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, relative)
+
+
+def build_info():
+    path = Path(resource_path("build_info.json"))
+    fallback = {"version": APP_VERSION, "build_number": "dev"}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return fallback
+    return {
+        "version": str(data.get("version") or APP_VERSION),
+        "build_number": str(data.get("build_number") or "dev"),
+    }
 
 
 def data_dir():
@@ -105,6 +124,7 @@ def bootstrap_services(
         (Path(r"C:\CertMon\CA"), root / "CA"),
     )
     local_ca_service = LocalCAService(database, artifact_store)
+    local_ca_backup_service = LocalCABackupService(database, artifact_store)
     external_ca_service = ExternalCAService(database, artifact_store)
     acme_account_service = ACMEAccountService(
         database, vault, NativeACMEAccountClient
@@ -135,28 +155,33 @@ def bootstrap_services(
             else deployment_adapters
         ),
     )
+    toolbelt_service = ToolbeltBatchService(database, artifact_store, vault)
     return {
         "vault": vault,
         "artifact_store": artifact_store,
         "local_ca_service": local_ca_service,
+        "local_ca_backup_service": local_ca_backup_service,
         "external_ca_service": external_ca_service,
         "renewal_service": renewal_service,
         "acme_account_service": acme_account_service,
         "acme_order_service": acme_order_service,
         "acme_orchestrator": acme_orchestrator,
         "deployment_service": deployment_service,
+        "toolbelt_service": toolbelt_service,
     }
 
 
 vault = None
 artifact_store = None
 local_ca_service = None
+local_ca_backup_service = None
 external_ca_service = None
 renewal_service = RenewalService(database)
 acme_account_service = None
 acme_order_service = None
 acme_orchestrator = None
 deployment_service = None
+toolbelt_service = None
 _services = bootstrap_services(database, data_dir())
 globals().update(_services)
 if migration_source is not None and vault is not None:
@@ -346,7 +371,7 @@ def scan_range_worker(ip_range):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", build_info=build_info())
 
 
 @app.route("/api/data")
@@ -734,6 +759,12 @@ def ca_exists():
 
 def _certificate_selector(metadata):
     identifiers = metadata.get("identifiers") or []
+    for value in identifiers:
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            continue
+        return value
     return identifiers[0] if identifiers else metadata.get("id")
 
 
@@ -741,12 +772,25 @@ def _filename_part(value):
     return safe_slug(value, max_length=80)
 
 
+def _is_ip_identifier(value):
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
 def _certificate_download_filename(certificate_id, artifact_name):
     metadata = database.get_certificate(certificate_id) if database else None
     metadata = metadata or {"id": certificate_id}
     identifiers = metadata.get("identifiers") or []
     parts = []
-    for value in (metadata.get("device_name"), identifiers[0] if identifiers else None):
+    filename_values = [
+        metadata.get("device_name"),
+        identifiers[0] if identifiers else None,
+        *[identifier for identifier in identifiers if _is_ip_identifier(identifier)],
+    ]
+    for value in filename_values:
         part = _filename_part(value)
         if part and part not in parts:
             parts.append(part)
@@ -851,6 +895,49 @@ def ca_download_cert():
     return response
 
 
+@app.route("/api/ca/backup/export", methods=["POST"])
+def ca_backup_export():
+    if local_ca_backup_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    passphrase = body.get("passphrase") or ""
+    try:
+        package = local_ca_backup_service.export_package(passphrase)
+    except LocalCABackupError as error:
+        return jsonify({"error": str(error)}), 400
+    database.record_event("local_ca_backup_exported", {})
+    return send_file(
+        io.BytesIO(package),
+        mimetype="application/json",
+        as_attachment=True,
+        download_name="certmon-local-ca-backup.json",
+    )
+
+
+@app.route("/api/ca/backup/import", methods=["POST"])
+def ca_backup_import():
+    if local_ca_backup_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    upload = request.files.get("backup")
+    passphrase = request.form.get("passphrase") or ""
+    replace = request.form.get("replace") in {"1", "true", "yes", "on"}
+    if upload is None:
+        return jsonify({"error": "Backup file is required"}), 400
+    try:
+        result = local_ca_backup_service.import_package(
+            upload.read(),
+            passphrase,
+            replace=replace,
+        )
+    except LocalCABackupError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        app.logger.exception("Unexpected Local CA backup import failure")
+        return jsonify({"error": "Could not import Local CA backup. Check the file and passphrase."}), 400
+    database.record_event("local_ca_backup_imported", {"replace": replace})
+    return jsonify({"ok": True, **result})
+
+
 @app.route("/api/ca/issue", methods=["POST"])
 def ca_issue():
     """Issue a device certificate signed by the local CA."""
@@ -877,6 +964,45 @@ def ca_issue():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ca/issue-bulk", methods=["POST"])
+def ca_issue_bulk():
+    """Issue multiple Local CA device certificates and report per-device failures."""
+    if not ca_exists():
+        return jsonify({"error": "No CA found. Generate one first."}), 400
+    if local_ca_service is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    devices = body.get("devices") or []
+    if not isinstance(devices, list) or not devices:
+        return jsonify({"error": "Provide at least one device"}), 400
+
+    created = []
+    failed = []
+    for device in devices:
+        ip = (device.get("ip") or "").strip()
+        hostname = (device.get("hostname") or "").strip()
+        identifiers = tuple(value for value in (hostname, ip) if value)
+        label = device.get("name") or hostname or ip or "device"
+        client_key = device.get("key")
+        if not identifiers:
+            failed.append({"name": label, "key": client_key, "error": "Provide at least an IP or hostname"})
+            continue
+        try:
+            result = local_ca_service.issue(
+                identifiers=identifiers,
+                profile_name=device.get("profile") or "extron-rsa",
+                device_name=label,
+            )
+            created.append({"name": label, "key": client_key, "cn": hostname or ip, **result})
+        except (KeyError, ValueError, FileExistsError) as error:
+            failed.append({"name": label, "key": client_key, "error": str(error)})
+        except Exception as error:
+            app.logger.exception("Unexpected Local CA bulk issue failure")
+            failed.append({"name": label, "key": client_key, "error": str(error)})
+
+    return jsonify({"ok": not failed, "created": created, "failed": failed})
+
+
 @app.route("/api/ca/devices-txt")
 def ca_devices_txt():
     """List of `ip,pemfile` for every issued device cert that has a .pem —
@@ -898,6 +1024,45 @@ def ca_devices_txt():
     return response
 
 
+@app.route("/api/ca/extron-combined-zip")
+def ca_extron_combined_zip():
+    authorize(Permission.DOWNLOAD_PRIVATE_KEY)
+    if artifact_store is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    buffer = io.BytesIO()
+    count = 0
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for metadata in database.list_certificates():
+            if (
+                metadata.get("kind") != "leaf"
+                or metadata.get("issuer_type") != "local_ca"
+                or metadata.get("profile") != "extron-rsa"
+            ):
+                continue
+            certificate_id = metadata["id"]
+            try:
+                with artifact_store.materialize_private(certificate_id, "combined.pem") as path:
+                    data = path.read_bytes()
+            except (FileNotFoundError, ValueError, PermissionError):
+                continue
+            filename = _certificate_download_filename(certificate_id, "combined.pem")
+            archive.writestr(filename, data)
+            count += 1
+            database.record_event(
+                "private_artifact_downloaded",
+                {"certificate_id": certificate_id, "artifact_name": "combined.pem", "bundle": "extron_zip"},
+            )
+    if count == 0:
+        return jsonify({"error": "No Extron combined PEM certificates are available"}), 404
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="certmon-extron-combined-pems.zip",
+    )
+
+
 @app.route("/api/ca/issued/<certificate_id>", methods=["DELETE"])
 def ca_delete_issued(certificate_id):
     """Delete an issued device cert and its companion files (.crt/.key/.pem,
@@ -912,6 +1077,24 @@ def ca_delete_issued(certificate_id):
     if artifact_store is not None:
         artifact_store.delete_certificate_set(certificate_id)
     database.delete_certificate(certificate_id)
+    if toolbelt_service is not None:
+        identifiers = metadata.get("identifiers") or []
+        def is_ip(value):
+            try:
+                ipaddress.ip_address(value)
+                return True
+            except ValueError:
+                return False
+
+        selector = next((i for i in identifiers if is_ip(i)), None)
+        if not selector and identifiers:
+            selector = identifiers[0]
+        if selector and hasattr(toolbelt_service, "delete_credentials"):
+            toolbelt_service.delete_credentials(selector)
+    if hasattr(database, "record_event"):
+        database.record_event(
+            "local_ca_certificate_deleted", {"certificate_id": certificate_id}
+        )
     return jsonify({"ok": True, "removed": [certificate_id]})
 
 
@@ -1136,6 +1319,135 @@ def download_private_artifact(certificate_id, artifact_name):
 
 
 # ── Certificate Upload Module ─────────────────────────────────────────────────
+
+# Toolbelt batch upload ------------------------------------------------------
+
+def _toolbelt_unavailable():
+    return toolbelt_service is None or artifact_store is None or vault is None
+
+
+@app.route("/api/toolbelt/devices", methods=["GET"])
+def toolbelt_devices():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    return jsonify({"devices": toolbelt_service.list_devices()})
+
+
+@app.route("/api/toolbelt/selection", methods=["PATCH"])
+def toolbelt_selection():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    selectors = body.get("selectors")
+    if selectors is None or not isinstance(selectors, list):
+        return jsonify({"error": "selectors must be a list"}), 400
+    toolbelt_service.save_selection([str(value) for value in selectors])
+    return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
+
+
+@app.route("/api/toolbelt/reset-upload-tab", methods=["POST"])
+def toolbelt_reset_upload_tab():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    return jsonify({"ok": True, "devices": toolbelt_service.reset_upload_tab_state()})
+
+
+@app.route("/api/toolbelt/devices/<path:selector>/credentials", methods=["PATCH"])
+def toolbelt_credentials(selector):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "admin").strip()
+    password = body.get("password")
+    if password is None:
+        return jsonify({"error": "password is required"}), 400
+    if username == "admin" and str(password) == "":
+        if hasattr(toolbelt_service, "delete_credentials"):
+            toolbelt_service.delete_credentials(selector)
+        return jsonify({"ok": True, "credentials_saved": False})
+    toolbelt_service.save_credentials(
+        selector, username=username, password=str(password)
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/toolbelt/default-credentials", methods=["PATCH"])
+def toolbelt_default_credentials():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "admin").strip()
+    password = body.get("password")
+    if password is None:
+        return jsonify({"error": "password is required"}), 400
+    toolbelt_service.save_default_credentials(
+        username=username, password=str(password)
+    )
+    return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
+
+
+@app.route("/api/toolbelt/dry-run", methods=["POST"])
+def toolbelt_dry_run():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    if any(key in body for key in ("private_key_pem", "combined_pem", "pem")):
+        return jsonify({"error": "Private certificate material must stay server-side"}), 400
+    try:
+        selectors = body["selectors"] if "selectors" in body else None
+        run = toolbelt_service.start(
+            mode="dry-run", selectors=selectors
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"ok": True, "run": run})
+
+
+@app.route("/api/toolbelt/upload", methods=["POST"])
+def toolbelt_upload():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    if any(key in body for key in ("private_key_pem", "combined_pem", "pem")):
+        return jsonify({"error": "Private certificate material must stay server-side"}), 400
+    try:
+        selectors = body["selectors"] if "selectors" in body else None
+        run = toolbelt_service.start(
+            mode="upload", selectors=selectors
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"ok": True, "run": run})
+
+
+@app.route("/api/toolbelt/runs/<run_id>", methods=["GET"])
+def toolbelt_run(run_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    run = toolbelt_service.get_run(run_id)
+    if run is None:
+        return jsonify({"error": "Run not found"}), 404
+    return jsonify(run)
+
+
+@app.route("/api/toolbelt/runs/<run_id>/stop", methods=["POST"])
+def toolbelt_stop(run_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _toolbelt_unavailable():
+        return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
+    run = toolbelt_service.stop(run_id)
+    if run is None:
+        return jsonify({"error": "Run not found"}), 404
+    return jsonify({"ok": True, "run": run})
+
 
 @app.route("/api/upload/devices", methods=["GET"])
 def list_upload_devices():

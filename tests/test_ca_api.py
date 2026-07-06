@@ -1,4 +1,6 @@
 import importlib
+import io
+import zipfile
 
 
 class FakeArtifacts:
@@ -21,7 +23,9 @@ class FakeArtifacts:
         @contextmanager
         def _ctx():
             with tempfile.NamedTemporaryFile(delete=False) as handle:
-                handle.write(b"-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----\n")
+                handle.write(
+                    f"-----BEGIN {name}-----\n{certificate_id}\n-----END {name}-----\n".encode()
+                )
                 path = Path(handle.name)
             try:
                 yield path
@@ -71,9 +75,33 @@ class FakeCertificateDatabase:
 
 
 class FakeLocalCA:
+    def __init__(self):
+        self.issues = []
+
     def issue(self, **kwargs):
+        self.issues.append(kwargs)
         assert kwargs["profile_name"] == "extron-rsa"
-        return {"certificate_id": "cert-1", "not_after": "2030-01-01T00:00:00+00:00"}
+        return {
+            "certificate_id": f"cert-{len(self.issues)}",
+            "not_after": "2030-01-01T00:00:00+00:00",
+        }
+
+
+class FakeLocalCABackup:
+    def __init__(self):
+        self.imported = None
+
+    def export_package(self, passphrase):
+        assert passphrase == "secret"
+        return b'{"format":"certmon-local-ca-backup"}'
+
+    def import_package(self, package, passphrase, *, replace=False):
+        self.imported = (package, passphrase, replace)
+        return {
+            "certificate_id": "local-ca",
+            "fingerprint_sha256": "abc123",
+            "not_after": "2030-01-01T00:00:00+00:00",
+        }
 
 
 class FakeExternalCA:
@@ -85,6 +113,14 @@ class FakeExternalCA:
         return "cert-2"
 
 
+class FakeToolbeltService:
+    def __init__(self):
+        self.deleted_credentials = []
+
+    def delete_credentials(self, selector):
+        self.deleted_credentials.append(selector)
+
+
 def load_app(tmp_data_dir):
     import app
 
@@ -94,7 +130,8 @@ def load_app(tmp_data_dir):
 def test_local_ca_issue_response_contains_no_private_material(tmp_data_dir, monkeypatch):
     module = load_app(tmp_data_dir)
     monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
-    monkeypatch.setattr(module, "local_ca_service", FakeLocalCA())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, "local_ca_service", fake_ca)
 
     response = module.app.test_client().post(
         "/api/ca/issue",
@@ -105,6 +142,61 @@ def test_local_ca_issue_response_contains_no_private_material(tmp_data_dir, monk
     payload = response.get_json()
     assert payload["certificate_id"] == "cert-1"
     assert not {"key_pem", "passphrase", "key_path", "pem_path"} & payload.keys()
+
+
+def test_local_ca_issue_allows_multiple_bulk_style_requests(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, "local_ca_service", fake_ca)
+    client = module.app.test_client()
+
+    first = client.post(
+        "/api/ca/issue",
+        json={"hostname": "IPLP", "ip": "10.10.116.172", "profile": "extron-rsa", "name": "IPLP"},
+    )
+    second = client.post(
+        "/api/ca/issue",
+        json={"hostname": "IPLP", "ip": "10.10.116.199", "profile": "extron-rsa", "name": "IPLP"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.get_json()["certificate_id"] == "cert-1"
+    assert second.get_json()["certificate_id"] == "cert-2"
+    assert fake_ca.issues[0]["identifiers"] == ("IPLP", "10.10.116.172")
+    assert fake_ca.issues[1]["identifiers"] == ("IPLP", "10.10.116.199")
+
+
+def test_local_ca_issue_bulk_returns_created_and_failed_items(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, "local_ca_service", fake_ca)
+
+    response = module.app.test_client().post(
+        "/api/ca/issue-bulk",
+        json={
+            "devices": [
+                {
+                    "hostname": "IPLP",
+                    "ip": "10.10.116.172",
+                    "profile": "extron-rsa",
+                    "name": "IPLP",
+                    "key": "10.10.116.172|443",
+                },
+                {"name": "missing-identifiers", "key": "missing|443"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["created"][0]["certificate_id"] == "cert-1"
+    assert payload["created"][0]["key"] == "10.10.116.172|443"
+    assert payload["failed"][0]["name"] == "missing-identifiers"
+    assert payload["failed"][0]["key"] == "missing|443"
 
 
 def test_public_download_never_reads_private_artifact(tmp_data_dir, monkeypatch):
@@ -139,6 +231,31 @@ def test_private_download_uses_friendly_extron_filename(tmp_data_dir, monkeypatc
     )
 
 
+def test_extron_combined_filename_includes_ip_when_hostname_is_first_identifier(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    database.certificates["cert-1"].update(
+        {
+            "device_name": "IPLP",
+            "identifiers": ["IPLP", "10.10.116.199"],
+        }
+    )
+    monkeypatch.setattr(module, "artifact_store", FakeArtifacts())
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().get(
+        "/api/certificates/cert-1/private/combined.pem"
+    )
+
+    assert response.status_code == 200
+    assert (
+        'filename="iplp-10.10.116.199-extron-cert-1-extron-combined.pem"'
+        in response.headers["Content-Disposition"]
+    )
+
+
 def test_devices_txt_exports_certificate_ids_not_private_paths(
     tmp_data_dir, monkeypatch
 ):
@@ -152,14 +269,61 @@ def test_devices_txt_exports_certificate_ids_not_private_paths(
     assert ".pem" not in response.text
 
 
+def test_local_ca_backup_export_returns_attachment_without_private_json(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    monkeypatch.setattr(module, "local_ca_backup_service", FakeLocalCABackup())
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().post(
+        "/api/ca/backup/export",
+        json={"passphrase": "secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.data == b'{"format":"certmon-local-ca-backup"}'
+    assert "attachment" in response.headers["Content-Disposition"]
+    assert b"PRIVATE KEY" not in response.data
+    assert database.last_event == ("local_ca_backup_exported", {})
+
+
+def test_local_ca_backup_import_accepts_file_passphrase_and_replace(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    service = FakeLocalCABackup()
+    monkeypatch.setattr(module, "local_ca_backup_service", service)
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().post(
+        "/api/ca/backup/import",
+        data={
+            "backup": (io.BytesIO(b"package"), "backup.json"),
+            "passphrase": "secret",
+            "replace": "true",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["certificate_id"] == "local-ca"
+    assert service.imported == (b"package", "secret", True)
+    assert database.last_event == ("local_ca_backup_imported", {"replace": True})
+
+
 def test_delete_issued_certificate_uses_certificate_id(
     tmp_data_dir, monkeypatch
 ):
     module = load_app(tmp_data_dir)
     artifacts = FakeArtifacts()
     database = FakeCertificateDatabase()
+    toolbelt = FakeToolbeltService()
     monkeypatch.setattr(module, "artifact_store", artifacts)
     monkeypatch.setattr(module, "database", database)
+    monkeypatch.setattr(module, "toolbelt_service", toolbelt)
 
     response = module.app.test_client().delete("/api/ca/issued/cert-1")
 
@@ -167,6 +331,11 @@ def test_delete_issued_certificate_uses_certificate_id(
     assert response.get_json() == {"ok": True, "removed": ["cert-1"]}
     assert artifacts.deleted == ["cert-1"]
     assert database.deleted == ["cert-1"]
+    assert toolbelt.deleted_credentials == ["192.168.0.10"]
+    assert database.last_event == (
+        "local_ca_certificate_deleted",
+        {"certificate_id": "cert-1"},
+    )
 
 
 def test_external_completion_response_contains_only_certificate_id(
@@ -186,3 +355,50 @@ def test_external_completion_response_contains_only_certificate_id(
 
     assert response.status_code == 200
     assert response.get_json() == {"ok": True, "certificate_id": "cert-2"}
+
+def test_devices_txt_prefers_ip_identifier_for_toolbelt_selector(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    database.certificates["cert-1"]["identifiers"] = ["IPLP", "192.168.0.20"]
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().get("/api/ca/devices-txt")
+
+    assert response.status_code == 200
+    assert response.text == "192.168.0.20,cert-1\n"
+
+
+def test_extron_combined_zip_contains_only_extron_local_ca_combined_pems(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    artifacts = FakeArtifacts()
+    database = FakeCertificateDatabase()
+    database.certificates["cert-1"].update(
+        {"device_name": "IPLP", "identifiers": ["IPLP", "10.10.116.199"]}
+    )
+    database.certificates["generic-1"] = {
+        "id": "generic-1",
+        "kind": "leaf",
+        "issuer_type": "local_ca",
+        "profile": "generic-rsa",
+        "device_name": "Generic",
+        "identifiers": ["10.0.0.50"],
+        "not_after": "2030-01-01T00:00:00+00:00",
+    }
+    monkeypatch.setattr(module, "artifact_store", artifacts)
+    monkeypatch.setattr(module, "database", database)
+
+    response = module.app.test_client().get("/api/ca/extron-combined-zip")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    assert "certmon-extron-combined-pems.zip" in response.headers["Content-Disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        names = archive.namelist()
+        assert len(names) == 1
+        assert names[0] == "iplp-10.10.116.199-extron-cert-1-extron-combined.pem"
+        assert archive.read(names[0]).startswith(b"-----BEGIN combined.pem-----")
+    assert artifacts.requested == []
+    assert database.last_event == (
+        "private_artifact_downloaded",
+        {"certificate_id": "cert-1", "artifact_name": "combined.pem", "bundle": "extron_zip"},
+    )

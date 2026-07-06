@@ -16,6 +16,7 @@ a = Analysis(
     datas=[
         ('templates', 'templates'),
         ('app.py', '.'),
+        ('build_info.json', '.'),
     ] + flask_datas + jinja_datas + werkzeug_datas,
     hiddenimports=[
         'app',
@@ -28,12 +29,15 @@ a = Analysis(
         'cryptography.x509.oid',
         'certmon.backup', 'certmon.artifacts', 'certmon.db',
         'certmon.deployment', 'certmon.renewals',
+        'certmon.toolbelt', 'toolbelt_uploader',
         'sqlite3', '_sqlite3',
         'openpyxl', 'openpyxl.styles', 'openpyxl.utils',
         'acme', 'acme.client', 'acme.messages', 'acme.challenges',
         'josepy', 'dns', 'dns.resolver',
         'pystray', 'pystray._win32',
         'PIL', 'PIL.Image', 'PIL.ImageDraw',
+        'pywinauto', 'pywinauto.application', 'pywinauto.findwindows',
+        'pywinauto.timings', 'pywinauto.mouse', 'comtypes',
     ] + flask_hiddenimports + jinja_hiddenimports + werkzeug_hiddenimports,
     hookspath=[],
     runtime_hooks=[],

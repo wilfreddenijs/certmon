@@ -29,6 +29,13 @@ def test_wizard_has_endpoint_identifiers_issuers_profiles_and_dns_choices():
         assert required in html
 
 
+def test_header_shows_version_and_build_number_badge():
+    html = page()
+
+    assert 'class="build-badge"' in html
+    assert "v{{ build_info.version }} build {{ build_info.build_number }}" in html
+
+
 def test_wizard_has_external_ca_and_resumable_state_actions():
     html = page()
 
@@ -64,25 +71,101 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     html = page()
     push_function = html.split("async function pushCert()", 1)[1]
 
-    assert 'id="push-certificate-select"' in html
+    assert 'id="push-target-select"' in html
+    assert 'id="push-certificate-select"' not in html
+    assert 'id="push-device-select"' not in html
     assert 'id="cert-pem"' not in html
     assert 'id="key-pem"' not in html
     assert "certificate_id" in html
     assert "cert_pem" not in push_function
     assert "key_pem" not in push_function
-    assert "Choose the closest target" in html
-    assert "Used only server-side" in html
-    assert "Stored encrypted" in html
+    assert "Each certificate belongs to one device" in html
+    assert "certificate/device pair" in html
     assert "For unsupported devices" in html
     assert "separate private-key.pem download" in html
 
 
-def test_local_ca_ui_explains_device_certificate_fields():
+def test_devices_workflow_explains_device_certificate_fields():
     html = page()
 
+    assert "Choose a device and select <b>Create certificate</b>" in html
+    assert r"\b(dmp|ipcp|iplp|tlp|ucs|dtx|sme|smp|in\d{3,4}|dvs|dsc)\b" in html
     assert "Use the IP address users enter" in html
     assert "Add this if users connect by DNS name" in html
     assert "Choose Extron/RSA for older devices" in html
+    assert "Create certificate" in html
+    assert "Upload ready" in html
+    assert "Certificate ready" in html
+    assert "Use existing" in html
+    assert "Expires:" in html
+    assert 'value="extron-rsa"' in html
+
+
+def test_devices_overview_has_filters_sticky_tabs_and_bulk_certificate_selection():
+    html = page()
+
+    for required in (
+        'id="device-status-filter"',
+        'id="device-certificate-filter"',
+        'class="device-filter-options"',
+        'id="device-select-filtered"',
+        'id="device-bulk-create-btn"',
+        "setDeviceStatusFilter(this.value)",
+        "setDeviceCertificateFilter(this.value)",
+        "filterDeviceStatusFromSummary('ok')",
+        "toggleFilteredDevices(this.checked)",
+        "clearFilteredDeviceSelection()",
+        "bulkCreateSelectedDeviceCertificates()",
+        "removeAllPreparedToolbeltDevices()",
+        "selectedDeviceKeys",
+        "filteredDeviceEntries()",
+        "profile: 'extron-rsa'",
+        "position: sticky",
+    ):
+        assert required in html
+
+    assert "Certificate validity" in html
+    assert "Local CA certificate" in html
+    assert "Show all" in html
+    assert "Created" in html
+    assert "Not created" in html
+    assert "Select filtered" in html
+
+
+def test_bulk_device_certificate_creation_reports_results_and_recovers_button_state():
+    html = page()
+    bulk_function = html.split("async function bulkCreateSelectedDeviceCertificates()", 1)[1].split(
+        "function renderCerts", 1
+    )[0]
+
+    assert "/api/ca/issue-bulk" in bulk_function
+    assert "body: JSON.stringify({ devices })" in bulk_function
+    assert "const createdKeys = new Set" in bulk_function
+    assert "selectedDeviceKeys.delete(device.key)" in bulk_function
+    assert "result.failed" in bulk_function
+    assert "} finally {" in bulk_function
+    assert "await refreshCertificateWorkflow()" in bulk_function
+    assert "Created ${created}" in bulk_function
+
+
+def test_first_tab_is_devices_and_local_ca_is_root_management_only():
+    html = page()
+    ca_panel = html.split('id="tab-ca"', 1)[1].split("<!-- Upload Tab -->", 1)[0]
+
+    assert "switchTab('certs')\">Devices" in html
+    assert "Scanned devices" in html
+    assert "Issue Device Certificate" not in ca_panel
+    assert "Issued Device Certificates" not in ca_panel
+    assert "Generate Local CA" in html
+    assert "Download CA cert" in html
+    assert "Windows manual trust install" in html
+    assert "Trusted Root Certification Authorities" in html
+    assert "Export CA backup" in html
+    assert "Import CA backup" in html
+    assert "/api/ca/backup/export" in html
+    assert "/api/ca/backup/import" in html
+    assert "without baking private keys into the executable" in html
+    assert "overlay.querySelector('#device-ca-cancel').textContent = 'Close'" in html
 
 
 def test_external_ca_import_form_submits_generated_and_existing_certificates():
@@ -159,6 +242,10 @@ def test_deployment_result_offers_private_key_download_without_storing_key_mater
     assert 'id="push-private-artifacts"' in html
     assert 'id="push-private-artifact-links"' in html
     assert "/api/certificates/${certificate_id}/private/private-key.pem" in html
+    assert "selectedCertificate.profile === 'extron-rsa'" in html
+    assert "/api/certificates/${certificate_id}/private/combined.pem" in html
+    assert "extron-combined.pem" in html
+    assert "combined certificate/private-key PEM" in html
     assert "privateKeyPem" not in html
 
 
@@ -173,6 +260,112 @@ def test_local_ca_extron_pem_download_uses_private_combined_artifact():
     assert "/api/certificates/${c.certificate_id}/private/combined.pem" in html
     assert "/api/ca/download/${c.certificate_id}" in html
     assert "Extron PEM contains certificate and private key" in html
+
+
+def test_upload_tab_has_toolbelt_batch_upload_flow():
+    html = page()
+
+    assert "Prepared device upload" in html
+    assert "one central prepared-device list" in html
+    assert "Add device" in html
+    assert "Manual upload fallback" in html
+    assert "Download Certificates for Manual Upload" in html
+    assert "/api/ca/extron-combined-zip" in html
+    assert "Download all Extron PEMs (.zip)" in html
+    assert "These files contain private keys" in html
+    assert "Target Devices" not in html
+    assert "Toolbelt batch upload" in html
+    assert "Test Toolbelt upload first" in html
+    assert "Test Toolbelt upload" in html
+    assert "Retry dry-run" not in html
+    assert 'id="toolbelt-device-list"' in html
+    assert 'id="toolbelt-upload-btn"' in html
+    assert 'id="toolbelt-stop-btn"' in html
+    assert "/api/toolbelt/devices" in html
+    assert "/api/toolbelt/default-credentials" in html
+    assert "/api/toolbelt/reset-upload-tab" in html
+    assert "/api/toolbelt/dry-run" in html
+    assert "/api/toolbelt/upload" in html
+    assert "Shared Device Credentials" in html
+    assert "Device Credentials" in html
+    assert "Remove all" in html
+    assert "tries shared device password, then admin/extron" in html
+    assert "Stop after current device" in html
+    assert 'id="toolbelt-select-all"' in html
+    assert "toggleAllToolbeltDevices(this.checked)" in html
+    assert "Select all devices" in html
+    assert "selectAll.indeterminate" in html
+    assert "async function persistToolbeltSelection()" in html
+    assert "tries admin/extron, then admin/serial from Toolbelt" in html
+    assert "run.error" in html
+    assert "errorText" in html
+    assert "d.event !== 'device_pending'" in html
+
+
+def test_manual_upload_lists_all_certificate_profiles_as_download_targets():
+    html = page()
+    render_select = html.split("function renderCertificateSelect()", 1)[1].split(
+        "function applyPendingDeployment()", 1
+    )[0]
+
+    assert "availableCertificates || []" in render_select
+    assert "filter(c => c.profile !== 'extron-rsa')" not in render_select
+    assert "const deviceIp = identifiers.find(id => isIp(id))" in render_select
+    assert "`${device} (${deviceIp})`" in render_select
+    assert "Download Certificates for Manual Upload" in html
+    assert "certificate/device pair" in html
+
+
+def test_upload_tab_does_not_auto_start_toolbelt_dry_run():
+    html = page()
+    load_toolbelt = html.split("async function loadToolbeltDevices(forceDryRun)", 1)[1].split(
+        "function toolbeltStatusLabel", 1
+    )[0]
+
+    assert "if (forceDryRun && toolbeltDevices.length)" in load_toolbelt
+    assert "!toolbeltAutoDryRunStarted" not in load_toolbelt
+
+
+def test_device_card_local_ca_match_requires_device_ip_when_present():
+    html = page()
+    finder = html.split("function findLocalCaCertificate(device)", 1)[1].split(
+        "function openDeviceLocalCAModal", 1
+    )[0]
+
+    assert "const deviceIp = isIp(device.host)" in finder
+    assert "if (deviceIp) return certIdentifiers.includes(deviceIp)" in finder
+    assert "return certIdentifiers.some(id => identifiers.includes(id))" in finder
+
+
+def test_toolbelt_dry_run_clears_visible_stale_status_before_posting():
+    html = page()
+    runner = html.split("async function startToolbeltRun(mode)", 1)[1].split(
+        "async function pollToolbeltRun", 1
+    )[0]
+
+    assert "if (mode === 'dry-run')" in runner
+    assert "dry_run: null" in runner
+    assert "upload: null" in runner
+    assert "renderToolbeltDevices();" in runner.split("fetch(", 1)[0]
+
+
+def test_upload_rows_can_remove_prepared_local_ca_certificate():
+    html = page()
+    remove_function = html.split("async function removePreparedToolbeltDevice", 1)[1].split(
+        "function renderUploadDevices", 1
+    )[0]
+
+    assert "removePreparedToolbeltDevice" in html
+    assert "/api/ca/issued/${encodeURIComponent(certificateId)}" in html
+    assert "delete the associated Local CA device certificate" in html
+    assert "function removeCertificateFromClientState(certificateId)" in html
+    assert "availableCertificates = (availableCertificates || []).filter" in html
+    assert "toolbeltDevices = (toolbeltDevices || []).filter" in html
+    assert "removeCertificateFromClientState(certificateId)" in remove_function
+    assert "removeCertificateFromClientState(device.certificate_id)" in remove_function
+    assert "renderCerts(currentCertificates)" in html
+    assert "await refreshCertificateWorkflow()" in remove_function
+    assert "loadData();" not in remove_function
 
 
 def test_renewal_resume_actions_surface_errors_inline():

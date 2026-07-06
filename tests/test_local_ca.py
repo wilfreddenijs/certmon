@@ -79,3 +79,23 @@ def test_issue_extron_leaf_preserves_profile_and_combined_pem_order(tmp_path):
     assert combined.find(b"-----BEGIN RSA PRIVATE KEY-----") > combined.find(
         b"-----END CERTIFICATE-----"
     )
+
+
+def test_issue_multiple_extron_leaf_certificates_with_same_device_name(tmp_path):
+    database, store, service = make_service(tmp_path)
+    service.generate_ca()
+
+    first = service.issue(
+        identifiers=("IPLP", "10.10.116.172"),
+        profile_name="extron-rsa",
+        device_name="IPLP",
+    )
+    second = service.issue(
+        identifiers=("IPLP", "10.10.116.199"),
+        profile_name="extron-rsa",
+        device_name="IPLP",
+    )
+
+    assert first["certificate_id"] != second["certificate_id"]
+    assert store.has_certificate(first["certificate_id"])
+    assert store.has_certificate(second["certificate_id"])

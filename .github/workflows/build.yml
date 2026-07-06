@@ -1,9 +1,17 @@
 name: Build CertMon Windows EXE
+run-name: >-
+  Build CertMon Windows EXE
+  ${{ inputs.build_notes && format('- {0}', inputs.build_notes) || '' }}
 
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:   # allows manual trigger from GitHub UI
+    inputs:
+      build_notes:
+        description: "What changed or was fixed in this build"
+        required: false
+        type: string
 
 jobs:
   build:
@@ -11,23 +19,61 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write build info
+        shell: pwsh
+        run: |
+          @{
+            version = "1.0"
+            build_number = "${{ github.run_number }}"
+            run_id = "${{ github.run_id }}"
+            commit = "${{ github.sha }}"
+            branch = "${{ github.ref_name }}"
+          } | ConvertTo-Json | Set-Content -Path build_info.json -Encoding UTF8
+
       - name: Build EXE with PyInstaller
         run: |
           pyinstaller certmon.spec --clean --noconfirm
 
+      - name: Write build notes
+        shell: pwsh
+        env:
+          BUILD_NOTES_INPUT: ${{ inputs.build_notes }}
+        run: |
+          $notes = "$env:BUILD_NOTES_INPUT".Trim()
+          if (-not $notes) {
+            $notes = git log -5 --pretty=format:"- %s (%h)"
+          }
+          $content = @"
+          CertMon Windows build
+          =====================
+
+          Branch: ${{ github.ref_name }}
+          Commit: ${{ github.sha }}
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Changes / fixes:
+          $notes
+          "@
+          $content | Set-Content -Path dist/BUILD-NOTES.txt -Encoding UTF8
+          "### CertMon build notes" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          $notes >> $env:GITHUB_STEP_SUMMARY
+
       - name: Upload EXE as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CertMon-Windows
-          path: dist/CertMon.exe
+          path: |
+            dist/CertMon.exe
+            dist/BUILD-NOTES.txt
           retention-days: 30

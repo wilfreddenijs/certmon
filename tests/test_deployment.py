@@ -124,10 +124,10 @@ def test_upload_ui_uses_certificate_ids_instead_of_browser_pem_state():
     html = HTML.read_text(encoding="utf-8")
     push_function = html.split("async function pushCert()", 1)[1]
 
-    assert 'id="push-certificate-select"' in html
+    assert 'id="push-target-select"' in html
     assert 'id="cert-pem"' not in html
     assert 'id="key-pem"' not in html
-    assert "certificate_id," in html
+    assert "const certificate_id" in html
     assert "cert_pem" not in push_function
     assert "key_pem" not in push_function
 
