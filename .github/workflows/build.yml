@@ -29,6 +29,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write build info
+        shell: pwsh
+        run: |
+          @{
+            version = "1.0"
+            build_number = "${{ github.run_number }}"
+            run_id = "${{ github.run_id }}"
+            commit = "${{ github.sha }}"
+            branch = "${{ github.ref_name }}"
+          } | ConvertTo-Json | Set-Content -Path build_info.json -Encoding UTF8
+
       - name: Build EXE with PyInstaller
         run: |
           pyinstaller certmon.spec --clean --noconfirm

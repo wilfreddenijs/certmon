@@ -29,6 +29,13 @@ def test_wizard_has_endpoint_identifiers_issuers_profiles_and_dns_choices():
         assert required in html
 
 
+def test_header_shows_version_and_build_number_badge():
+    html = page()
+
+    assert 'class="build-badge"' in html
+    assert "v{{ build_info.version }} build {{ build_info.build_number }}" in html
+
+
 def test_wizard_has_external_ca_and_resumable_state_actions():
     html = page()
 

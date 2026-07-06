@@ -43,10 +43,26 @@ from certmon.toolbelt import ToolbeltBatchService
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
 
 
+APP_VERSION = "1.0"
+
+
 def resource_path(relative):
     """Get absolute path — works for dev and PyInstaller bundle."""
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, relative)
+
+
+def build_info():
+    path = Path(resource_path("build_info.json"))
+    fallback = {"version": APP_VERSION, "build_number": "dev"}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return fallback
+    return {
+        "version": str(data.get("version") or APP_VERSION),
+        "build_number": str(data.get("build_number") or "dev"),
+    }
 
 
 def data_dir():
@@ -355,7 +371,7 @@ def scan_range_worker(ip_range):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", build_info=build_info())
 
 
 @app.route("/api/data")

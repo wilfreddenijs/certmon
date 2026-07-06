@@ -52,6 +52,16 @@
 
   .logo span { color: var(--text); opacity: 0.5; }
 
+  .build-badge {
+    margin-left: 10px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
   .header-stats {
     display: flex;
     gap: 24px;
@@ -699,7 +709,10 @@
 <body>
 
 <header>
-  <div class="logo">Cert<span>/</span>Mon</div>
+  <div style="display:flex;align-items:baseline;gap:0;min-width:0">
+    <div class="logo">Cert<span>/</span>Mon</div>
+    <div class="build-badge">v{{ build_info.version }} build {{ build_info.build_number }}</div>
+  </div>
   <div class="header-stats" id="header-stats">
     <div class="stat-pill" style="cursor:pointer" title="Filter Devices by OK" onclick="filterDeviceStatusFromSummary('ok')"><div class="stat-dot" style="background:var(--ok)"></div><span id="stat-ok">0 OK</span></div>
     <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Warning" onclick="filterDeviceStatusFromSummary('warning')"><div class="stat-dot" style="background:var(--warning)"></div><span id="stat-warn">0 Warning</span></div>

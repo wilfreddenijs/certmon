@@ -16,6 +16,7 @@ a = Analysis(
     datas=[
         ('templates', 'templates'),
         ('app.py', '.'),
+        ('build_info.json', '.'),
     ] + flask_datas + jinja_datas + werkzeug_datas,
     hiddenimports=[
         'app',
