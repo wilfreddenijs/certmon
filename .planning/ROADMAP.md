@@ -4,13 +4,15 @@
 
 ### Phase 01 — Secure Certificate Renewal
 
-Status: in UAT/final acceptance.
+Status: complete.
 
 Source plan:
 
 - `docs/superpowers/plans/2026-06-13-certificate-renewal.md`
 
 Goal: replace generated renewal commands with secure Local CA, External CA/import, native ACME DNS-01 issuance, encrypted artifacts, explicit private-key export, and server-side deployment support.
+
+Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped for now.
 
 ## Future Phases
 

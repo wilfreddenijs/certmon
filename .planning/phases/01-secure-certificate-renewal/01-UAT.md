@@ -1,11 +1,11 @@
 ---
-status: diagnosed
+status: complete
 phase: 01-secure-certificate-renewal
 source:
   - docs/superpowers/plans/2026-06-13-certificate-renewal.md
   - docs/superpowers/specs/2026-06-13-certificate-renewal-design.md
 started: 2026-07-01T10:24:00+02:00
-updated: 2026-07-01T10:49:00+02:00
+updated: 2026-07-07T00:00:00+02:00
 ---
 
 ## Current Test
@@ -20,9 +20,9 @@ result: pass
 
 ### 2. Local CA Issuance
 expected: From the renewal wizard, choose CertMon Local CA for a private IP or internal hostname. CertMon should issue a Local CA certificate without internet access, store it securely, show the issued certificate in the renewal/job UI, and avoid returning private key material in ordinary JSON responses.
-result: issue
+result: pass
 reported: "When CertMon Local CA is selected, it asks for a certificate profile (fine), it then asks for confirmation on the selected parameters (Endpoint IP, Identifiers, Issuer and Certificate Profile, then it will put it in the renewals list with the option Deploy Now or Delete entry. 2 entries are created in the Upload tabm which leads me to belief that the certificates have been created"
-severity: major
+resolved: "Phase 04 consolidated Upload into one prepared-device Toolbelt list and moved manual upload into a collapsed fallback section. Follow-up UAT accepted the workflow/UI."
 
 ### 3. External CA CSR Pause And Completion
 expected: Choose External CA with the generated-CSR workflow. CertMon creates a CSR, pauses the job for a signed certificate, survives restart, and later accepts the signed certificate/chain without exposing the private key.
@@ -60,26 +60,16 @@ result: pass
 ## Summary
 
 total: 10
-passed: 8
-issues: 1
+passed: 9
+issues: 0
 pending: 0
 skipped: 1
 blocked: 0
 
 ## Gaps
 
-- truth: "Local CA issuance creates one issued certificate/job and does not create duplicate Upload entries"
-  status: failed
-  reason: "User reported: When CertMon Local CA is selected, it asks for a certificate profile and confirmation, then puts it in the renewals list with Deploy Now/Delete entry. Two entries are created in the Upload tab."
-  severity: major
-  test: 2
-  root_cause: "The Upload tab currently presents both the legacy manual target-device/push UI and the Toolbelt batch list derived from Local CA Extron certificates. A Local CA certificate can therefore appear through multiple upload surfaces even when the underlying certificate creation succeeded."
-  artifacts:
-    - path: "templates/index.html"
-      issue: "Upload tab renders upload-device-list/push controls and toolbelt-device-list as separate primary surfaces."
-    - path: "app.py"
-      issue: "Local CA issuance creates a renewal/certificate artifact; Toolbelt list derives from stored Local CA certificates rather than legacy upload_devices."
-  missing:
-    - "Consolidate Upload into one central prepared-device list and move manual upload into a fallback section."
-    - "Clarify Local CA issuance feedback so users can distinguish one issued certificate from multiple upload UI surfaces."
-  debug_session: "inline UAT diagnosis 2026-07-01"
+- none
+
+## Closeout
+
+Phase 01 UAT closed on 2026-07-07. The only recorded major issue, duplicate-looking Upload surfaces after Local CA issuance, was resolved by the Phase 04 device-first Upload workflow and accepted in follow-up testing.
