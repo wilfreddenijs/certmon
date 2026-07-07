@@ -18,13 +18,17 @@ Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped
 
 ### Phase 02 — Shared Server Mode and Team Local CA
 
-Status: planned, not started.
+Status: implemented, pending human LAN UAT.
 
 Plans:
 
 - `.planning/phases/02-shared-server-mode/02-01-PLAN.md` — Shared server mode and team Local CA
 
 Goal: turn CertMon into a safe shared LAN service with local users, roles, sessions, CSRF protection, user-aware audit logs, guarded private-key export, and shared Local CA trust bundle export.
+
+Implementation summary:
+
+- `.planning/phases/02-shared-server-mode/02-01-SUMMARY.md` â€” Shared server mode and team Local CA
 
 
 ### Phase 3: Toolbelt auto-upload UI with device progress and cancellation
