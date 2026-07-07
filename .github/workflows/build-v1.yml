@@ -1,6 +1,6 @@
-name: Build CertMon Windows EXE
+name: Build CertMon Windows EXE v1
 run-name: >-
-  Build CertMon Windows EXE
+  Build CertMon Windows EXE v1
   ${{ inputs.build_notes && format('- {0}', inputs.build_notes) || '' }}
 
 on:

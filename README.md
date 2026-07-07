@@ -69,7 +69,7 @@ python launcher.py
 
 ### GitHub Actions build
 
-The canonical Windows build is produced by the GitHub Actions workflow **Build CertMon Windows EXE**.
+The canonical Windows build is produced by the GitHub Actions workflow **Build CertMon Windows EXE v1**.
 
 - Pushes to `main` start a build automatically.
 - Manual builds can be started with **Run workflow** and an optional `build_notes` value.
@@ -89,9 +89,7 @@ v1.0 build <GitHub Actions run number>
 
 Local/source runs use `v1.0 build dev`.
 
-Current main build baseline: **build 118**, run <https://github.com/wilfreddenijs/certmon/actions/runs/28807063364>.
-
-Old feature-branch runs before build 111 were cleaned up from GitHub Actions. GitHub's built-in workflow run numbers cannot be reset for an existing workflow; deleted runs do not renumber later builds.
+The current build-number line was restarted by replacing the previous workflow with **Build CertMon Windows EXE v1**. GitHub's built-in workflow run numbers cannot be reset for an existing workflow, so a new workflow identity is used when the project intentionally starts a fresh build-number sequence.
 
 ### Local build
 
