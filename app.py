@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response
 
-from certmon.config import resolve_data_dir
+from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
 from certmon.ca_migration import migrate_legacy_ca_if_present
 from certmon.db import Database
 from certmon.artifacts import ArtifactStore
@@ -1768,6 +1768,15 @@ def test_device_connection():
 
 if __name__ == "__main__":
     os.makedirs(data_dir(), exist_ok=True)
-    port = int(os.environ.get("PORT", 5000))
-    print(f"CertMon running at http://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    try:
+        runtime = resolve_runtime_config(
+            frozen=getattr(sys, "frozen", False),
+            executable=Path(sys.executable),
+            source_dir=Path(__file__).resolve().parent,
+        )
+    except ConfigError as exc:
+        print(f"CertMon configuration error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    mode = "server" if runtime.server_mode else "desktop"
+    print(f"CertMon running in {mode} mode at http://{runtime.bind_host}:{runtime.port}")
+    app.run(host=runtime.bind_host, port=runtime.port, debug=False)

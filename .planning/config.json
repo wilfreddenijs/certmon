@@ -1,9 +1,9 @@
 {
   "project_code": "certmon",
   "workflow": {
-    "text_mode": true
+    "text_mode": true,
+    "_auto_chain_active": false
   },
   "current_phase": "01-secure-certificate-renewal",
   "next_phase": "02-shared-server-mode"
 }
-
