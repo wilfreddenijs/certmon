@@ -827,6 +827,7 @@
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
         <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
         <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
+        <div class="tab" onclick="switchTab('audit'); loadAudit()">Audit</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -894,6 +895,15 @@
 
     <div class="tab-panel" id="tab-ca">
       <div id="ca-content" style="max-width:860px"></div>
+    </div>
+
+    <div class="tab-panel" id="tab-audit">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+        <div class="section-title" style="margin-bottom:8px">Audit log</div>
+        <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
+        <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="loadAudit()">Refresh audit</button>
+        <div id="audit-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
     </div>
 
     <!-- Upload Tab -->
@@ -1203,6 +1213,36 @@
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     await initAuth();
+  }
+
+  async function loadAudit() {
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    list.innerHTML = '<div class="help-text">Loading audit...</div>';
+    const res = await fetch('/api/audit');
+    if (res.status === 403) {
+      list.innerHTML = '<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>';
+      return;
+    }
+    const events = await res.json();
+    if (!events.length) {
+      list.innerHTML = '<div class="help-text">No audit events yet.</div>';
+      return;
+    }
+    list.innerHTML = events.map(ev => {
+      const details = ev.details && Object.keys(ev.details).length
+        ? `<div class="help-text">${esc(JSON.stringify(ev.details))}</div>`
+        : '';
+      return `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <b style="color:${ev.success ? 'var(--accent)' : 'var(--warning)'}">${esc(ev.event_type)}</b>
+            <span class="help-text">${esc(ev.created_at || '')}</span>
+          </div>
+          <div class="help-text">user: ${esc(ev.username || 'system')} · source: ${esc(ev.source_ip || '-')} · target: ${esc(ev.target || '-')}</div>
+          ${details}
+        </div>`;
+    }).join('');
   }
 
   async function loadData() {

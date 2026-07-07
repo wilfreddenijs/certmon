@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response, g
 
 from certmon.auth import AuthError, AuthService, SESSION_COOKIE, public_user
+from certmon.audit import AuditService
 from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
 from certmon.csrf import CSRFError, CSRF_HEADER, csrf_token_for_session, validate_csrf
 from certmon.ca_migration import migrate_legacy_ca_if_present
@@ -94,6 +95,7 @@ DB_FILE = os.path.join(data_dir(), "certmon.db")
 database = Database(Path(DB_FILE))
 database.initialize()
 auth_service = AuthService(database)
+audit_service = AuditService(database)
 legacy_base = (
     Path(sys.executable).parent
     if getattr(sys, "frozen", False)
@@ -222,6 +224,17 @@ def server_mode_enabled():
 
 def current_user():
     return getattr(g, "current_user", None)
+
+
+def audit(event_type, *, target=None, success=True, details=None, user=None):
+    audit_service.record(
+        event_type,
+        user=current_user() if user is None else user,
+        source_ip=request.remote_addr if request else None,
+        target=target,
+        success=success,
+        details=details,
+    )
 
 
 AUTH_EXEMPT_PATHS = {
@@ -479,7 +492,9 @@ def auth_setup_first_admin():
             body.get("password", ""),
         )
     except AuthError as exc:
+        audit("first_admin_setup_failed", success=False, details={"reason": str(exc)}, user=body.get("username"))
         return jsonify({"error": str(exc)}), 400
+    audit("first_admin_created", target=user["username"], user=user)
     token, expires_at = auth_service.start_session(user)
     response = jsonify({"ok": True, "user": public_user(user)})
     response.set_cookie(
@@ -498,7 +513,9 @@ def auth_login():
     body = request.get_json(silent=True) or {}
     user = auth_service.authenticate(body.get("username", ""), body.get("password", ""))
     if user is None:
+        audit("login_failed", success=False, user=body.get("username"))
         return jsonify({"error": "Invalid username or password"}), 401
+    audit("login_succeeded", user=user)
     token, expires_at = auth_service.start_session(user)
     response = jsonify({"ok": True, "user": public_user(user)})
     response.set_cookie(
@@ -514,6 +531,7 @@ def auth_login():
 
 @app.route("/api/auth/logout", methods=["POST"])
 def auth_logout():
+    audit("logout", user=current_user())
     auth_service.end_session(request.cookies.get(SESSION_COOKIE))
     response = jsonify({"ok": True})
     response.delete_cookie(SESSION_COOKIE)
@@ -525,6 +543,13 @@ def auth_me():
     if server_mode_enabled() and current_user() is None:
         return jsonify({"error": "Authentication required"}), 401
     return jsonify({"user": public_user(current_user())})
+
+
+@app.route("/api/audit")
+def api_audit():
+    authorize(Permission.VIEW_AUDIT)
+    limit = min(int(request.args.get("limit", 200)), 500)
+    return jsonify(audit_service.list(limit=limit))
 
 
 @app.route("/api/data")
@@ -1057,8 +1082,10 @@ def ca_backup_export():
     try:
         package = local_ca_backup_service.export_package(passphrase)
     except LocalCABackupError as error:
+        audit("local_ca_backup_export_failed", success=False, details={"reason": str(error)})
         return jsonify({"error": str(error)}), 400
     database.record_event("local_ca_backup_exported", {})
+    audit("local_ca_backup_exported")
     return send_file(
         io.BytesIO(package),
         mimetype="application/json",
@@ -1083,11 +1110,14 @@ def ca_backup_import():
             replace=replace,
         )
     except LocalCABackupError as error:
+        audit("local_ca_backup_import_failed", success=False, details={"replace": replace, "reason": str(error)})
         return jsonify({"error": str(error)}), 400
     except Exception:
         app.logger.exception("Unexpected Local CA backup import failure")
+        audit("local_ca_backup_import_failed", success=False, details={"replace": replace, "reason": "unexpected"})
         return jsonify({"error": "Could not import Local CA backup. Check the file and passphrase."}), 400
     database.record_event("local_ca_backup_imported", {"replace": replace})
+    audit("local_ca_backup_imported", details={"replace": replace})
     return jsonify({"ok": True, **result})
 
 
@@ -1205,6 +1235,11 @@ def ca_extron_combined_zip():
                 "private_artifact_downloaded",
                 {"certificate_id": certificate_id, "artifact_name": "combined.pem", "bundle": "extron_zip"},
             )
+            audit(
+                "private_artifact_downloaded",
+                target=certificate_id,
+                details={"artifact_name": "combined.pem", "bundle": "extron_zip"},
+            )
     if count == 0:
         return jsonify({"error": "No Extron combined PEM certificates are available"}), 404
     buffer.seek(0)
@@ -1248,6 +1283,7 @@ def ca_delete_issued(certificate_id):
         database.record_event(
             "local_ca_certificate_deleted", {"certificate_id": certificate_id}
         )
+    audit("local_ca_certificate_deleted", target=certificate_id)
     return jsonify({"ok": True, "removed": [certificate_id]})
 
 
@@ -1397,8 +1433,10 @@ def create_cloudflare_credentials():
         if acme_orchestrator is not None:
             acme_orchestrator.dns_providers["cloudflare"] = provider
         config = database.get_setting(CloudflareDNSProvider.SETTING_ID)
+        audit("dns_credentials_updated", target="cloudflare", details={"zones": config["zones"]})
         return jsonify({"configured": True, "zones": config["zones"]}), 201
     except (TypeError, ValueError, CloudflareError):
+        audit("dns_credentials_update_failed", target="cloudflare", success=False)
         return jsonify({"error": "Cloudflare credentials are invalid"}), 400
 
 
@@ -1409,6 +1447,7 @@ def delete_cloudflare_credentials():
     database.delete_setting(CloudflareDNSProvider.SETTING_ID)
     if acme_orchestrator is not None:
         acme_orchestrator.dns_providers.pop("cloudflare", None)
+    audit("dns_credentials_deleted", target="cloudflare")
     return "", 204
 
 
@@ -1462,6 +1501,11 @@ def download_private_artifact(certificate_id, artifact_name):
     database.record_event(
         "private_artifact_downloaded",
         {"certificate_id": certificate_id, "artifact_name": artifact_name},
+    )
+    audit(
+        "private_artifact_downloaded",
+        target=certificate_id,
+        details={"artifact_name": artifact_name},
     )
     response = Response(data, status=200, mimetype="application/x-pem-file")
     filename = _certificate_download_filename(certificate_id, artifact_name)
@@ -1521,10 +1565,12 @@ def toolbelt_credentials(selector):
     if username == "admin" and str(password) == "":
         if hasattr(toolbelt_service, "delete_credentials"):
             toolbelt_service.delete_credentials(selector)
+        audit("toolbelt_device_credentials_cleared", target=selector)
         return jsonify({"ok": True, "credentials_saved": False})
     toolbelt_service.save_credentials(
         selector, username=username, password=str(password)
     )
+    audit("toolbelt_device_credentials_saved", target=selector, details={"username": username})
     return jsonify({"ok": True})
 
 
@@ -1541,6 +1587,7 @@ def toolbelt_default_credentials():
     toolbelt_service.save_default_credentials(
         username=username, password=str(password)
     )
+    audit("toolbelt_shared_credentials_saved", details={"username": username})
     return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
 
 
@@ -1559,6 +1606,7 @@ def toolbelt_dry_run():
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+    audit("toolbelt_dry_run_started", target=run.get("id"), details={"selectors": selectors})
     return jsonify({"ok": True, "run": run})
 
 
@@ -1577,6 +1625,7 @@ def toolbelt_upload():
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+    audit("toolbelt_upload_started", target=run.get("id"), details={"selectors": selectors})
     return jsonify({"ok": True, "run": run})
 
 
@@ -1599,6 +1648,7 @@ def toolbelt_stop(run_id):
     run = toolbelt_service.stop(run_id)
     if run is None:
         return jsonify({"error": "Run not found"}), 404
+    audit("toolbelt_run_stop_requested", target=run_id)
     return jsonify({"ok": True, "run": run})
 
 
@@ -1868,7 +1918,19 @@ def push_cert():
     try:
         result = deployment_service.deploy_certificate(device, certificate_id)
     except (KeyError, ValueError) as error:
+        audit(
+            "deployment_failed",
+            target=device_id,
+            success=False,
+            details={"certificate_id": certificate_id, "reason": str(error)},
+        )
         return jsonify({"error": str(error)}), 400
+    audit(
+        "deployment_started",
+        target=device_id,
+        success=result.ok,
+        details={"certificate_id": certificate_id},
+    )
 
     payload = {
         "ok": result.ok,

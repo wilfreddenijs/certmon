@@ -27,6 +27,7 @@ def test_database_enables_wal_foreign_keys_and_schema(tmp_path):
             "events",
             "users",
             "sessions",
+            "audit_events",
         } <= tables
     with db.connect() as conn:
         renewal_columns = {

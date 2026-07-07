@@ -100,6 +100,16 @@ class Database:
                     last_seen_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    username TEXT,
+                    source_ip TEXT,
+                    target TEXT,
+                    success INTEGER NOT NULL DEFAULT 1,
+                    details_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             conn.execute(
@@ -205,6 +215,58 @@ class Database:
     def delete_session(self, token_hash):
         with self.transaction() as conn:
             conn.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
+
+    def record_audit_event(
+        self,
+        *,
+        event_type,
+        username=None,
+        source_ip=None,
+        target=None,
+        success=True,
+        details=None,
+    ):
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_events(
+                    event_type, username, source_ip, target, success, details_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_type,
+                    username,
+                    source_ip,
+                    target,
+                    1 if success else 0,
+                    json.dumps(details or {}),
+                    _utc_now(),
+                ),
+            )
+
+    def list_audit_events(self, limit=200):
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_type, username, source_ip, target, success, details_json, created_at
+                FROM audit_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [
+            {
+                "event_type": row["event_type"],
+                "username": row["username"],
+                "source_ip": row["source_ip"],
+                "target": row["target"],
+                "success": bool(row["success"]),
+                "details": json.loads(row["details_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     @contextmanager
     def transaction(self):

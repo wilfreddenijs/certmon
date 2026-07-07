@@ -36,6 +36,17 @@ def test_header_shows_version_and_build_number_badge():
     assert "v{{ build_info.version }} build {{ build_info.build_number }}" in html
 
 
+def test_server_mode_login_and_audit_ui_are_present():
+    html = page()
+
+    assert 'id="auth-gate"' in html
+    assert "/api/auth/status" in html
+    assert "/api/auth/setup-first-admin" in html
+    assert "/api/auth/login" in html
+    assert "Audit log" in html
+    assert "/api/audit" in html
+
+
 def test_wizard_has_external_ca_and_resumable_state_actions():
     html = page()
 
