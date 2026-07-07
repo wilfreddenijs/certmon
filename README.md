@@ -4,9 +4,36 @@ CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certi
 
 ## Security Status
 
-This release is still single-user software and has no application authentication. Run it on `127.0.0.1` only. Do not bind it to a LAN interface or place it behind a shared reverse proxy until Phase 2 authentication and roles are implemented.
+CertMon starts in desktop mode by default and binds to `127.0.0.1`. LAN binding is refused unless explicit server mode is enabled.
 
 Certificate private keys, ACME account keys, device credentials, and Cloudflare tokens are encrypted at rest. Manual private-key export is intentionally separate, permission checked, and audited. Exported keys must be handled as secrets.
+
+## Shared Server Mode
+
+Server mode is for a trusted LAN or a protected reverse-proxy deployment. Do not expose CertMon directly to the public internet.
+
+Enable server mode explicitly:
+
+```powershell
+$env:CERTMON_SERVER_MODE = '1'
+$env:CERTMON_BIND_HOST = '0.0.0.0'
+$env:CERTMON_PORT = '5000'
+python launcher.py
+```
+
+On first open, create the first administrator account. After that, users sign in with local CertMon accounts. Server mode uses HttpOnly session cookies and CSRF tokens for state-changing requests.
+
+Roles:
+
+- **Viewer:** view inventory and public certificate/trust artifacts.
+- **Operator:** start renewals and deploy certificates.
+- **CA Admin:** manage Local CA operations and issue Local CA certificates.
+- **Security Admin:** download private-key material, manage DNS credentials, and view audit-sensitive operations.
+- **Admin:** all permissions, including user and audit administration.
+
+The UI shows the current signed-in user and exposes an Audit tab. Sensitive actions such as login/logout, Local CA backup import/export, DNS credential changes, private artifact downloads, Toolbelt upload runs, and deployment attempts are recorded with username and source IP. Secrets are redacted from audit details.
+
+For team trust distribution, use **Local CA** > **Trust bundle**. The bundle contains only the public CertMon Local CA certificate and installation notes; it does not contain the Local CA private key. Use encrypted CA backup export/import only between trusted CertMon installations that must share the same signing CA.
 
 ## Issuer Workflows
 
@@ -50,6 +77,8 @@ Development defaults to `data` beside the source. The packaged Windows build def
 Create and securely store a vault recovery package and its passphrase separately. The package can restore the installation master key after service-account migration; possession of both package and passphrase grants access to all encrypted CertMon secrets.
 
 `BackupService` creates a consistent SQLite online backup plus encrypted certificate artifacts and vault files. Its manifest is hash checked, HMAC authenticated, tied to a backup ID, and bound to the recovery package. Restore always writes to a new directory and verifies it completely. Stop CertMon and perform the final directory swap manually after verification.
+
+In server mode, the SQLite backup includes users, sessions, roles, settings, certificate metadata, and audit records. Backup and Local CA recovery operations require an authenticated role with the relevant private-key or CA-management permission.
 
 When moving CertMon to another Windows service account:
 
