@@ -1978,6 +1978,7 @@
           <span style="display:inline-flex;align-items:center;gap:6px">
             <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
             <span title="Windows manual trust install: download the CA cert, double-click the .crt, choose Install Certificate, choose Local Machine for all users or Current User for only you, select Place all certificates in the following store, browse to Trusted Root Certification Authorities, finish, confirm the warning, then restart the browser. Install only the public CA certificate, not a private key or backup file." style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--border);border-radius:50%;color:var(--accent);font-size:12px;font-weight:700;cursor:help">i</span>
+            <a href="/api/ca/trust-bundle" download="certmon-local-ca-trust-bundle.zip"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" title="Download the public Local CA trust bundle for another CertMon operator's Windows trust store. This ZIP does not include the Local CA private key.">⬇ Trust bundle</button></a>
           </span>
           <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
           <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>

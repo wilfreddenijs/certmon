@@ -1021,6 +1021,7 @@ def ca_status():
 
 @app.route("/api/ca/generate", methods=["POST"])
 def ca_generate():
+    authorize(Permission.MANAGE_LOCAL_CA)
     if local_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     if ca_exists():
@@ -1034,6 +1035,7 @@ def ca_generate():
 @app.route("/api/ca/install", methods=["POST"])
 def ca_install():
     """Install CA cert into Windows trust store."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
     if sys.platform != "win32":
@@ -1063,6 +1065,7 @@ def ca_install():
 @app.route("/api/ca/download-cert")
 def ca_download_cert():
     """Download the CA certificate for manual installation."""
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
     if not ca_exists():
         return jsonify({"error": "No CA found"}), 404
     data = artifact_store.read_public(
@@ -1073,8 +1076,39 @@ def ca_download_cert():
     return response
 
 
+@app.route("/api/ca/trust-bundle")
+def ca_trust_bundle():
+    """Download the public Local CA trust bundle for other team machines."""
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
+    if not ca_exists():
+        return jsonify({"error": "No CA found"}), 404
+    if artifact_store is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    cert_data = artifact_store.read_public(
+        LocalCAService.CA_CERTIFICATE_ID, "certificate.pem"
+    )
+    readme = (
+        "CertMon Local CA trust bundle\n\n"
+        "Install certmon-ca.crt into Windows Trusted Root Certification Authorities.\n"
+        "This bundle contains only the public CA certificate, not the Local CA private key.\n"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("certmon-ca.crt", cert_data)
+        archive.writestr("README.txt", readme)
+    buffer.seek(0)
+    audit("local_ca_trust_bundle_downloaded")
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="certmon-local-ca-trust-bundle.zip",
+    )
+
+
 @app.route("/api/ca/backup/export", methods=["POST"])
 def ca_backup_export():
+    authorize(Permission.DOWNLOAD_PRIVATE_KEY)
     if local_ca_backup_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     body = request.get_json(silent=True) or {}
@@ -1096,6 +1130,7 @@ def ca_backup_export():
 
 @app.route("/api/ca/backup/import", methods=["POST"])
 def ca_backup_import():
+    authorize(Permission.MANAGE_LOCAL_CA)
     if local_ca_backup_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     upload = request.files.get("backup")
