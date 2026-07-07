@@ -40,7 +40,14 @@ from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
 from certmon.local_ca_backup import LocalCABackupError, LocalCABackupService
 from certmon.naming import safe_slug
-from certmon.permissions import Permission, authorize
+from certmon.permissions import (
+    AuthorizationError,
+    Permission,
+    authorize,
+    permissions_for_roles,
+    reset_current_permissions,
+    set_current_permissions,
+)
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
 from certmon.toolbelt import ToolbeltBatchService
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
@@ -237,6 +244,7 @@ def csrf_secret():
 @app.before_request
 def require_server_authentication():
     g.current_user = None
+    g.permission_token = set_current_permissions(None)
     if not server_mode_enabled():
         return None
     token = request.cookies.get(SESSION_COOKIE)
@@ -245,11 +253,24 @@ def require_server_authentication():
         return None
     if g.current_user is None:
         return jsonify({"error": "Authentication required"}), 401
+    set_current_permissions(permissions_for_roles(g.current_user.get("roles", [])))
     try:
         validate_csrf(request, session_token=token, secret=csrf_secret())
     except CSRFError as exc:
         return jsonify({"error": str(exc)}), 403
     return None
+
+
+@app.teardown_request
+def reset_request_permissions(_exc):
+    token = getattr(g, "permission_token", None)
+    if token is not None:
+        reset_current_permissions(token)
+
+
+@app.errorhandler(AuthorizationError)
+def handle_authorization_error(exc):
+    return jsonify({"error": str(exc)}), 403
 
 
 def load_data():
