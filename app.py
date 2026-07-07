@@ -18,8 +18,9 @@ import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file, Response, g
 
+from certmon.auth import AuthError, AuthService, SESSION_COOKIE, public_user
 from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
 from certmon.ca_migration import migrate_legacy_ca_if_present
 from certmon.db import Database
@@ -83,6 +84,7 @@ DATA_FILE = os.path.join(data_dir(), "certmon_data.json")
 DB_FILE = os.path.join(data_dir(), "certmon.db")
 database = Database(Path(DB_FILE))
 database.initialize()
+auth_service = AuthService(database)
 legacy_base = (
     Path(sys.executable).parent
     if getattr(sys, "frozen", False)
@@ -192,6 +194,47 @@ ACME_PROD = "https://acme-v02.api.letsencrypt.org/directory"
 COMMON_TLS_PORTS = [443, 8443, 8080, 4443, 9443, 4523]
 
 scan_progress = {"running": False, "progress": 0, "total": 0, "current": ""}
+
+
+def current_runtime_config():
+    return resolve_runtime_config(
+        frozen=getattr(sys, "frozen", False),
+        executable=Path(sys.executable),
+        source_dir=Path(__file__).resolve().parent,
+    )
+
+
+def server_mode_enabled():
+    try:
+        return current_runtime_config().server_mode
+    except ConfigError:
+        return False
+
+
+def current_user():
+    return getattr(g, "current_user", None)
+
+
+AUTH_EXEMPT_PATHS = {
+    "/",
+    "/api/auth/status",
+    "/api/auth/setup-first-admin",
+    "/api/auth/login",
+}
+
+
+@app.before_request
+def require_server_authentication():
+    g.current_user = None
+    if not server_mode_enabled():
+        return None
+    token = request.cookies.get(SESSION_COOKIE)
+    g.current_user = auth_service.user_for_token(token)
+    if request.path in AUTH_EXEMPT_PATHS:
+        return None
+    if g.current_user is None:
+        return jsonify({"error": "Authentication required"}), 401
+    return None
 
 
 def load_data():
@@ -372,6 +415,75 @@ def scan_range_worker(ip_range):
 @app.route("/")
 def index():
     return render_template("index.html", build_info=build_info())
+
+
+@app.route("/api/auth/status")
+def auth_status():
+    return jsonify(
+        {
+            "server_mode": server_mode_enabled(),
+            "authenticated": current_user() is not None,
+            "first_admin_required": auth_service.first_admin_required(),
+            "user": public_user(current_user()),
+        }
+    )
+
+
+@app.route("/api/auth/setup-first-admin", methods=["POST"])
+def auth_setup_first_admin():
+    body = request.get_json(silent=True) or {}
+    try:
+        user = auth_service.create_first_admin(
+            body.get("username", ""),
+            body.get("password", ""),
+        )
+    except AuthError as exc:
+        return jsonify({"error": str(exc)}), 400
+    token, expires_at = auth_service.start_session(user)
+    response = jsonify({"ok": True, "user": public_user(user)})
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        expires=expires_at,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json(silent=True) or {}
+    user = auth_service.authenticate(body.get("username", ""), body.get("password", ""))
+    if user is None:
+        return jsonify({"error": "Invalid username or password"}), 401
+    token, expires_at = auth_service.start_session(user)
+    response = jsonify({"ok": True, "user": public_user(user)})
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        expires=expires_at,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    auth_service.end_session(request.cookies.get(SESSION_COOKIE))
+    response = jsonify({"ok": True})
+    response.delete_cookie(SESSION_COOKIE)
+    return response
+
+
+@app.route("/api/auth/me")
+def auth_me():
+    if server_mode_enabled() and current_user() is None:
+        return jsonify({"error": "Authentication required"}), 401
+    return jsonify({"user": public_user(current_user())})
 
 
 @app.route("/api/data")

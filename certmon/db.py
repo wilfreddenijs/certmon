@@ -85,6 +85,21 @@ class Database:
                     details_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    roles_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    disabled_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
                 """
             )
             conn.execute(
@@ -105,6 +120,91 @@ class Database:
         }
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def create_user(self, *, user_id, username, password_hash, roles):
+        now = _utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO users(id, username, password_hash, roles_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, username, password_hash, json.dumps(list(roles)), now),
+            )
+
+    def users_exist(self):
+        with self.connect() as conn:
+            row = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        return row is not None
+
+    def get_user_by_username(self, username):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username, password_hash, roles_json, created_at, disabled_at
+                FROM users WHERE lower(username)=lower(?)
+                """,
+                (username,),
+            ).fetchone()
+        return self._row_to_user(row)
+
+    def get_user(self, user_id):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username, password_hash, roles_json, created_at, disabled_at
+                FROM users WHERE id=?
+                """,
+                (user_id,),
+            ).fetchone()
+        return self._row_to_user(row)
+
+    def _row_to_user(self, row):
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "password_hash": row["password_hash"],
+            "roles": json.loads(row["roles_json"]),
+            "created_at": row["created_at"],
+            "disabled_at": row["disabled_at"],
+        }
+
+    def create_session(self, *, token_hash, user_id, expires_at):
+        now = _utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (token_hash, user_id, now, now, expires_at),
+            )
+
+    def get_session(self, token_hash):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT token_hash, user_id, created_at, last_seen_at, expires_at
+                FROM sessions WHERE token_hash=?
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def touch_session(self, token_hash):
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE sessions SET last_seen_at=? WHERE token_hash=?",
+                (_utc_now(), token_hash),
+            )
+
+    def delete_session(self, token_hash):
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
 
     @contextmanager
     def transaction(self):

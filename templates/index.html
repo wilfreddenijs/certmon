@@ -62,6 +62,38 @@
     white-space: nowrap;
   }
 
+  .auth-badge {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .auth-gate {
+    display: none;
+    min-height: calc(100vh - 65px);
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .auth-panel {
+    width: min(420px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    box-shadow: var(--card-shadow);
+  }
+
+  .auth-panel h1 {
+    font-family: 'Syne', sans-serif;
+    color: var(--accent);
+    font-size: 22px;
+    margin-bottom: 12px;
+  }
+
   .header-stats {
     display: flex;
     gap: 24px;
@@ -719,7 +751,28 @@
     <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Critical" onclick="filterDeviceStatusFromSummary('critical')"><div class="stat-dot" style="background:var(--critical)"></div><span id="stat-crit">0 Critical</span></div>
     <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Expired" onclick="filterDeviceStatusFromSummary('expired')"><div class="stat-dot" style="background:var(--expired)"></div><span id="stat-exp">0 Expired</span></div>
   </div>
+  <div class="auth-badge" id="auth-badge">
+    <span id="auth-user-label"></span>
+    <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="logout()">Logout</button>
+  </div>
 </header>
+
+<div class="auth-gate" id="auth-gate">
+  <div class="auth-panel">
+    <h1 id="auth-title">Sign in</h1>
+    <div class="help-text choice-help" id="auth-copy" style="margin-bottom:16px"></div>
+    <div class="form-group">
+      <label class="form-label" for="auth-username">Username</label>
+      <input id="auth-username" type="text" autocomplete="username" style="width:100%" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="auth-password">Password</label>
+      <input id="auth-password" type="password" autocomplete="current-password" style="width:100%" />
+    </div>
+    <div id="auth-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:10px"></div>
+    <button class="btn" id="auth-submit" onclick="submitAuth()">Sign in</button>
+  </div>
+</div>
 
 <div class="main">
   <!-- Sidebar -->
@@ -1077,6 +1130,67 @@
   let deviceCertificateFilter = 'all';
   const selectedDeviceKeys = new Set();
   const renewalActionResults = {};
+  let authState = { server_mode: false, authenticated: true, first_admin_required: false };
+
+  async function initAuth() {
+    const res = await fetch('/api/auth/status');
+    authState = await res.json();
+    const gate = document.getElementById('auth-gate');
+    const main = document.querySelector('.main');
+    const badge = document.getElementById('auth-badge');
+    const stats = document.getElementById('header-stats');
+    if (!authState.server_mode) {
+      gate.style.display = 'none';
+      main.style.display = 'grid';
+      badge.style.display = 'none';
+      stats.style.display = 'flex';
+      return true;
+    }
+    if (!authState.authenticated) {
+      main.style.display = 'none';
+      stats.style.display = 'none';
+      badge.style.display = 'none';
+      gate.style.display = 'flex';
+      document.getElementById('auth-title').textContent = authState.first_admin_required ? 'Create first admin' : 'Sign in';
+      document.getElementById('auth-copy').textContent = authState.first_admin_required
+        ? 'Server mode is enabled. Create the first administrator before using CertMon over the LAN.'
+        : 'Server mode is enabled. Sign in to use CertMon.';
+      document.getElementById('auth-submit').textContent = authState.first_admin_required ? 'Create admin' : 'Sign in';
+      return false;
+    }
+    gate.style.display = 'none';
+    main.style.display = 'grid';
+    stats.style.display = 'flex';
+    badge.style.display = 'flex';
+    document.getElementById('auth-user-label').textContent = `${authState.user.username} (${authState.user.roles.join(', ')})`;
+    return true;
+  }
+
+  async function submitAuth() {
+    const errorEl = document.getElementById('auth-error');
+    errorEl.textContent = '';
+    const endpoint = authState.first_admin_required ? '/api/auth/setup-first-admin' : '/api/auth/login';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('auth-username').value.trim(),
+        password: document.getElementById('auth-password').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errorEl.textContent = data.error || 'Authentication failed';
+      return;
+    }
+    document.getElementById('auth-password').value = '';
+    await startApp();
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    await initAuth();
+  }
 
   async function loadData() {
     const res = await fetch('/api/data');
@@ -2662,9 +2776,17 @@
     resultDiv.scrollIntoView({ behavior: 'smooth' });
   }
 
+  async function startApp() {
+    if (await initAuth()) {
+      await loadData();
+    }
+  }
+
   // Initial load + auto-refresh every 60s
-  loadData();
-  setInterval(loadData, 60000);
+  startApp();
+  setInterval(async () => {
+    if (!authState.server_mode || authState.authenticated) await loadData();
+  }, 60000);
 </script>
 </body>
 </html>

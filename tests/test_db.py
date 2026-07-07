@@ -22,10 +22,12 @@ def test_database_enables_wal_foreign_keys_and_schema(tmp_path):
         "settings",
         "devices",
         "renewal_jobs",
-        "certificates",
-        "secrets",
-        "events",
-    } <= tables
+            "certificates",
+            "secrets",
+            "events",
+            "users",
+            "sessions",
+        } <= tables
     with db.connect() as conn:
         renewal_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(renewal_jobs)")
