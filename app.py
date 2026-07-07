@@ -26,7 +26,7 @@ from certmon.audit import AuditService
 from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
 from certmon.csrf import CSRFError, CSRF_HEADER, csrf_token_for_session, validate_csrf
 from certmon.ca_migration import migrate_legacy_ca_if_present
-from certmon.db import Database
+from certmon.db import ConcurrentUpdateError, Database
 from certmon.artifacts import ArtifactStore
 from certmon.acme_service import (
     ACMEAccountService,
@@ -284,6 +284,11 @@ def reset_request_permissions(_exc):
 @app.errorhandler(AuthorizationError)
 def handle_authorization_error(exc):
     return jsonify({"error": str(exc)}), 403
+
+
+@app.errorhandler(ConcurrentUpdateError)
+def handle_concurrent_update_error(exc):
+    return jsonify({"error": "conflict", "message": str(exc)}), 409
 
 
 def load_data():
