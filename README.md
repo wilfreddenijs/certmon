@@ -67,6 +67,34 @@ python launcher.py
 
 ## Build Windows EXE
 
+### GitHub Actions build
+
+The canonical Windows build is produced by the GitHub Actions workflow **Build CertMon Windows EXE**.
+
+- Pushes to `main` start a build automatically.
+- Manual builds can be started with **Run workflow** and an optional `build_notes` value.
+- The Actions run title includes the supplied build notes when present.
+- The uploaded artifact is named `CertMon-Windows`.
+- The artifact contains:
+  - `CertMon.exe`
+  - `BUILD-NOTES.txt`
+
+`BUILD-NOTES.txt` records the branch, commit, Actions run URL, and either the supplied `build_notes` text or the latest five commit messages.
+
+The executable also embeds `build_info.json`. The app header shows this as:
+
+```text
+v1.0 build <GitHub Actions run number>
+```
+
+Local/source runs use `v1.0 build dev`.
+
+Current main build baseline: **build 118**, run <https://github.com/wilfreddenijs/certmon/actions/runs/28807063364>.
+
+Old feature-branch runs before build 111 were cleaned up from GitHub Actions. GitHub's built-in workflow run numbers cannot be reset for an existing workflow; deleted runs do not renumber later builds.
+
+### Local build
+
 ```powershell
 build.bat
 ```
