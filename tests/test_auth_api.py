@@ -80,7 +80,11 @@ def test_logout_removes_session(tmp_data_dir, monkeypatch):
         "/api/auth/setup-first-admin",
         json={"username": "admin", "password": "correct horse"},
     )
+    status = client.get("/api/auth/status").get_json()
 
-    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post(
+        "/api/auth/logout",
+        headers={status["csrf_header"]: status["csrf_token"]},
+    ).status_code == 200
 
     assert client.get("/api/data").status_code == 401

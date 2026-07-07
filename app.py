@@ -15,6 +15,7 @@ import io
 import base64
 import uuid
 import zipfile
+import secrets
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +23,7 @@ from flask import Flask, render_template, request, jsonify, send_file, Response,
 
 from certmon.auth import AuthError, AuthService, SESSION_COOKIE, public_user
 from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
+from certmon.csrf import CSRFError, CSRF_HEADER, csrf_token_for_session, validate_csrf
 from certmon.ca_migration import migrate_legacy_ca_if_present
 from certmon.db import Database
 from certmon.artifacts import ArtifactStore
@@ -223,6 +225,15 @@ AUTH_EXEMPT_PATHS = {
 }
 
 
+def csrf_secret():
+    value = database.get_setting("server:csrf-secret")
+    if value:
+        return value
+    value = secrets.token_hex(32)
+    database.put_setting("server:csrf-secret", value)
+    return value
+
+
 @app.before_request
 def require_server_authentication():
     g.current_user = None
@@ -234,6 +245,10 @@ def require_server_authentication():
         return None
     if g.current_user is None:
         return jsonify({"error": "Authentication required"}), 401
+    try:
+        validate_csrf(request, session_token=token, secret=csrf_secret())
+    except CSRFError as exc:
+        return jsonify({"error": str(exc)}), 403
     return None
 
 
@@ -419,12 +434,17 @@ def index():
 
 @app.route("/api/auth/status")
 def auth_status():
+    token = request.cookies.get(SESSION_COOKIE)
     return jsonify(
         {
             "server_mode": server_mode_enabled(),
             "authenticated": current_user() is not None,
             "first_admin_required": auth_service.first_admin_required(),
             "user": public_user(current_user()),
+            "csrf_header": CSRF_HEADER,
+            "csrf_token": csrf_token_for_session(token, csrf_secret())
+            if current_user() is not None
+            else None,
         }
     )
 

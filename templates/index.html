@@ -1132,6 +1132,19 @@
   const renewalActionResults = {};
   let authState = { server_mode: false, authenticated: true, first_admin_required: false };
 
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const method = (init.method || 'GET').toUpperCase();
+    const url = typeof input === 'string' ? input : input.url;
+    const sameOrigin = !/^https?:\/\//i.test(url || '') || (url || '').startsWith(window.location.origin);
+    if (authState && authState.csrf_token && sameOrigin && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const headers = new Headers(init.headers || {});
+      headers.set(authState.csrf_header || 'X-CertMon-CSRF', authState.csrf_token);
+      init = { ...init, headers };
+    }
+    return nativeFetch(input, init);
+  };
+
   async function initAuth() {
     const res = await fetch('/api/auth/status');
     authState = await res.json();
