@@ -12,6 +12,7 @@ import time
 import webbrowser
 import socket
 import traceback
+from pathlib import Path
 
 # When frozen by PyInstaller, add the bundle dir to sys.path
 if getattr(sys, 'frozen', False):
@@ -44,19 +45,27 @@ def find_free_port(start=5000):
     return start
 
 
-def wait_for_server(port, timeout=20):
+def browser_host_for_bind(bind_host):
+    normalized = (bind_host or "").strip().lower()
+    if normalized in {"0.0.0.0", "::", ""}:
+        return "127.0.0.1"
+    return bind_host
+
+
+def wait_for_server(host, port, timeout=20):
+    host = browser_host_for_bind(host)
     for _ in range(timeout * 10):
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+            with socket.create_connection((host, port), timeout=0.1):
                 return True
         except OSError:
             time.sleep(0.1)
     return False
 
 
-def start_flask(port):
+def start_flask(runtime):
     try:
-        log(f"Starting Flask on port {port}")
+        log(f"Starting Flask on {runtime.bind_host}:{runtime.port}")
         log(f"sys.path: {sys.path}")
         log(f"frozen: {getattr(sys, 'frozen', False)}")
         if getattr(sys, 'frozen', False):
@@ -69,10 +78,35 @@ def start_flask(port):
 
         app_module = initialize_application()
         log(f"app initialized OK, data_dir={app_module.data_dir()}")
-        app_module.app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+        app_module.app.run(
+            host=runtime.bind_host,
+            port=runtime.port,
+            debug=False,
+            use_reloader=False,
+            threaded=True,
+        )
     except Exception as e:
         log(f"FLASK ERROR: {e}")
         log(traceback.format_exc())
+
+
+def resolve_launcher_runtime():
+    from certmon.config import resolve_runtime_config
+
+    runtime = resolve_runtime_config(
+        frozen=getattr(sys, "frozen", False),
+        executable=Path(sys.executable),
+        source_dir=Path(__file__).resolve().parent,
+    )
+    if runtime.server_mode:
+        return runtime
+    return runtime.__class__(
+        data_dir=runtime.data_dir,
+        bind_host=runtime.bind_host,
+        port=find_free_port(runtime.port),
+        server_mode=runtime.server_mode,
+        auth_required=runtime.auth_required,
+    )
 
 
 def initialize_application():
@@ -90,7 +124,7 @@ def initialize_application():
     return app_module
 
 
-def make_tray_icon(port):
+def make_tray_icon(runtime):
     try:
         import pystray
         from PIL import Image, ImageDraw
@@ -101,14 +135,14 @@ def make_tray_icon(port):
         draw.text((20, 16), "CM", fill=(0, 229, 255))
 
         def open_browser(icon, item):
-            webbrowser.open(f"http://127.0.0.1:{port}")
+            webbrowser.open(f"http://{browser_host_for_bind(runtime.bind_host)}:{runtime.port}")
 
         def quit_app(icon, item):
             icon.stop()
             os._exit(0)
 
         menu = pystray.Menu(
-            pystray.MenuItem(f"Open CertMon (:{port})", open_browser, default=True),
+            pystray.MenuItem(f"Open CertMon (:{runtime.port})", open_browser, default=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", quit_app),
         )
@@ -140,20 +174,37 @@ def main():
         return
 
     log("CertMon starting")
-    port = find_free_port(5000)
-    log(f"Using port {port}")
+    try:
+        from certmon.config import ConfigError
 
-    flask_thread = threading.Thread(target=start_flask, args=(port,), daemon=True)
+        runtime = resolve_launcher_runtime()
+    except ConfigError as exc:
+        message = str(exc)
+        log(f"CONFIG ERROR: {message}")
+        print(message, file=sys.stderr)
+        try:
+            import tkinter.messagebox
+
+            tkinter.messagebox.showerror("CertMon configuration error", message)
+        except Exception:
+            pass
+        sys.exit(2)
+
+    log(f"Using {runtime.bind_host}:{runtime.port}")
+
+    flask_thread = threading.Thread(target=start_flask, args=(runtime,), daemon=True)
     flask_thread.start()
 
-    if wait_for_server(port):
+    browser_host = browser_host_for_bind(runtime.bind_host)
+    browser_url = f"http://{browser_host}:{runtime.port}"
+    if wait_for_server(runtime.bind_host, runtime.port):
         log("Server ready, opening browser")
-        webbrowser.open(f"http://127.0.0.1:{port}")
+        webbrowser.open(browser_url)
     else:
         log("Server did not respond after 20s, opening browser anyway")
-        webbrowser.open(f"http://127.0.0.1:{port}")
+        webbrowser.open(browser_url)
 
-    make_tray_icon(port)
+    make_tray_icon(runtime)
 
 
 if __name__ == "__main__":
