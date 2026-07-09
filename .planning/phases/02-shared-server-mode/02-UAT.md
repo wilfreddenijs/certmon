@@ -4,15 +4,15 @@ phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-07-09T13:45:00+02:00
+updated: 2026-07-09T14:32:00+02:00
 ---
 
 ## Current Test
 
-number: 2
-name: LAN Bind Safety Gate
+number: 6
+name: CSRF Protection
 expected: |
-  Start CertMon with a LAN or wildcard bind host but without `CERTMON_SERVER_MODE=1`. It should refuse startup with a clear configuration error instead of exposing the app unauthenticated on the LAN.
+  Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
 awaiting: user response
 
 ## Tests
@@ -23,20 +23,22 @@ result: [passed]
 
 ### 2. LAN Bind Safety Gate
 expected: Start CertMon with a LAN or wildcard bind host but without `CERTMON_SERVER_MODE=1`. It should refuse startup with a clear configuration error instead of exposing the app unauthenticated on the LAN.
-result: [issue-fixed-pending-retest]
-note: Initial UAT reported the Windows EXE still started. Root cause was `launcher.py` bypassing server-mode runtime config and hardcoding loopback startup. Fixed launcher runtime resolution and added regression tests.
+result: [passed]
+note: Initial UAT reported the Windows EXE still started. Root cause was `launcher.py` bypassing server-mode runtime config and hardcoding loopback startup. After fix/rebuild, CertMon did not start and logged `CONFIG ERROR: LAN binding requires CERTMON_SERVER_MODE=1. Default desktop mode is loopback-only.`
 
 ### 3. First Admin Setup
 expected: Start CertMon with `CERTMON_SERVER_MODE=1` and a LAN/loopback bind host using a fresh data directory. The first browser open should show a "Create first admin" flow; creating the admin signs you in and opens the normal app.
-result: [pending]
+result: [passed]
 
 ### 4. Login, Logout, And Session
 expected: In server mode after first-admin setup, logout should return to the sign-in screen. Wrong credentials should be rejected; correct credentials should sign in and restore app access.
-result: [pending]
+result: [passed]
+note: Follow-up polish requested: Enter key should submit Sign in; first-admin password setup should require entering the password twice with match validation.
 
 ### 5. Role Restrictions
 expected: A lower-privilege user such as Viewer should be able to view allowed public information but should not be able to start certificate issuance, manage CA/private-key operations, or view restricted audit/security actions.
-result: [pending]
+result: [blocked-issue]
+note: Roles and permission checks exist, but no admin UI/API exists yet to create additional users. End-to-end UAT cannot create a Viewer user through normal app workflow.
 
 ### 6. CSRF Protection
 expected: Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
@@ -61,13 +63,15 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 1
+passed: 4
 issues: 1
-pending: 8
+pending: 5
 skipped: 0
-blocked: 0
+blocked: 1
 
 ## Gaps
 
 - 2026-07-09: UAT 2 found that the Windows launcher bypassed the LAN bind safety gate. Fixed in `launcher.py`; retest required with a new build.
+- 2026-07-09: UAT 4 polish follow-up: Sign in should submit on Enter, and first-admin password setup should require password confirmation with a match check.
+- 2026-07-09: UAT 5 blocked: user/role management is not exposed in the admin UI/API, so role restrictions cannot be tested end-to-end with a Viewer user from normal workflows.
 <!-- YAML format for plan-phase --gaps consumption -->
