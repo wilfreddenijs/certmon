@@ -4,15 +4,15 @@ phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-07-09T14:32:00+02:00
+updated: 2026-07-09T15:42:00+02:00
 ---
 
 ## Current Test
 
-number: 6
-name: CSRF Protection
+number: 7
+name: Audit Log
 expected: |
-  Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
+  Sensitive actions such as login/logout, failed login, private-artifact download, DNS credential change, Toolbelt run, deployment, or Local CA backup/import should appear in the Audit tab with user/source IP and without secret values.
 awaiting: user response
 
 ## Tests
@@ -42,11 +42,13 @@ note: Roles and permission checks exist, but no admin UI/API exists yet to creat
 
 ### 6. CSRF Protection
 expected: Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
-result: [pending]
+result: [passed]
+note: Browser console XHR without CSRF header returned 403 with `{"error":"CSRF token required"}`. Earlier fetch-based helper was invalid because the UI wraps `window.fetch` and injects CSRF automatically; helper updated to use XMLHttpRequest.
 
 ### 7. Audit Log
 expected: Sensitive actions such as login/logout, failed login, private-artifact download, DNS credential change, Toolbelt run, deployment, or Local CA backup/import should appear in the Audit tab with user/source IP and without secret values.
-result: [pending]
+result: [issue-fixed-pending-retest]
+note: Initial UAT reported the Audit tab stayed indefinitely on "Loading audit...". Added UI timeout and error rendering for `/api/audit` failures so the tab no longer hangs silently.
 
 ### 8. Local CA Trust Bundle
 expected: The Local CA tab should offer a Trust bundle download. The downloaded ZIP should contain the public CA certificate and instructions only, not the Local CA private key.
@@ -63,9 +65,9 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 4
-issues: 1
-pending: 5
+passed: 5
+issues: 2
+pending: 3
 skipped: 0
 blocked: 1
 
@@ -74,4 +76,5 @@ blocked: 1
 - 2026-07-09: UAT 2 found that the Windows launcher bypassed the LAN bind safety gate. Fixed in `launcher.py`; retest required with a new build.
 - 2026-07-09: UAT 4 polish follow-up: Sign in should submit on Enter, and first-admin password setup should require password confirmation with a match check.
 - 2026-07-09: UAT 5 blocked: user/role management is not exposed in the admin UI/API, so role restrictions cannot be tested end-to-end with a Viewer user from normal workflows.
+- 2026-07-09: UAT 7 found the Audit tab could remain stuck on "Loading audit..." with no visible error. Added timeout/error UI; retest required with a new build.
 <!-- YAML format for plan-phase --gaps consumption -->
