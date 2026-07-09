@@ -45,6 +45,8 @@ def test_server_mode_login_and_audit_ui_are_present():
     assert "/api/auth/login" in html
     assert "Audit log" in html
     assert "/api/audit" in html
+    assert "Promise.race" in html
+    assert "audit-timeout" in html
     assert "Audit log request timed out after 10 seconds." in html
 
 

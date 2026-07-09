@@ -1219,10 +1219,14 @@
     const list = document.getElementById('audit-list');
     if (!list) return;
     list.innerHTML = '<div class="help-text">Loading audit...</div>';
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    let timeout = null;
     try {
-      const res = await fetch('/api/audit', { signal: controller.signal });
+      const res = await Promise.race([
+        fetch('/api/audit'),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('audit-timeout')), 10000);
+        })
+      ]);
       if (res.status === 403) {
         list.innerHTML = '<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>';
         return;
@@ -1252,12 +1256,12 @@
           </div>`;
       }).join('');
     } catch (err) {
-      const message = err && err.name === 'AbortError'
+      const message = err && err.message === 'audit-timeout'
         ? 'Audit log request timed out after 10 seconds.'
         : `Audit log failed to load. ${err && err.message ? err.message : ''}`;
       list.innerHTML = `<div class="help-text" style="color:var(--critical)">${esc(message)}</div>`;
     } finally {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
     }
   }
   async function loadData() {
