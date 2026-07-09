@@ -11,6 +11,11 @@
 // 2. The POST response status should be 403 because this request intentionally
 //    omits the X-CertMon-CSRF header required for state-changing server-mode
 //    requests.
+//
+// Note:
+// The CertMon UI wraps window.fetch and automatically injects the CSRF header
+// for normal same-origin UI requests. This helper therefore uses
+// XMLHttpRequest for the mutating request, so the CSRF header is truly absent.
 
 (async () => {
   const statusResponse = await fetch('/api/auth/status');
@@ -26,23 +31,26 @@
     return;
   }
 
-  const response = await fetch('/api/renew', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
+  const result = await new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/renew', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = () => resolve({
+      status: xhr.status,
+      body: xhr.responseText
+    });
+    xhr.onerror = () => resolve({
+      status: xhr.status || 0,
+      body: 'network error'
+    });
+    xhr.send(JSON.stringify({
       endpoint_host: '127.0.0.1',
       endpoint_port: 443,
       issuer_type: 'local-ca',
       identifiers: ['uat-csrf-test.local'],
       profile: 'generic-rsa'
-    })
+    }));
   });
 
-  const result = {
-    status: response.status,
-    body: await response.text()
-  };
   console.log('Mutating request without CSRF header:', result);
 })();
