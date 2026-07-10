@@ -1220,16 +1220,41 @@
     const list = document.getElementById('audit-list');
     if (!list) return;
     const sequence = ++auditLoadSequence;
-    list.innerHTML = '<div class="help-text">Loading audit... <span style="opacity:.7">(request timeout guard active)</span></div>';
+    list.innerHTML = '<div class="help-text">Loading audit... <span style="opacity:.7">(XHR timeout guard active)</span></div>';
     const showIfCurrent = html => {
       if (sequence === auditLoadSequence) list.innerHTML = html;
     };
-    const timeout = setTimeout(() => {
-      showIfCurrent('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
-    }, 10000);
     try {
-      const res = await nativeFetch('/api/audit?limit=100');
+      const res = await new Promise(resolve => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/audit?limit=100', true);
+        xhr.timeout = 10000;
+        xhr.onload = () => resolve({
+          ok: xhr.status >= 200 && xhr.status < 300,
+          status: xhr.status,
+          text: async () => xhr.responseText,
+          json: async () => JSON.parse(xhr.responseText || '[]')
+        });
+        xhr.onerror = () => resolve({
+          ok: false,
+          status: xhr.status || 0,
+          text: async () => 'Network error while loading audit log.',
+          json: async () => []
+        });
+        xhr.ontimeout = () => resolve({
+          ok: false,
+          status: 0,
+          timedOut: true,
+          text: async () => 'Audit log request timed out after 10 seconds.',
+          json: async () => []
+        });
+        xhr.send();
+      });
       if (sequence !== auditLoadSequence) return;
+      if (res.timedOut) {
+        showIfCurrent('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
+        return;
+      }
       if (res.status === 403) {
         showIfCurrent('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
         return;
@@ -1260,8 +1285,6 @@
       }).join(''));
     } catch (err) {
       showIfCurrent(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${esc(err && err.message ? err.message : '')}</div>`);
-    } finally {
-      clearTimeout(timeout);
     }
   }
   async function loadData() {

@@ -45,8 +45,9 @@ def test_server_mode_login_and_audit_ui_are_present():
     assert "/api/auth/login" in html
     assert "Audit log" in html
     assert "/api/audit" in html
-    assert "request timeout guard active" in html
-    assert "nativeFetch('/api/audit?limit=100')" in html
+    assert "XHR timeout guard active" in html
+    assert "xhr.timeout = 10000" in html
+    assert "xhr.open('GET', '/api/audit?limit=100', true)" in html
     assert "Audit log request timed out after 10 seconds." in html
 
 
