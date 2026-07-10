@@ -36,6 +36,28 @@ def test_login_and_logout_are_audited(tmp_data_dir, monkeypatch):
     assert "login_succeeded" in event_types
 
 
+def test_audit_endpoint_times_out_when_store_hangs(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir, monkeypatch)
+    client = module.app.test_client()
+    client.post(
+        "/api/auth/setup-first-admin",
+        json={"username": "admin", "password": "correct horse"},
+    )
+
+    def hang(*_args, **_kwargs):
+        import time
+
+        time.sleep(1)
+
+    monkeypatch.setattr(module, "AUDIT_QUERY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(module.audit_service, "list", hang)
+
+    response = client.get("/api/audit")
+
+    assert response.status_code == 504
+    assert response.get_json()["error"] == "Audit log query timed out"
+
+
 def test_viewer_cannot_read_audit_log(tmp_data_dir, monkeypatch):
     module = load_app(tmp_data_dir, monkeypatch)
     module.database.create_user(

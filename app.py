@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import threading
+import queue
 import ipaddress
 import io
 import base64
@@ -55,6 +56,7 @@ from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
 
 
 APP_VERSION = "1.0"
+AUDIT_QUERY_TIMEOUT_SECONDS = 5
 
 
 def resource_path(relative):
@@ -554,7 +556,23 @@ def auth_me():
 def api_audit():
     authorize(Permission.VIEW_AUDIT)
     limit = min(int(request.args.get("limit", 200)), 500)
-    return jsonify(audit_service.list(limit=limit))
+    result_queue = queue.Queue(maxsize=1)
+
+    def load_events():
+        try:
+            result_queue.put(("ok", audit_service.list(limit=limit)), block=False)
+        except Exception as exc:
+            result_queue.put(("error", str(exc)), block=False)
+
+    worker = threading.Thread(target=load_events, daemon=True)
+    worker.start()
+    try:
+        status, payload = result_queue.get(timeout=AUDIT_QUERY_TIMEOUT_SECONDS)
+    except queue.Empty:
+        return jsonify({"error": "Audit log query timed out"}), 504
+    if status == "error":
+        return jsonify({"error": payload}), 500
+    return jsonify(payload)
 
 
 @app.route("/api/data")

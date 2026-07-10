@@ -1261,7 +1261,10 @@
       }
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        showIfCurrent(`<div class="help-text" style="color:var(--critical)">Audit log failed to load (${res.status}). ${esc(text || 'Check certmon_error.log.')}</div>`);
+        const statusHint = res.status === 504
+          ? 'Audit backend query timed out.'
+          : `Audit log failed to load (${res.status}).`;
+        showIfCurrent(`<div class="help-text" style="color:var(--critical)">${esc(statusHint)} ${esc(text || 'Check certmon_error.log.')}</div>`);
         return;
       }
       const events = await res.json();
