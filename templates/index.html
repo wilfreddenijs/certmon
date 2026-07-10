@@ -1140,6 +1140,7 @@
   let deviceCertificateFilter = 'all';
   const selectedDeviceKeys = new Set();
   const renewalActionResults = {};
+  let auditLoadSequence = 0;
   let authState = { server_mode: false, authenticated: true, first_admin_required: false };
 
   const nativeFetch = window.fetch.bind(window);
@@ -1218,30 +1219,32 @@
   async function loadAudit() {
     const list = document.getElementById('audit-list');
     if (!list) return;
-    list.innerHTML = '<div class="help-text">Loading audit...</div>';
-    let timeout = null;
+    const sequence = ++auditLoadSequence;
+    list.innerHTML = '<div class="help-text">Loading audit... <span style="opacity:.7">(request timeout guard active)</span></div>';
+    const showIfCurrent = html => {
+      if (sequence === auditLoadSequence) list.innerHTML = html;
+    };
+    const timeout = setTimeout(() => {
+      showIfCurrent('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
+    }, 10000);
     try {
-      const res = await Promise.race([
-        fetch('/api/audit'),
-        new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error('audit-timeout')), 10000);
-        })
-      ]);
+      const res = await nativeFetch('/api/audit?limit=100');
+      if (sequence !== auditLoadSequence) return;
       if (res.status === 403) {
-        list.innerHTML = '<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>';
+        showIfCurrent('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
         return;
       }
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        list.innerHTML = `<div class="help-text" style="color:var(--critical)">Audit log failed to load (${res.status}). ${esc(text || 'Check certmon_error.log.')}</div>`;
+        showIfCurrent(`<div class="help-text" style="color:var(--critical)">Audit log failed to load (${res.status}). ${esc(text || 'Check certmon_error.log.')}</div>`);
         return;
       }
       const events = await res.json();
       if (!Array.isArray(events) || !events.length) {
-        list.innerHTML = '<div class="help-text">No audit events yet.</div>';
+        showIfCurrent('<div class="help-text">No audit events yet.</div>');
         return;
       }
-      list.innerHTML = events.map(ev => {
+      showIfCurrent(events.map(ev => {
         const details = ev.details && Object.keys(ev.details).length
           ? `<div class="help-text">${esc(JSON.stringify(ev.details))}</div>`
           : '';
@@ -1254,14 +1257,11 @@
             <div class="help-text">user: ${esc(ev.username || 'system')} &middot; source: ${esc(ev.source_ip || '-')} &middot; target: ${esc(ev.target || '-')}</div>
             ${details}
           </div>`;
-      }).join('');
+      }).join(''));
     } catch (err) {
-      const message = err && err.message === 'audit-timeout'
-        ? 'Audit log request timed out after 10 seconds.'
-        : `Audit log failed to load. ${err && err.message ? err.message : ''}`;
-      list.innerHTML = `<div class="help-text" style="color:var(--critical)">${esc(message)}</div>`;
+      showIfCurrent(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${esc(err && err.message ? err.message : '')}</div>`);
     } finally {
-      if (timeout) clearTimeout(timeout);
+      clearTimeout(timeout);
     }
   }
   async function loadData() {
