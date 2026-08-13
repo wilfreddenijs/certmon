@@ -1227,7 +1227,7 @@
     };
     const renderLoading = () => {
       const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      showIfCurrent(`<div class="help-text">Loading audit... <span style="opacity:.7">(XHR watchdog active, ${seconds}s)</span></div>`);
+      showIfCurrent(`<div class="help-text">Loading audit... <span style="opacity:.7">(deferred fetch watchdog active, ${seconds}s)</span></div>`);
     };
     const stop = () => {
       finished = true;
@@ -1268,35 +1268,33 @@
       if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
     }, 10000);
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', '/api/audit?limit=100', true);
-    xhr.timeout = 12000;
-    xhr.onload = () => {
+    setTimeout(() => {
       if (finished || sequence !== auditLoadSequence) return;
-      if (xhr.status === 403) {
-        renderFailure('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const statusHint = xhr.status === 504
-          ? 'Audit backend query timed out.'
-          : `Audit log failed to load (${xhr.status}).`;
-        renderFailure(`<div class="help-text" style="color:var(--critical)">${esc(statusHint)} ${esc(xhr.responseText || 'Check certmon_error.log.')}</div>`);
-        return;
-      }
-      try {
-        renderEvents(JSON.parse(xhr.responseText || '[]'));
-      } catch (err) {
-        renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log returned invalid JSON. ${esc(err && err.message ? err.message : '')}</div>`);
-      }
-    };
-    xhr.onerror = () => {
-      if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Network error while loading audit log.</div>');
-    };
-    xhr.ontimeout = () => {
-      if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 12 seconds.</div>');
-    };
-    xhr.send();
+      nativeFetch('/api/audit?limit=100')
+        .then(async res => {
+          if (finished || sequence !== auditLoadSequence) return;
+          if (res.status === 403) {
+            renderFailure('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
+            return;
+          }
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            const statusHint = res.status === 504
+              ? 'Audit backend query timed out.'
+              : `Audit log failed to load (${res.status}).`;
+            renderFailure(`<div class="help-text" style="color:var(--critical)">${esc(statusHint)} ${esc(text || 'Check certmon_error.log.')}</div>`);
+            return;
+          }
+          try {
+            renderEvents(await res.json());
+          } catch (err) {
+            renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log returned invalid JSON. ${esc(err && err.message ? err.message : '')}</div>`);
+          }
+        })
+        .catch(err => {
+          if (!finished) renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${esc(err && err.message ? err.message : '')}</div>`);
+        });
+    }, 250);
   }
   async function loadData() {
     const res = await fetch('/api/data');
