@@ -45,6 +45,9 @@ def test_server_mode_login_and_audit_ui_are_present():
     assert "/api/auth/login" in html
     assert "Audit log" in html
     assert "/api/audit" in html
+    assert "prepareAuditTab()" in html
+    assert "Test timer" in html
+    assert "Audit timer test completed after 10 seconds." in html
     assert "deferred fetch watchdog active" in html
     assert "setInterval" in html
     assert "nativeFetch('/api/audit?limit=100')" in html

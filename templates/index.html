@@ -827,7 +827,7 @@
         <div class="tab" onclick="switchTab('renewals')">Renewals</div>
         <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
         <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
-        <div class="tab" onclick="switchTab('audit'); loadAudit()">Audit</div>
+        <div class="tab" onclick="switchTab('audit'); prepareAuditTab()">Audit</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -902,6 +902,7 @@
         <div class="section-title" style="margin-bottom:8px">Audit log</div>
         <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
         <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="loadAudit()">Refresh audit</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="testAuditTimer()">Test timer</button>
         <div id="audit-list" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
     </div>
@@ -1214,6 +1215,32 @@
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     await initAuth();
+  }
+
+  function prepareAuditTab() {
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    list.innerHTML = '<div class="help-text">Audit tab ready. Click Refresh audit to load events, or Test timer to verify browser timers.</div>';
+  }
+
+  function testAuditTimer() {
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    const sequence = ++auditLoadSequence;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (sequence !== auditLoadSequence) {
+        clearInterval(timer);
+        return;
+      }
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      list.innerHTML = `<div class="help-text">Audit timer test: ${seconds}s</div>`;
+      if (seconds >= 10) {
+        clearInterval(timer);
+        list.innerHTML = '<div class="help-text" style="color:var(--accent)">Audit timer test completed after 10 seconds.</div>';
+      }
+    }, 1000);
+    list.innerHTML = '<div class="help-text">Audit timer test: 0s</div>';
   }
 
   function loadAudit() {
