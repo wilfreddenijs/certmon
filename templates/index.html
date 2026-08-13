@@ -1216,58 +1216,30 @@
     await initAuth();
   }
 
-  async function loadAudit() {
+  function loadAudit() {
     const list = document.getElementById('audit-list');
     if (!list) return;
     const sequence = ++auditLoadSequence;
-    list.innerHTML = '<div class="help-text">Loading audit... <span style="opacity:.7">(XHR timeout guard active)</span></div>';
+    const startedAt = Date.now();
+    let finished = false;
     const showIfCurrent = html => {
       if (sequence === auditLoadSequence) list.innerHTML = html;
     };
-    try {
-      const res = await new Promise(resolve => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', '/api/audit?limit=100', true);
-        xhr.timeout = 10000;
-        xhr.onload = () => resolve({
-          ok: xhr.status >= 200 && xhr.status < 300,
-          status: xhr.status,
-          text: async () => xhr.responseText,
-          json: async () => JSON.parse(xhr.responseText || '[]')
-        });
-        xhr.onerror = () => resolve({
-          ok: false,
-          status: xhr.status || 0,
-          text: async () => 'Network error while loading audit log.',
-          json: async () => []
-        });
-        xhr.ontimeout = () => resolve({
-          ok: false,
-          status: 0,
-          timedOut: true,
-          text: async () => 'Audit log request timed out after 10 seconds.',
-          json: async () => []
-        });
-        xhr.send();
-      });
-      if (sequence !== auditLoadSequence) return;
-      if (res.timedOut) {
-        showIfCurrent('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
-        return;
-      }
-      if (res.status === 403) {
-        showIfCurrent('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
-        return;
-      }
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        const statusHint = res.status === 504
-          ? 'Audit backend query timed out.'
-          : `Audit log failed to load (${res.status}).`;
-        showIfCurrent(`<div class="help-text" style="color:var(--critical)">${esc(statusHint)} ${esc(text || 'Check certmon_error.log.')}</div>`);
-        return;
-      }
-      const events = await res.json();
+    const renderLoading = () => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      showIfCurrent(`<div class="help-text">Loading audit... <span style="opacity:.7">(XHR watchdog active, ${seconds}s)</span></div>`);
+    };
+    const stop = () => {
+      finished = true;
+      clearInterval(interval);
+      clearTimeout(watchdog);
+    };
+    const renderFailure = html => {
+      stop();
+      showIfCurrent(html);
+    };
+    const renderEvents = events => {
+      stop();
       if (!Array.isArray(events) || !events.length) {
         showIfCurrent('<div class="help-text">No audit events yet.</div>');
         return;
@@ -1286,9 +1258,45 @@
             ${details}
           </div>`;
       }).join(''));
-    } catch (err) {
-      showIfCurrent(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${esc(err && err.message ? err.message : '')}</div>`);
-    }
+    };
+
+    renderLoading();
+    const interval = setInterval(() => {
+      if (!finished) renderLoading();
+    }, 1000);
+    const watchdog = setTimeout(() => {
+      if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
+    }, 10000);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/audit?limit=100', true);
+    xhr.timeout = 12000;
+    xhr.onload = () => {
+      if (finished || sequence !== auditLoadSequence) return;
+      if (xhr.status === 403) {
+        renderFailure('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const statusHint = xhr.status === 504
+          ? 'Audit backend query timed out.'
+          : `Audit log failed to load (${xhr.status}).`;
+        renderFailure(`<div class="help-text" style="color:var(--critical)">${esc(statusHint)} ${esc(xhr.responseText || 'Check certmon_error.log.')}</div>`);
+        return;
+      }
+      try {
+        renderEvents(JSON.parse(xhr.responseText || '[]'));
+      } catch (err) {
+        renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log returned invalid JSON. ${esc(err && err.message ? err.message : '')}</div>`);
+      }
+    };
+    xhr.onerror = () => {
+      if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Network error while loading audit log.</div>');
+    };
+    xhr.ontimeout = () => {
+      if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 12 seconds.</div>');
+    };
+    xhr.send();
   }
   async function loadData() {
     const res = await fetch('/api/data');
