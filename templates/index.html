@@ -903,6 +903,9 @@
         <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
         <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="loadAudit()">Refresh audit</button>
         <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="testAuditTimer()">Test timer</button>
+        <a href="/api/audit?limit=100" target="_blank" rel="noopener" style="display:inline-block;margin-bottom:12px">
+          <button class="btn btn-ghost" type="button" style="font-size:11px;padding:6px 10px">Open raw audit JSON</button>
+        </a>
         <div id="audit-list" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
     </div>
@@ -1254,7 +1257,7 @@
     };
     const renderLoading = () => {
       const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      showIfCurrent(`<div class="help-text">Loading audit... <span style="opacity:.7">(deferred fetch watchdog active, ${seconds}s)</span></div>`);
+      showIfCurrent(`<div class="help-text">Loading audit... <span style="opacity:.7">(delayed fetch watchdog active, ${seconds}s)</span></div>`);
     };
     const stop = () => {
       finished = true;
@@ -1321,7 +1324,7 @@
         .catch(err => {
           if (!finished) renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${esc(err && err.message ? err.message : '')}</div>`);
         });
-    }, 250);
+    }, 1500);
   }
   async function loadData() {
     const res = await fetch('/api/data');
