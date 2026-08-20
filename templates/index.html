@@ -952,9 +952,52 @@
     </div>
 
     <div class="tab-panel" id="tab-admin" hidden>
+      <section id="server-backup-section">
+        <div class="section-title" style="margin-bottom:6px">Server backup and recovery</div>
+        <div class="help-text choice-help" style="margin-bottom:16px">
+          Full server backups contain the database, encrypted certificate artifacts, vault files, and encrypted recovery material. This is separate from Local CA Export CA backup and Import CA backup.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;margin-bottom:24px">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;margin-bottom:10px">Download full backup</div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-export-passphrase">Passphrase</label>
+              <input id="server-backup-export-passphrase" type="password" autocomplete="new-password" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-export-confirmation">Confirm passphrase</label>
+              <input id="server-backup-export-confirmation" type="password" autocomplete="new-password" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <button class="btn" id="server-backup-export-button" type="button" onclick="downloadFullServerBackup()" disabled>Download full backup</button>
+            <div id="server-backup-export-result" role="status" class="help-text" style="min-height:20px;margin-top:10px"></div>
+          </div>
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;margin-bottom:10px">Stage restore</div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-restore-file">Backup ZIP</label>
+              <input id="server-backup-restore-file" type="file" accept=".zip,application/zip" style="width:100%" onchange="updateServerBackupControls()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-restore-passphrase">Passphrase</label>
+              <input id="server-backup-restore-passphrase" type="password" autocomplete="off" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-restore-confirmation">Confirm passphrase</label>
+              <input id="server-backup-restore-confirmation" type="password" autocomplete="off" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <label class="checkbox-row help-text" style="align-items:flex-start;margin-bottom:14px">
+              <input id="server-backup-restore-consent" type="checkbox" onchange="updateServerBackupControls()" />
+              <span>Validation creates a new staged directory. It does not switch or restart the running CertMon installation.</span>
+            </label>
+            <button class="btn" id="server-backup-restore-button" type="button" onclick="stageFullServerRestore()" disabled>Stage restore</button>
+          </div>
+        </div>
+        <div id="server-backup-restore-result" role="status" class="help-text" style="margin-bottom:24px"></div>
+      </section>
+      <section id="user-administration-section" style="border-top:1px solid var(--border);padding-top:20px">
       <div class="admin-toolbar">
         <div>
-          <div class="section-title" style="margin-bottom:6px">Administration</div>
+          <div class="section-title" style="margin-bottom:6px">Users</div>
           <div class="help-text">Local users and role assignments</div>
         </div>
         <div></div>
@@ -965,6 +1008,7 @@
       </div>
       <div id="administration-result" role="status" class="help-text" style="min-height:20px;margin-bottom:6px"></div>
       <div id="administration-users"></div>
+      </section>
     </div>
 
     <!-- Upload Tab -->
@@ -1360,13 +1404,113 @@
     );
   }
 
+  function canManageServerBackup() {
+    return Boolean(
+      authState.server_mode &&
+      authState.authenticated &&
+      authState.user &&
+      authState.user.roles.some(role => role === 'admin' || role === 'security_admin')
+    );
+  }
+
   function syncAdministrationVisibility() {
-    const visible = isAuthenticatedAdmin();
+    const visible = canManageServerBackup();
     const tab = document.getElementById('administration-tab');
     const panel = document.getElementById('tab-admin');
+    const users = document.getElementById('user-administration-section');
     if (tab) tab.hidden = !visible;
     if (panel) panel.hidden = !visible;
+    if (users) users.hidden = !isAuthenticatedAdmin();
     if (!visible && panel && panel.classList.contains('active')) switchTab('certs');
+  }
+
+  function updateServerBackupControls() {
+    const exportPassphrase = document.getElementById('server-backup-export-passphrase').value;
+    const exportConfirmation = document.getElementById('server-backup-export-confirmation').value;
+    document.getElementById('server-backup-export-button').disabled = !exportPassphrase || exportPassphrase !== exportConfirmation;
+
+    const restorePassphrase = document.getElementById('server-backup-restore-passphrase').value;
+    const restoreConfirmation = document.getElementById('server-backup-restore-confirmation').value;
+    const restoreFile = document.getElementById('server-backup-restore-file').files[0];
+    const consent = document.getElementById('server-backup-restore-consent').checked;
+    document.getElementById('server-backup-restore-button').disabled = !restoreFile || !restorePassphrase || restorePassphrase !== restoreConfirmation || !consent;
+  }
+
+  async function downloadFullServerBackup() {
+    const passphraseEl = document.getElementById('server-backup-export-passphrase');
+    const confirmationEl = document.getElementById('server-backup-export-confirmation');
+    const result = document.getElementById('server-backup-export-result');
+    const passphrase = passphraseEl.value;
+    if (!passphrase || passphrase !== confirmationEl.value) return;
+    result.style.color = 'var(--muted)';
+    result.textContent = 'Creating full server backup...';
+    const response = await fetch('/api/server-backup/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({passphrase})
+    });
+    passphraseEl.value = '';
+    confirmationEl.value = '';
+    updateServerBackupControls();
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'Could not create full server backup';
+      return;
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename=?"?([^";]+)"?/i);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = match ? match[1] : 'certmon-server-backup.zip';
+    document.body.appendChild(link);
+    link.click();
+    URL.revokeObjectURL(link.href);
+    link.remove();
+    result.style.color = 'var(--ok)';
+    result.textContent = 'Full server backup downloaded.';
+  }
+
+  async function stageFullServerRestore() {
+    const fileEl = document.getElementById('server-backup-restore-file');
+    const passphraseEl = document.getElementById('server-backup-restore-passphrase');
+    const confirmationEl = document.getElementById('server-backup-restore-confirmation');
+    const consentEl = document.getElementById('server-backup-restore-consent');
+    const result = document.getElementById('server-backup-restore-result');
+    const file = fileEl.files[0];
+    const passphrase = passphraseEl.value;
+    if (!file || !passphrase || passphrase !== confirmationEl.value || !consentEl.checked) return;
+    result.style.color = 'var(--muted)';
+    result.textContent = 'Validating and staging restore...';
+    const form = new FormData();
+    form.append('backup', file);
+    form.append('passphrase', passphrase);
+    const response = await fetch('/api/server-backup/restore', {method: 'POST', body: form});
+    passphraseEl.value = '';
+    confirmationEl.value = '';
+    consentEl.checked = false;
+    updateServerBackupControls();
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'Could not stage full server restore';
+      return;
+    }
+    result.replaceChildren();
+    result.style.color = 'var(--ok)';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Restore staged at: ';
+    const path = document.createElement('code');
+    path.textContent = data.staged_path;
+    const instructions = document.createElement('ol');
+    instructions.style.cssText = 'margin:12px 0 0 22px;color:var(--text);line-height:1.7';
+    (data.activation_steps || []).forEach(step => {
+      const item = document.createElement('li');
+      item.textContent = step;
+      instructions.appendChild(item);
+    });
+    result.append(heading, path, instructions);
   }
 
   async function loadUsers(message = '') {
@@ -2344,7 +2488,7 @@
   }
 
   function switchTab(name) {
-    if (name === 'admin' && !isAuthenticatedAdmin()) return;
+    if (name === 'admin' && !canManageServerBackup()) return;
     document.querySelectorAll('.tab[data-tab]').forEach(t => {
       t.classList.toggle('active', t.dataset.tab === name);
     });
@@ -2352,7 +2496,7 @@
     document.getElementById(`tab-${name}`).classList.add('active');
     if (name === 'ca') loadCA();
     if (name === 'audit') prepareAuditTab();
-    if (name === 'admin') loadUsers();
+    if (name === 'admin' && isAuthenticatedAdmin()) loadUsers();
     if (name === 'upload') {
       loadUploadDevices();
       loadAvailableCertificates();

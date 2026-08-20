@@ -28,10 +28,10 @@ Roles:
 - **Viewer:** view inventory and public certificate/trust artifacts.
 - **Operator:** start renewals and deploy certificates.
 - **CA Admin:** manage Local CA operations and issue Local CA certificates.
-- **Security Admin:** download private-key material, manage DNS credentials, and view audit-sensitive operations.
+- **Security Admin:** download private-key material, manage DNS credentials, view audit-sensitive operations, and manage full server backups.
 - **Admin:** all permissions, including user and audit administration.
 
-Signed-in administrators use the **Administration** tab to add local users, edit usernames and roles, enable or disable accounts, and reset passwords. CertMon accepts only the five roles above. At least one enabled administrator must always remain, so the final enabled administrator cannot be disabled or lose the Admin role.
+Signed-in Admin and Security Admin users can open the **Administration** tab for full server backup and recovery. Only Admin users see its Users section, where they can add local users, edit usernames and roles, enable or disable accounts, and reset passwords. CertMon accepts only the five roles above. At least one enabled administrator must always remain, so the final enabled administrator cannot be disabled or lose the Admin role.
 
 Disabling an account, changing its roles, or resetting its password revokes all active sessions for that user. The user must sign in again after a role or password change; disabled users cannot sign in until an administrator enables them. User-management audit events record the acting administrator, source IP, target account, and changed fields without recording passwords or password hashes.
 
@@ -78,18 +78,22 @@ Development defaults to `data` beside the source. The packaged Windows build def
 
 ## Recovery And Backup
 
-Create and securely store a vault recovery package and its passphrase separately. The package can restore the installation master key after service-account migration; possession of both package and passphrase grants access to all encrypted CertMon secrets.
+Use **Administration** > **Server backup and recovery** to download a full server backup. This operation requires the Admin or Security Admin role and a new passphrase entered twice. The ZIP contains a consistent SQLite online backup, encrypted certificate artifacts, encrypted vault files, a passphrase-encrypted recovery package, a versioned authenticated manifest, and recovery notes. The database includes users, applicable sessions, roles, settings, certificate metadata, and audit records. Plaintext private keys and decrypted secrets are never added to the package.
 
-`BackupService` creates a consistent SQLite online backup plus encrypted certificate artifacts and vault files. Its manifest is hash checked, HMAC authenticated, tied to a backup ID, and bound to the recovery package. Restore always writes to a new directory and verifies it completely. Stop CertMon and perform the final directory swap manually after verification.
+The full server backup is different from **Local CA** > **Export CA backup** and **Import CA backup**. Local CA backup moves only Local CA signing state between trusted installations. Full server backup preserves the complete CertMon installation state.
 
-In server mode, the SQLite backup includes users, sessions, roles, settings, certificate metadata, and audit records. Backup and Local CA recovery operations require an authenticated role with the relevant private-key or CA-management permission.
+Treat the backup ZIP and its passphrase as highly sensitive: together they grant access to encrypted CertMon material. Store them securely, preferably in separate controlled locations, and do not include either one in tickets, logs, or ordinary file shares. `CERTMON_MAX_BACKUP_UPLOAD_MB` controls the restore upload limit and defaults to 512 MiB.
 
-When moving CertMon to another Windows service account:
+**Stage restore** verifies the archive layout, package authentication, manifest, file hashes, backup ID, and representative vault key before writing. It restores into a new sibling directory and re-protects the vault master key for the Windows account running the current CertMon process. It never overwrites, renames, deletes, or activates the current `CERTMON_DATA_DIR` while CertMon is running.
 
-1. Restore the backup into a new directory.
-2. Restore the vault master key with the recovery package and passphrase.
-3. Rewrap the master key using DPAPI under the new service account.
-4. Verify representative certificates and keys before switching `CERTMON_DATA_DIR`.
+Activate a staged restore on Windows only after the web request has completed:
+
+1. Stop CertMon completely.
+2. Retain or rename the current data directory so it remains available for rollback.
+3. Rename the staged directory to the expected location, or configure `CERTMON_DATA_DIR` to point to the exact staged directory.
+4. Start CertMon and sign in.
+5. Verify the Local CA, representative certificates, encrypted artifacts, users, and audit history.
+6. Remove the old data directory only after the restored installation has been accepted.
 
 ## Run From Source
 

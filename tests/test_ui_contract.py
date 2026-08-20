@@ -76,6 +76,32 @@ def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
     assert "supportedRoles.map(role" in html
     for command in ("Add user", "Edit roles", "Enable", "Disable", "Reset password"):
         assert command in html
+
+
+def test_server_backup_ui_is_security_admin_visible_and_requires_confirmation():
+    html = page()
+    exporter = html.split("async function downloadFullServerBackup()", 1)[1].split(
+        "async function stageFullServerRestore()", 1
+    )[0]
+    restorer = html.split("async function stageFullServerRestore()", 1)[1].split(
+        "async function loadUsers", 1
+    )[0]
+
+    assert "Server backup and recovery" in html
+    assert "Download full backup" in html
+    assert "Stage restore" in html
+    assert "Export CA backup" in html
+    assert "Import CA backup" in html
+    assert "role === 'admin' || role === 'security_admin'" in html
+    assert 'id="user-administration-section"' in html
+    assert "users.hidden = !isAuthenticatedAdmin()" in html
+    assert "passphrase !== confirmationEl.value" in exporter
+    assert exporter.index("passphrase !== confirmationEl.value") < exporter.index("fetch('/api/server-backup/export'")
+    assert "passphrase !== confirmationEl.value || !consentEl.checked" in restorer
+    assert restorer.index("passphrase !== confirmationEl.value || !consentEl.checked") < restorer.index("fetch('/api/server-backup/restore'")
+    assert "path.textContent = data.staged_path" in restorer
+    assert "data.activation_steps" in restorer
+    assert "window.location" not in restorer
     assert "await loadUsers(successMessage)" in html
     assert "await loadUsers(currentlyDisabled ? 'User enabled'" in html
 
