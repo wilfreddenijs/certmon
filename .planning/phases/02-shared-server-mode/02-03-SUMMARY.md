@@ -97,6 +97,7 @@ status: complete
 - `py -3 -m compileall app.py certmon` - passed.
 - Embedded JavaScript syntax check with Node - passed.
 - Acceptance grep confirmed distinct full-server and Local CA controls, matching passphrase confirmation, staged-path rendering, activation steps, rollback instructions, and package sensitivity guidance.
+- `py -3 -m pytest -m "not acme_staging" -q --basetemp .tmp\pytest-execute-02-rerun -p no:cacheprovider` - 265 passed, 1 deselected after the launcher regression fix.
 
 ## Deviations from Plan
 
@@ -118,7 +119,15 @@ status: complete
 - **Verification:** API suite proves both export and upload temporary paths are removed.
 - **Commit:** `7898448`
 
-**Total deviations:** 2 auto-fixed bugs. **Impact:** Both fixes enforce planned cleanup behavior on Windows without expanding feature scope.
+**3. [Rule 1 - Bug] Preserved the backup upload limit in desktop launcher runtime reconstruction**
+- **Found during:** Phase regression gate
+- **Issue:** Desktop mode rebuilt `RuntimeConfig` with a free loopback port but omitted the newly required `max_backup_upload_bytes` field.
+- **Fix:** Copied the resolved limit into the rebuilt runtime and added a launcher regression assertion.
+- **Files modified:** `launcher.py`, `tests/test_launcher_config.py`
+- **Verification:** The complete non-staging suite passes with 265 tests.
+- **Commit:** `6afd584`
+
+**Total deviations:** 3 auto-fixed bugs. **Impact:** The fixes enforce planned cleanup behavior and preserve desktop startup without expanding feature scope.
 
 ## Known Stubs
 
