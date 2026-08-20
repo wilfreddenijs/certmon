@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,7 +91,9 @@ class BackupService:
         return hmac.new(key, payload, hashlib.sha256).hexdigest()
 
     def _backup_database(self, target):
-        with self.database.connect() as source, sqlite3.connect(target) as destination:
+        with closing(self.database.connect()) as source, closing(
+            sqlite3.connect(target)
+        ) as destination:
             source.backup(destination)
 
     def _build_manifest(self, root, backup_id, recovery_package):
