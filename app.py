@@ -22,7 +22,14 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response, g
 
-from certmon.auth import AuthError, AuthService, SESSION_COOKIE, public_user
+from certmon.auth import (
+    AuthError,
+    AuthNotFoundError,
+    AuthService,
+    SESSION_COOKIE,
+    SUPPORTED_ROLES,
+    public_user,
+)
 from certmon.audit import AuditService
 from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
 from certmon.csrf import CSRFError, CSRF_HEADER, csrf_token_for_session, validate_csrf
@@ -551,6 +558,185 @@ def auth_me():
     if server_mode_enabled() and current_user() is None:
         return jsonify({"error": "Authentication required"}), 401
     return jsonify({"user": public_user(current_user())})
+
+
+@app.route("/api/users", methods=["GET"])
+def api_users_list():
+    authorize(Permission.MANAGE_USERS)
+    return jsonify(
+        {
+            "users": [public_user(user) for user in auth_service.list_users()],
+            "supported_roles": list(SUPPORTED_ROLES),
+        }
+    )
+
+
+@app.route("/api/users", methods=["POST"])
+def api_users_create():
+    authorize(Permission.MANAGE_USERS)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        message = "JSON body must be an object"
+        audit("user_created_failed", success=False, details={"reason": message})
+        return jsonify({"error": message}), 400
+    unknown = set(body) - {"username", "password", "roles"}
+    if unknown:
+        message = f"Unsupported fields: {sorted(unknown)}"
+        audit(
+            "user_created_failed",
+            target=body.get("username"),
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    try:
+        user = auth_service.create_user(
+            body.get("username"), body.get("password"), body.get("roles")
+        )
+    except AuthError as exc:
+        audit(
+            "user_created_failed",
+            target=body.get("username"),
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 400
+    audit("user_created", target=user["username"], details={"roles": user["roles"]})
+    return jsonify({"ok": True, "user": public_user(user)}), 201
+
+
+@app.route("/api/users/<user_id>", methods=["PATCH"])
+def api_users_update(user_id):
+    authorize(Permission.MANAGE_USERS)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        message = "JSON body must be an object"
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    unknown = set(body) - {"username", "roles", "disabled"}
+    if unknown or not body:
+        message = (
+            f"Unsupported fields: {sorted(unknown)}"
+            if unknown
+            else "At least one field is required"
+        )
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    if "disabled" in body and not isinstance(body["disabled"], bool):
+        message = "disabled must be a boolean"
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+
+    changed_fields = [field for field in ("username", "roles", "disabled") if field in body]
+    try:
+        user = auth_service.database.get_user(user_id)
+        if user is None:
+            raise AuthNotFoundError("User not found")
+        if (
+            body.get("disabled") is True
+            and user.get("disabled_at") is None
+            and "admin" in user.get("roles", [])
+            and auth_service.database.count_enabled_admins() <= 1
+        ):
+            raise AuthError("Cannot disable the final enabled administrator")
+        if "username" in body or "roles" in body:
+            user = auth_service.update_user(
+                user_id,
+                username=body.get("username") if "username" in body else None,
+                roles=body.get("roles") if "roles" in body else None,
+            )
+        if "disabled" in body:
+            user = auth_service.set_user_enabled(user_id, not body["disabled"])
+    except AuthNotFoundError as exc:
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 404
+    except AuthError as exc:
+        event_type = _user_update_event(body, failed=True)
+        audit(
+            event_type,
+            target=user_id,
+            success=False,
+            details={"reason": str(exc), "changed_fields": changed_fields},
+        )
+        return jsonify({"error": str(exc)}), 400
+
+    event_type = _user_update_event(body)
+    details = {"changed_fields": changed_fields}
+    if "roles" in body:
+        details["roles"] = user["roles"]
+    audit(event_type, target=user["username"], details=details)
+    return jsonify({"ok": True, "user": public_user(user)})
+
+
+def _user_update_event(body, *, failed=False):
+    suffix = "_failed" if failed else ""
+    if set(body) == {"disabled"}:
+        return ("user_disabled" if body["disabled"] else "user_enabled") + suffix
+    return "user_updated" + suffix
+
+
+@app.route("/api/users/<user_id>/password", methods=["POST"])
+def api_users_password(user_id):
+    authorize(Permission.MANAGE_USERS)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        message = "JSON body must be an object"
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    if set(body) != {"password"}:
+        message = "Password endpoint accepts only password"
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    try:
+        user = auth_service.reset_user_password(user_id, body.get("password"))
+    except AuthNotFoundError as exc:
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 404
+    except AuthError as exc:
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 400
+    audit("user_password_reset", target=user["username"])
+    return jsonify({"ok": True, "user": public_user(user)})
 
 
 @app.route("/api/audit")

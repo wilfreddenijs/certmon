@@ -44,6 +44,23 @@ def test_server_mode_blocks_renew_without_csrf(tmp_data_dir, monkeypatch):
     assert response.get_json()["error"] == "CSRF token required"
 
 
+def test_server_mode_blocks_user_mutation_without_csrf(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir, monkeypatch)
+    client, _headers = authenticated_client(module)
+
+    response = client.post(
+        "/api/users",
+        json={
+            "username": "viewer",
+            "password": "correct horse",
+            "roles": ["viewer"],
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "CSRF token required"
+
+
 def test_server_mode_accepts_mutating_routes_with_csrf(tmp_data_dir, monkeypatch):
     module = load_app(tmp_data_dir, monkeypatch)
     client, headers = authenticated_client(module)

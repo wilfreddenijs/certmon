@@ -8,6 +8,7 @@ from certmon.auth import (
     public_user,
 )
 from certmon.db import Database
+from tests.test_auth_api import load_app
 
 
 @pytest.fixture
@@ -126,3 +127,176 @@ def test_one_admin_can_be_changed_when_another_enabled_admin_exists(auth):
     assert auth.update_user(first["id"], roles=["viewer"])["roles"] == ["viewer"]
     auth.create_user("third-admin", "correct horse", ["admin"])
     assert auth.set_user_enabled(second["id"], False)["disabled_at"] is not None
+
+
+def setup_admin_client(module):
+    client = module.app.test_client()
+    response = client.post(
+        "/api/auth/setup-first-admin",
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
+    )
+    assert response.status_code == 200
+    status = client.get("/api/auth/status").get_json()
+    return client, {status["csrf_header"]: status["csrf_token"]}
+
+
+def login_client(module, username, password):
+    client = module.app.test_client()
+    assert client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    ).status_code == 200
+    status = client.get("/api/auth/status").get_json()
+    return client, {status["csrf_header"]: status["csrf_token"]}
+
+
+def create_user_via_api(client, headers, username, roles):
+    response = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": username, "password": "correct horse", "roles": roles},
+    )
+    assert response.status_code == 201
+    return response.get_json()["user"]
+
+
+def test_user_management_api_lists_public_users_and_supported_roles(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir, monkeypatch)
+    client, _headers = setup_admin_client(module)
+
+    response = client.get("/api/users")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["supported_roles"] == list(SUPPORTED_ROLES)
+    assert payload["users"][0]["username"] == "admin"
+    assert "password_hash" not in payload["users"][0]
+
+
+def test_user_without_manage_users_is_forbidden_from_all_user_endpoints(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir, monkeypatch)
+    admin, headers = setup_admin_client(module)
+    viewer = create_user_via_api(admin, headers, "viewer", ["viewer"])
+    client, viewer_headers = login_client(module, "viewer", "correct horse")
+
+    responses = [
+        client.get("/api/users"),
+        client.post(
+            "/api/users",
+            headers=viewer_headers,
+            json={"username": "other", "password": "do not read", "roles": ["viewer"]},
+        ),
+        client.patch(
+            f"/api/users/{viewer['id']}",
+            headers=viewer_headers,
+            json={"roles": ["admin"]},
+        ),
+        client.post(
+            f"/api/users/{viewer['id']}/password",
+            headers=viewer_headers,
+            json={"password": "do not read"},
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [403, 403, 403, 403]
+
+
+def test_user_api_returns_stable_validation_and_missing_user_errors(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir, monkeypatch)
+    client, headers = setup_admin_client(module)
+
+    assert client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "bad", "password": "short", "roles": ["viewer"]},
+    ).status_code == 400
+    assert client.patch(
+        "/api/users/missing", headers=headers, json={"roles": ["viewer"]}
+    ).status_code == 404
+    assert client.patch(
+        "/api/users/missing", headers=headers, json={"unexpected": True}
+    ).status_code == 400
+    assert client.post(
+        "/api/users/missing/password",
+        headers=headers,
+        json={"password": "correct horse"},
+    ).status_code == 404
+
+
+def test_created_viewer_can_sign_in_but_cannot_start_renewal(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir, monkeypatch)
+    admin, headers = setup_admin_client(module)
+    create_user_via_api(admin, headers, "viewer", ["viewer"])
+    viewer, viewer_headers = login_client(module, "viewer", "correct horse")
+
+    response = viewer.post(
+        "/api/renew",
+        headers=viewer_headers,
+        json={
+            "endpoint_host": "192.168.1.20",
+            "endpoint_port": 443,
+            "issuer_type": "acme",
+            "identifiers": ["device.example.com"],
+            "profile": "generic-rsa",
+            "environment": "staging",
+            "dns_provider": "manual",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_role_change_invalidates_target_session(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir, monkeypatch)
+    admin, headers = setup_admin_client(module)
+    operator = create_user_via_api(admin, headers, "operator", ["operator"])
+    target, _target_headers = login_client(module, "operator", "correct horse")
+    assert target.get("/api/data").status_code == 200
+
+    updated = admin.patch(
+        f"/api/users/{operator['id']}",
+        headers=headers,
+        json={"roles": ["viewer"]},
+    )
+
+    assert updated.status_code == 200
+    assert target.get("/api/data").status_code == 401
+
+
+def test_user_management_audit_events_contain_no_password_material(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir, monkeypatch)
+    client, headers = setup_admin_client(module)
+    user = create_user_via_api(client, headers, "audited", ["viewer"])
+    assert client.post(
+        f"/api/users/{user['id']}/password",
+        headers=headers,
+        json={"password": "replacement secret"},
+    ).status_code == 200
+
+    events = client.get("/api/audit").get_json()
+    relevant = [event for event in events if event["event_type"].startswith("user_")]
+    serialized = str(relevant).lower()
+
+    assert {event["event_type"] for event in relevant} >= {
+        "user_created",
+        "user_password_reset",
+    }
+    assert all(event["username"] == "admin" for event in relevant)
+    assert all(event["source_ip"] for event in relevant)
+    assert all(event["target"] for event in relevant)
+    assert "replacement secret" not in serialized
+    assert "password_hash" not in serialized
+    assert "pbkdf2_sha256" not in serialized
