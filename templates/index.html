@@ -150,7 +150,7 @@
     margin-bottom: 8px;
   }
 
-  input[type="text"], input[type="number"] {
+  input[type="text"], input[type="number"], input[type="password"] {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -302,6 +302,40 @@
 
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+
+  .admin-toolbar, .admin-user-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.6fr) 110px minmax(300px, auto);
+    gap: 12px;
+    align-items: center;
+  }
+
+  .admin-toolbar {
+    margin-bottom: 12px;
+  }
+
+  .admin-user-row {
+    border-top: 1px solid var(--border);
+    padding: 12px 0;
+  }
+
+  .admin-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .role-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  @media (max-width: 980px) {
+    .admin-toolbar, .admin-user-row { grid-template-columns: 1fr; }
+    .admin-actions { justify-content: flex-start; }
+  }
 
   .device-filter-bar {
     display: flex;
@@ -761,16 +795,22 @@
   <div class="auth-panel">
     <h1 id="auth-title">Sign in</h1>
     <div class="help-text choice-help" id="auth-copy" style="margin-bottom:16px"></div>
-    <div class="form-group">
-      <label class="form-label" for="auth-username">Username</label>
-      <input id="auth-username" type="text" autocomplete="username" style="width:100%" />
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="auth-password">Password</label>
-      <input id="auth-password" type="password" autocomplete="current-password" style="width:100%" />
-    </div>
-    <div id="auth-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:10px"></div>
-    <button class="btn" id="auth-submit" onclick="submitAuth()">Sign in</button>
+    <form id="auth-form" onsubmit="event.preventDefault(); submitAuth()">
+      <div class="form-group">
+        <label class="form-label" for="auth-username">Username</label>
+        <input id="auth-username" type="text" autocomplete="username" style="width:100%" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="auth-password">Password</label>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" style="width:100%" oninput="updateAuthSubmitState()" />
+      </div>
+      <div class="form-group" id="auth-confirmation-group" hidden>
+        <label class="form-label" for="auth-password-confirmation">Confirm password</label>
+        <input id="auth-password-confirmation" type="password" autocomplete="new-password" minlength="8" style="width:100%" oninput="updateAuthSubmitState()" />
+      </div>
+      <div id="auth-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:10px"></div>
+      <button class="btn" type="submit" id="auth-submit">Sign in</button>
+    </form>
   </div>
 </div>
 
@@ -823,11 +863,12 @@
   <div class="content">
     <div class="tabs" style="justify-content:space-between">
       <div style="display:flex">
-        <div class="tab active" onclick="switchTab('certs')">Devices</div>
-        <div class="tab" onclick="switchTab('renewals')">Renewals</div>
-        <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
-        <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
-        <div class="tab" onclick="switchTab('audit'); prepareAuditTab()">Audit</div>
+        <div class="tab active" data-tab="certs" onclick="switchTab('certs')">Devices</div>
+        <div class="tab" data-tab="renewals" onclick="switchTab('renewals')">Renewals</div>
+        <div class="tab" data-tab="ca" onclick="switchTab('ca')">🔐 Local CA</div>
+        <div class="tab" data-tab="upload" onclick="switchTab('upload')">⬆ Upload</div>
+        <div class="tab" data-tab="audit" onclick="switchTab('audit')">Audit</div>
+        <div class="tab" data-tab="admin" id="administration-tab" onclick="switchTab('admin')" hidden>Administration</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -910,6 +951,22 @@
       </div>
     </div>
 
+    <div class="tab-panel" id="tab-admin" hidden>
+      <div class="admin-toolbar">
+        <div>
+          <div class="section-title" style="margin-bottom:6px">Administration</div>
+          <div class="help-text">Local users and role assignments</div>
+        </div>
+        <div></div>
+        <div></div>
+        <div class="admin-actions">
+          <button class="btn" id="administration-add-user" type="button" onclick="openAddUser()" disabled>Add user</button>
+        </div>
+      </div>
+      <div id="administration-result" role="status" class="help-text" style="min-height:20px;margin-bottom:6px"></div>
+      <div id="administration-users"></div>
+    </div>
+
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
       <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
@@ -985,6 +1042,35 @@
         </div>
       </details>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="user-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+    <div class="modal-title" id="user-modal-title">Add user</div>
+    <div class="form-group" id="user-username-group">
+      <label class="form-label" for="user-username">Username</label>
+      <input id="user-username" type="text" autocomplete="off" style="width:100%" />
+    </div>
+    <div class="form-group" id="user-roles-group">
+      <span class="form-label">Roles</span>
+      <div class="role-options" id="user-role-options"></div>
+    </div>
+    <div id="user-password-fields">
+      <div class="form-group">
+        <label class="form-label" for="user-password">Password</label>
+        <input id="user-password" type="password" autocomplete="new-password" minlength="8" style="width:100%" oninput="updateUserSubmitState()" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="user-password-confirmation">Confirm password</label>
+        <input id="user-password-confirmation" type="password" autocomplete="new-password" minlength="8" style="width:100%" oninput="updateUserSubmitState()" />
+      </div>
+    </div>
+    <div id="user-modal-error" role="alert" style="color:var(--critical);font-size:12px;min-height:18px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" type="button" onclick="closeUserModal()">Cancel</button>
+      <button class="btn" type="button" id="user-modal-submit" onclick="submitUserModal()">Add user</button>
     </div>
   </div>
 </div>
@@ -1146,6 +1232,11 @@
   const renewalActionResults = {};
   let auditLoadSequence = 0;
   let authState = { server_mode: false, authenticated: true, first_admin_required: false };
+  let authSubmitting = false;
+  let administrationUsers = [];
+  let supportedRoles = [];
+  let userModalMode = 'add';
+  let userModalTargetId = null;
 
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input, init = {}) => {
@@ -1172,6 +1263,7 @@
       main.style.display = 'grid';
       badge.style.display = 'none';
       stats.style.display = 'flex';
+      syncAdministrationVisibility();
       return true;
     }
     if (!authState.authenticated) {
@@ -1184,6 +1276,11 @@
         ? 'Server mode is enabled. Create the first administrator before using CertMon over the LAN.'
         : 'Server mode is enabled. Sign in to use CertMon.';
       document.getElementById('auth-submit').textContent = authState.first_admin_required ? 'Create admin' : 'Sign in';
+      document.getElementById('auth-confirmation-group').hidden = !authState.first_admin_required;
+      document.getElementById('auth-password').autocomplete = authState.first_admin_required ? 'new-password' : 'current-password';
+      document.getElementById('auth-password-confirmation').autocomplete = 'new-password';
+      syncAdministrationVisibility();
+      updateAuthSubmitState();
       return false;
     }
     gate.style.display = 'none';
@@ -1191,33 +1288,255 @@
     stats.style.display = 'flex';
     badge.style.display = 'flex';
     document.getElementById('auth-user-label').textContent = `${authState.user.username} (${authState.user.roles.join(', ')})`;
+    syncAdministrationVisibility();
     return true;
   }
 
+  function updateAuthSubmitState() {
+    const password = document.getElementById('auth-password').value;
+    const confirmation = document.getElementById('auth-password-confirmation').value;
+    const validSetup = password.length >= 8 && password === confirmation;
+    document.getElementById('auth-submit').disabled = authSubmitting || (authState.first_admin_required && !validSetup);
+  }
+
   async function submitAuth() {
+    if (authSubmitting) return;
     const errorEl = document.getElementById('auth-error');
     errorEl.textContent = '';
-    const endpoint = authState.first_admin_required ? '/api/auth/setup-first-admin' : '/api/auth/login';
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: document.getElementById('auth-username').value.trim(),
-        password: document.getElementById('auth-password').value
-      })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      errorEl.textContent = data.error || 'Authentication failed';
+    const passwordEl = document.getElementById('auth-password');
+    const confirmationEl = document.getElementById('auth-password-confirmation');
+    const password = passwordEl.value;
+    const passwordConfirmation = confirmationEl.value;
+    if (authState.first_admin_required && (password.length < 8 || password !== passwordConfirmation)) {
+      errorEl.textContent = password.length < 8
+        ? 'Password must be at least 8 characters'
+        : 'Passwords do not match';
+      updateAuthSubmitState();
       return;
     }
-    document.getElementById('auth-password').value = '';
-    await startApp();
+    authSubmitting = true;
+    updateAuthSubmitState();
+    const endpoint = authState.first_admin_required ? '/api/auth/setup-first-admin' : '/api/auth/login';
+    const payload = {
+      username: document.getElementById('auth-username').value.trim(),
+      password
+    };
+    if (authState.first_admin_required) payload.password_confirmation = passwordConfirmation;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      passwordEl.value = '';
+      confirmationEl.value = '';
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errorEl.textContent = data.error || 'Authentication failed';
+        return;
+      }
+      await startApp();
+    } catch (error) {
+      errorEl.textContent = error.message || 'Authentication failed';
+    } finally {
+      authSubmitting = false;
+      passwordEl.value = '';
+      confirmationEl.value = '';
+      updateAuthSubmitState();
+    }
   }
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     await initAuth();
+  }
+
+  function isAuthenticatedAdmin() {
+    return Boolean(
+      authState.server_mode &&
+      authState.authenticated &&
+      authState.user &&
+      authState.user.roles.includes('admin')
+    );
+  }
+
+  function syncAdministrationVisibility() {
+    const visible = isAuthenticatedAdmin();
+    const tab = document.getElementById('administration-tab');
+    const panel = document.getElementById('tab-admin');
+    if (tab) tab.hidden = !visible;
+    if (panel) panel.hidden = !visible;
+    if (!visible && panel && panel.classList.contains('active')) switchTab('certs');
+  }
+
+  async function loadUsers(message = '') {
+    if (!isAuthenticatedAdmin()) return;
+    const res = await fetch('/api/users');
+    const data = await res.json().catch(() => ({}));
+    const result = document.getElementById('administration-result');
+    if (!res.ok) {
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'Could not load users';
+      return;
+    }
+    administrationUsers = data.users || [];
+    supportedRoles = data.supported_roles || [];
+    document.getElementById('administration-add-user').disabled = supportedRoles.length === 0;
+    result.style.color = 'var(--ok)';
+    result.textContent = message;
+    renderAdministrationUsers();
+  }
+
+  function renderAdministrationUsers() {
+    const list = document.getElementById('administration-users');
+    list.innerHTML = administrationUsers.map(user => `
+      <div class="admin-user-row">
+        <strong>${escapeHtml(user.username)}</strong>
+        <div>${user.roles.map(role => `<span class="tag">${escapeHtml(role)}</span>`).join('')}</div>
+        <span class="status-badge ${user.disabled ? 'critical' : 'ok'}">${user.disabled ? 'Disabled' : 'Enabled'}</span>
+        <div class="admin-actions">
+          <button class="btn btn-ghost" type="button" onclick="openEditRoles('${escAttr(user.id)}')">Edit roles</button>
+          <button class="btn ${user.disabled ? 'btn-ghost' : 'btn-danger'}" type="button" onclick="toggleUserEnabled('${escAttr(user.id)}', ${user.disabled})">${user.disabled ? 'Enable' : 'Disable'}</button>
+          <button class="btn btn-ghost" type="button" onclick="openResetPassword('${escAttr(user.id)}')">Reset password</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderRoleCheckboxes(selectedRoles) {
+    document.getElementById('user-role-options').innerHTML = supportedRoles.map(role => `
+      <label class="checkbox-row">
+        <input type="checkbox" name="user-role" value="${escapeHtml(role)}" ${selectedRoles.includes(role) ? 'checked' : ''} onchange="updateUserSubmitState()" />
+        <span>${escapeHtml(role)}</span>
+      </label>
+    `).join('');
+  }
+
+  function openAddUser() {
+    userModalMode = 'add';
+    userModalTargetId = null;
+    document.getElementById('user-modal-title').textContent = 'Add user';
+    document.getElementById('user-modal-submit').textContent = 'Add user';
+    document.getElementById('user-username').value = '';
+    document.getElementById('user-username-group').hidden = false;
+    document.getElementById('user-roles-group').hidden = false;
+    document.getElementById('user-password-fields').hidden = false;
+    renderRoleCheckboxes(['viewer']);
+    openUserModal();
+  }
+
+  function openEditRoles(userId) {
+    const user = administrationUsers.find(item => item.id === userId);
+    if (!user) return;
+    userModalMode = 'edit';
+    userModalTargetId = userId;
+    document.getElementById('user-modal-title').textContent = 'Edit roles';
+    document.getElementById('user-modal-submit').textContent = 'Save user';
+    document.getElementById('user-username').value = user.username;
+    document.getElementById('user-username-group').hidden = false;
+    document.getElementById('user-roles-group').hidden = false;
+    document.getElementById('user-password-fields').hidden = true;
+    renderRoleCheckboxes(user.roles);
+    openUserModal();
+  }
+
+  function openResetPassword(userId) {
+    const user = administrationUsers.find(item => item.id === userId);
+    if (!user) return;
+    userModalMode = 'password';
+    userModalTargetId = userId;
+    document.getElementById('user-modal-title').textContent = `Reset password for ${user.username}`;
+    document.getElementById('user-modal-submit').textContent = 'Reset password';
+    document.getElementById('user-username-group').hidden = true;
+    document.getElementById('user-roles-group').hidden = true;
+    document.getElementById('user-password-fields').hidden = false;
+    openUserModal();
+  }
+
+  function openUserModal() {
+    document.getElementById('user-modal-error').textContent = '';
+    document.getElementById('user-password').value = '';
+    document.getElementById('user-password-confirmation').value = '';
+    document.getElementById('user-modal').classList.add('open');
+    updateUserSubmitState();
+  }
+
+  function closeUserModal() {
+    document.getElementById('user-password').value = '';
+    document.getElementById('user-password-confirmation').value = '';
+    document.getElementById('user-modal').classList.remove('open');
+  }
+
+  function selectedUserRoles() {
+    return Array.from(document.querySelectorAll('input[name="user-role"]:checked')).map(input => input.value);
+  }
+
+  function updateUserSubmitState() {
+    const submit = document.getElementById('user-modal-submit');
+    const rolesValid = userModalMode === 'password' || selectedUserRoles().length > 0;
+    const password = document.getElementById('user-password').value;
+    const confirmation = document.getElementById('user-password-confirmation').value;
+    const passwordValid = userModalMode === 'edit' || (password.length >= 8 && password === confirmation);
+    submit.disabled = !(rolesValid && passwordValid);
+  }
+
+  async function submitUserModal() {
+    const passwordEl = document.getElementById('user-password');
+    const confirmationEl = document.getElementById('user-password-confirmation');
+    const password = passwordEl.value;
+    const confirmation = confirmationEl.value;
+    if (userModalMode !== 'edit' && (password.length < 8 || password !== confirmation)) return;
+
+    let endpoint = '/api/users';
+    let method = 'POST';
+    let payload = {
+      username: document.getElementById('user-username').value.trim(),
+      roles: selectedUserRoles()
+    };
+    let successMessage = 'User added';
+    if (userModalMode === 'add') payload.password = password;
+    if (userModalMode === 'edit') {
+      endpoint = `/api/users/${encodeURIComponent(userModalTargetId)}`;
+      method = 'PATCH';
+      successMessage = 'User roles updated';
+    }
+    if (userModalMode === 'password') {
+      endpoint = `/api/users/${encodeURIComponent(userModalTargetId)}/password`;
+      payload = { password };
+      successMessage = 'Password reset; active sessions revoked';
+    }
+    passwordEl.value = '';
+    confirmationEl.value = '';
+    updateUserSubmitState();
+    const res = await fetch(endpoint, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      document.getElementById('user-modal-error').textContent = data.error || 'User change failed';
+      return;
+    }
+    closeUserModal();
+    await loadUsers(successMessage);
+  }
+
+  async function toggleUserEnabled(userId, currentlyDisabled) {
+    if (!currentlyDisabled && !confirm('Disable this user and revoke all active sessions?')) return;
+    const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled: !currentlyDisabled })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const result = document.getElementById('administration-result');
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'User change failed';
+      return;
+    }
+    await loadUsers(currentlyDisabled ? 'User enabled' : 'User disabled; active sessions revoked');
   }
 
   function prepareAuditTab() {
@@ -2025,12 +2344,15 @@
   }
 
   function switchTab(name) {
-    document.querySelectorAll('.tab').forEach((t, i) => {
-      t.classList.toggle('active', ['certs','renewals','ca','upload'][i] === name);
+    if (name === 'admin' && !isAuthenticatedAdmin()) return;
+    document.querySelectorAll('.tab[data-tab]').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === name);
     });
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${name}`).classList.add('active');
     if (name === 'ca') loadCA();
+    if (name === 'audit') prepareAuditTab();
+    if (name === 'admin') loadUsers();
     if (name === 'upload') {
       loadUploadDevices();
       loadAvailableCertificates();

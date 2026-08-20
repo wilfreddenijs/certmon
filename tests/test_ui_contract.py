@@ -60,6 +60,45 @@ def test_server_mode_login_and_audit_ui_are_present():
     assert "Audit log request timed out after 10 seconds." in html
 
 
+def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
+    html = page()
+    loader = html.split("async function loadUsers(message = '')", 1)[1].split(
+        "function renderAdministrationUsers", 1
+    )[0]
+
+    assert html.count('id="administration-tab"') == 1
+    assert 'id="tab-admin"' in html
+    assert "authState.user.roles.includes('admin')" in html
+    assert "if (!isAuthenticatedAdmin()) return;" in loader
+    assert "fetch('/api/users')" in loader
+    assert loader.index("if (!isAuthenticatedAdmin()) return;") < loader.index("fetch('/api/users')")
+    assert "data.supported_roles" in html
+    assert "supportedRoles.map(role" in html
+    for command in ("Add user", "Edit roles", "Enable", "Disable", "Reset password"):
+        assert command in html
+    assert "await loadUsers(successMessage)" in html
+    assert "await loadUsers(currentlyDisabled ? 'User enabled'" in html
+
+
+def test_authentication_form_supports_enter_and_confirmed_first_admin_setup():
+    html = page()
+    submit = html.split("async function submitAuth()", 1)[1].split(
+        "async function logout()", 1
+    )[0]
+
+    assert 'id="auth-form"' in html
+    assert 'onsubmit="event.preventDefault(); submitAuth()"' in html
+    assert 'type="submit" id="auth-submit"' in html
+    assert 'id="auth-password-confirmation"' in html
+    assert "authSubmitting" in submit
+    assert "password.length < 8 || password !== passwordConfirmation" in submit
+    assert "payload.password_confirmation = passwordConfirmation" in submit
+    assert submit.index("password !== passwordConfirmation") < submit.index("fetch(endpoint")
+    assert "passwordEl.value = '';" in submit
+    assert "confirmationEl.value = '';" in submit
+    assert "authState.first_admin_required ? 'new-password' : 'current-password'" in html
+
+
 def test_wizard_has_external_ca_and_resumable_state_actions():
     html = page()
 

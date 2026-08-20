@@ -120,8 +120,10 @@ def test_first_admin_setup_requires_matching_password_confirmation(
             "password_confirmation": "different horse",
         },
     )
+    non_object = client.post("/api/auth/setup-first-admin", json=["not", "an", "object"])
 
     assert missing.status_code == 400
     assert mismatch.status_code == 400
+    assert non_object.status_code == 400
     assert module.database.users_exist() is False
     assert module.database.get_session("anything") is None

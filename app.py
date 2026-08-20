@@ -500,6 +500,13 @@ def auth_status():
 @app.route("/api/auth/setup-first-admin", methods=["POST"])
 def auth_setup_first_admin():
     body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        audit(
+            "first_admin_setup_failed",
+            success=False,
+            details={"reason": "JSON body must be an object"},
+        )
+        return jsonify({"error": "JSON body must be an object"}), 400
     try:
         user = auth_service.create_first_admin(
             body.get("username", ""),
