@@ -5,7 +5,11 @@ def authenticated_client(module):
     client = module.app.test_client()
     client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
     status = client.get("/api/auth/status").get_json()
     return client, {status["csrf_header"]: status["csrf_token"]}

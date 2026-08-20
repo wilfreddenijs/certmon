@@ -25,7 +25,11 @@ def test_admin_role_can_start_certificate_workflows(tmp_data_dir, monkeypatch):
     client = module.app.test_client()
     client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
 
     response = client.post(

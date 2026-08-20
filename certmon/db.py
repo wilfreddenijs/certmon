@@ -134,6 +134,10 @@ class Database:
     def create_user(self, *, user_id, username, password_hash, roles):
         now = _utc_now()
         with self.transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM users WHERE lower(username)=lower(?)", (username,)
+            ).fetchone():
+                raise sqlite3.IntegrityError("username already exists")
             conn.execute(
                 """
                 INSERT INTO users(id, username, password_hash, roles_json, created_at)
@@ -141,6 +145,109 @@ class Database:
                 """,
                 (user_id, username, password_hash, json.dumps(list(roles)), now),
             )
+
+    def list_users(self):
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, username, password_hash, roles_json, created_at, disabled_at
+                FROM users ORDER BY username COLLATE NOCASE, id
+                """
+            ).fetchall()
+        return [self._row_to_user(row) for row in rows]
+
+    def update_user_identity_and_roles(
+        self,
+        user_id,
+        *,
+        username,
+        roles,
+        revoke_sessions=False,
+        protect_final_admin=False,
+    ):
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT roles_json, disabled_at FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            if current is None:
+                return False
+            if (
+                protect_final_admin
+                and current["disabled_at"] is None
+                and "admin" in json.loads(current["roles_json"])
+                and "admin" not in roles
+                and self._count_enabled_admins(conn) <= 1
+            ):
+                raise ValueError("Cannot remove the final enabled administrator")
+            duplicate = conn.execute(
+                "SELECT 1 FROM users WHERE lower(username)=lower(?) AND id != ?",
+                (username, user_id),
+            ).fetchone()
+            if duplicate:
+                raise sqlite3.IntegrityError("username already exists")
+            cursor = conn.execute(
+                "UPDATE users SET username=?, roles_json=? WHERE id=?",
+                (username, json.dumps(list(roles)), user_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            if revoke_sessions:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return True
+
+    def set_user_disabled(
+        self, user_id, disabled, *, revoke_sessions=False, protect_final_admin=False
+    ):
+        disabled_at = _utc_now() if disabled else None
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT roles_json, disabled_at FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            if current is None:
+                return False
+            if (
+                disabled
+                and protect_final_admin
+                and current["disabled_at"] is None
+                and "admin" in json.loads(current["roles_json"])
+                and self._count_enabled_admins(conn) <= 1
+            ):
+                raise ValueError("Cannot disable the final enabled administrator")
+            cursor = conn.execute(
+                "UPDATE users SET disabled_at=? WHERE id=?", (disabled_at, user_id)
+            )
+            if cursor.rowcount != 1:
+                return False
+            if revoke_sessions:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return True
+
+    def set_user_password_hash(self, user_id, password_hash, *, revoke_sessions=False):
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id)
+            )
+            if cursor.rowcount != 1:
+                return False
+            if revoke_sessions:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return True
+
+    def delete_sessions_for_user(self, user_id):
+        with self.transaction() as conn:
+            cursor = conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return cursor.rowcount
+
+    def count_enabled_admins(self):
+        with self.connect() as conn:
+            return self._count_enabled_admins(conn)
+
+    @staticmethod
+    def _count_enabled_admins(conn):
+        rows = conn.execute(
+            "SELECT roles_json FROM users WHERE disabled_at IS NULL"
+        ).fetchall()
+        return sum("admin" in json.loads(row["roles_json"]) for row in rows)
 
     def users_exist(self):
         with self.connect() as conn:

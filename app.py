@@ -497,6 +497,7 @@ def auth_setup_first_admin():
         user = auth_service.create_first_admin(
             body.get("username", ""),
             body.get("password", ""),
+            body.get("password_confirmation"),
         )
     except AuthError as exc:
         audit("first_admin_setup_failed", success=False, details={"reason": str(exc)}, user=body.get("username"))

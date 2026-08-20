@@ -40,7 +40,11 @@ def test_first_admin_setup_creates_session_and_allows_api(tmp_data_dir, monkeypa
 
     created = client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
 
     assert created.status_code == 200
@@ -55,7 +59,11 @@ def test_login_rejects_wrong_password_and_accepts_correct_password(tmp_data_dir,
     setup_client = module.app.test_client()
     setup_client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
 
     client = module.app.test_client()
@@ -78,7 +86,11 @@ def test_logout_removes_session(tmp_data_dir, monkeypatch):
     client = module.app.test_client()
     client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
     status = client.get("/api/auth/status").get_json()
 
@@ -88,3 +100,28 @@ def test_logout_removes_session(tmp_data_dir, monkeypatch):
     ).status_code == 200
 
     assert client.get("/api/data").status_code == 401
+
+
+def test_first_admin_setup_requires_matching_password_confirmation(
+    tmp_data_dir, monkeypatch
+):
+    module = load_app(tmp_data_dir, monkeypatch)
+    client = module.app.test_client()
+
+    missing = client.post(
+        "/api/auth/setup-first-admin",
+        json={"username": "admin", "password": "correct horse"},
+    )
+    mismatch = client.post(
+        "/api/auth/setup-first-admin",
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "different horse",
+        },
+    )
+
+    assert missing.status_code == 400
+    assert mismatch.status_code == 400
+    assert module.database.users_exist() is False
+    assert module.database.get_session("anything") is None

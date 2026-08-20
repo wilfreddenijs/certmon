@@ -13,7 +13,11 @@ def test_login_and_logout_are_audited(tmp_data_dir, monkeypatch):
     client = module.app.test_client()
     client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
     headers = auth_headers(client)
     client.post("/api/auth/logout", headers=headers)
@@ -41,7 +45,11 @@ def test_audit_endpoint_times_out_when_store_hangs(tmp_data_dir, monkeypatch):
     client = module.app.test_client()
     client.post(
         "/api/auth/setup-first-admin",
-        json={"username": "admin", "password": "correct horse"},
+        json={
+            "username": "admin",
+            "password": "correct horse",
+            "password_confirmation": "correct horse",
+        },
     )
 
     def hang(*_args, **_kwargs):
