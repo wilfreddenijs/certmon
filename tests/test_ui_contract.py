@@ -54,6 +54,9 @@ def test_server_mode_login_and_audit_ui_are_present():
     assert "setInterval" in html
     assert "nativeFetch('/api/audit?limit=100')" in html
     assert "Audit backend query timed out." in html
+    assert "Audit log render failed." in html
+    assert "escapeHtml(ev.event_type)" in html
+    assert "esc(ev.event_type)" not in html
     assert "Audit log request timed out after 10 seconds." in html
 
 

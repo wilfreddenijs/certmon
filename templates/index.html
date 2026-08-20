@@ -1269,25 +1269,31 @@
       showIfCurrent(html);
     };
     const renderEvents = events => {
-      stop();
-      if (!Array.isArray(events) || !events.length) {
-        showIfCurrent('<div class="help-text">No audit events yet.</div>');
-        return;
+      try {
+        if (!Array.isArray(events) || !events.length) {
+          stop();
+          showIfCurrent('<div class="help-text">No audit events yet.</div>');
+          return;
+        }
+        const html = events.map(ev => {
+          const details = ev.details && Object.keys(ev.details).length
+            ? `<div class="help-text">${escapeHtml(JSON.stringify(ev.details))}</div>`
+            : '';
+          return `
+            <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">
+              <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                <b style="color:${ev.success ? 'var(--accent)' : 'var(--warning)'}">${escapeHtml(ev.event_type)}</b>
+                <span class="help-text">${escapeHtml(ev.created_at || '')}</span>
+              </div>
+              <div class="help-text">user: ${escapeHtml(ev.username || 'system')} &middot; source: ${escapeHtml(ev.source_ip || '-')} &middot; target: ${escapeHtml(ev.target || '-')}</div>
+              ${details}
+            </div>`;
+        }).join('');
+        stop();
+        showIfCurrent(html);
+      } catch (err) {
+        renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log render failed. ${escapeHtml(err && err.message ? err.message : '')}</div>`);
       }
-      showIfCurrent(events.map(ev => {
-        const details = ev.details && Object.keys(ev.details).length
-          ? `<div class="help-text">${esc(JSON.stringify(ev.details))}</div>`
-          : '';
-        return `
-          <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">
-            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
-              <b style="color:${ev.success ? 'var(--accent)' : 'var(--warning)'}">${esc(ev.event_type)}</b>
-              <span class="help-text">${esc(ev.created_at || '')}</span>
-            </div>
-            <div class="help-text">user: ${esc(ev.username || 'system')} &middot; source: ${esc(ev.source_ip || '-')} &middot; target: ${esc(ev.target || '-')}</div>
-            ${details}
-          </div>`;
-      }).join(''));
     };
 
     renderLoading();
@@ -1312,17 +1318,17 @@
             const statusHint = res.status === 504
               ? 'Audit backend query timed out.'
               : `Audit log failed to load (${res.status}).`;
-            renderFailure(`<div class="help-text" style="color:var(--critical)">${esc(statusHint)} ${esc(text || 'Check certmon_error.log.')}</div>`);
+            renderFailure(`<div class="help-text" style="color:var(--critical)">${escapeHtml(statusHint)} ${escapeHtml(text || 'Check certmon_error.log.')}</div>`);
             return;
           }
           try {
             renderEvents(await res.json());
           } catch (err) {
-            renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log returned invalid JSON. ${esc(err && err.message ? err.message : '')}</div>`);
+            renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log returned invalid JSON. ${escapeHtml(err && err.message ? err.message : '')}</div>`);
           }
         })
         .catch(err => {
-          if (!finished) renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${esc(err && err.message ? err.message : '')}</div>`);
+          if (!finished) renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${escapeHtml(err && err.message ? err.message : '')}</div>`);
         });
     }, 1500);
   }
