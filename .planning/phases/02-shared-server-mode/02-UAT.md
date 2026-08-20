@@ -4,15 +4,15 @@ phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-07-09T15:42:00+02:00
+updated: 2026-08-20T13:58:00+02:00
 ---
 
 ## Current Test
 
-number: 7
-name: Audit Log
+number: 8
+name: Local CA Trust Bundle
 expected: |
-  Sensitive actions such as login/logout, failed login, private-artifact download, DNS credential change, Toolbelt run, deployment, or Local CA backup/import should appear in the Audit tab with user/source IP and without secret values.
+  The Local CA tab should offer a Trust bundle download. The downloaded ZIP should contain the public CA certificate and instructions only, not the Local CA private key.
 awaiting: user response
 
 ## Tests
@@ -47,8 +47,8 @@ note: Browser console XHR without CSRF header returned 403 with `{"error":"CSRF 
 
 ### 7. Audit Log
 expected: Sensitive actions such as login/logout, failed login, private-artifact download, DNS credential change, Toolbelt run, deployment, or Local CA backup/import should appear in the Audit tab with user/source IP and without secret values.
-result: [issue-fixed-pending-retest]
-note: Initial UAT reported the Audit tab stayed indefinitely on "Loading audit...". Added UI timeout and error rendering for `/api/audit` failures so the tab no longer hangs silently.
+result: [passed]
+note: UAT confirmed Audit tab renders `login_succeeded`, `login_failed`, `logout`, and `first_admin_created` with username and source IP, and without secrets. Earlier loading issue was fixed by replacing missing `esc()` helper usage with `escapeHtml()`.
 
 ### 8. Local CA Trust Bundle
 expected: The Local CA tab should offer a Trust bundle download. The downloaded ZIP should contain the public CA certificate and instructions only, not the Local CA private key.
@@ -65,9 +65,9 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 5
-issues: 2
-pending: 3
+passed: 6
+issues: 1
+pending: 2
 skipped: 0
 blocked: 1
 
