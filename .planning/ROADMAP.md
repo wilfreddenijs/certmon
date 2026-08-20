@@ -18,9 +18,15 @@ Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped
 
 ### Phase 02 — Shared Server Mode and Team Local CA
 
-Status: implemented; human UAT completed with two major gaps; gap-closure plans ready for execution.
+Status: implemented; human UAT completed; gap closure in progress with one plan remaining.
 
 Plans:
+
+- [x] 02-01-PLAN.md
+- [x] 02-02-PLAN.md
+- [ ] 02-03-PLAN.md
+
+2/3 plans executed
 
 **Wave 1 — completed implementation**
 
@@ -28,7 +34,7 @@ Plans:
 
 **Wave 2 — gap closure** *(depends on Wave 1)*
 
-- [ ] `.planning/phases/02-shared-server-mode/02-02-PLAN.md` — User and role administration plus authentication polish
+- [x] `.planning/phases/02-shared-server-mode/02-02-PLAN.md` — User and role administration plus authentication polish
 
 **Wave 3 — gap closure** *(depends on Wave 2)*
 
@@ -44,8 +50,8 @@ Goal: turn CertMon into a safe shared LAN service with local users, roles, sessi
 Implementation summary:
 
 - `.planning/phases/02-shared-server-mode/02-01-SUMMARY.md` â€” Shared server mode and team Local CA
+- `.planning/phases/02-shared-server-mode/02-02-SUMMARY.md` — User and role administration plus authentication polish
 - `.planning/phases/02-shared-server-mode/02-UAT.md` — Human UAT: 8 passed, 2 major gaps captured in Plans 02-02 and 02-03
-
 
 ### Phase 3: Toolbelt auto-upload UI with device progress and cancellation
 
@@ -55,6 +61,7 @@ Implementation summary:
 **Plans:** 1 plan
 
 Plans:
+
 - [x] `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation
 
 ### Phase 04: Extron workflow/UI simplification
@@ -65,4 +72,5 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
+
 - [x] `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-01-PLAN.md` — Device-first Extron Local CA and Upload workflow
