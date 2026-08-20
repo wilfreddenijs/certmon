@@ -106,6 +106,7 @@ def resolve_launcher_runtime():
         port=find_free_port(runtime.port),
         server_mode=runtime.server_mode,
         auth_required=runtime.auth_required,
+        max_backup_upload_bytes=runtime.max_backup_upload_bytes,
     )
 
 

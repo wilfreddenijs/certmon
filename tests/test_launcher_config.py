@@ -29,6 +29,7 @@ def test_launcher_desktop_mode_keeps_free_loopback_port(monkeypatch):
     monkeypatch.delenv("CERTMON_SERVER_MODE", raising=False)
     monkeypatch.delenv("CERTMON_BIND_HOST", raising=False)
     monkeypatch.setenv("CERTMON_PORT", "5090")
+    monkeypatch.setenv("CERTMON_MAX_BACKUP_UPLOAD_MB", "7")
     monkeypatch.setattr(launcher, "find_free_port", lambda start: start + 1)
 
     runtime = launcher.resolve_launcher_runtime()
@@ -37,3 +38,4 @@ def test_launcher_desktop_mode_keeps_free_loopback_port(monkeypatch):
     assert runtime.auth_required is False
     assert runtime.bind_host == "127.0.0.1"
     assert runtime.port == 5091
+    assert runtime.max_backup_upload_bytes == 7 * 1024 * 1024
