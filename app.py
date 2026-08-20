@@ -17,10 +17,13 @@ import base64
 import uuid
 import zipfile
 import secrets
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_file, Response, g
+from werkzeug.wsgi import ClosingIterator
 
 from certmon.auth import (
     AuthError,
@@ -58,6 +61,11 @@ from certmon.permissions import (
     set_current_permissions,
 )
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
+from certmon.server_backup import (
+    ServerBackupConflictError,
+    ServerBackupPackageError,
+    ServerBackupPackageService,
+)
 from certmon.toolbelt import ToolbeltBatchService
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
 
@@ -147,6 +155,13 @@ def bootstrap_services(
     )
     local_ca_service = LocalCAService(database, artifact_store)
     local_ca_backup_service = LocalCABackupService(database, artifact_store)
+    server_backup_service = ServerBackupPackageService(
+        root,
+        database,
+        vault,
+        key_protector,
+        mutation_lock=artifact_store.mutation_lock,
+    )
     external_ca_service = ExternalCAService(database, artifact_store)
     acme_account_service = ACMEAccountService(
         database, vault, NativeACMEAccountClient
@@ -183,6 +198,7 @@ def bootstrap_services(
         "artifact_store": artifact_store,
         "local_ca_service": local_ca_service,
         "local_ca_backup_service": local_ca_backup_service,
+        "server_backup_service": server_backup_service,
         "external_ca_service": external_ca_service,
         "renewal_service": renewal_service,
         "acme_account_service": acme_account_service,
@@ -197,6 +213,7 @@ vault = None
 artifact_store = None
 local_ca_service = None
 local_ca_backup_service = None
+server_backup_service = None
 external_ca_service = None
 renewal_service = RenewalService(database)
 acme_account_service = None
@@ -1371,6 +1388,133 @@ def ca_backup_import():
     database.record_event("local_ca_backup_imported", {"replace": replace})
     audit("local_ca_backup_imported", details={"replace": replace})
     return jsonify({"ok": True, **result})
+
+
+class BackupUploadTooLarge(ValueError):
+    pass
+
+
+@app.route("/api/server-backup/export", methods=["POST"])
+def server_backup_export():
+    authorize(Permission.MANAGE_SERVER_BACKUP)
+    if server_backup_service is None:
+        return jsonify({"error": "Server backup is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    passphrase = body.get("passphrase") if isinstance(body, dict) else ""
+    temporary_dir = Path(tempfile.mkdtemp(prefix="certmon-server-backup-download-"))
+    output_file = temporary_dir / "server-backup.zip"
+    try:
+        result = server_backup_service.export_package(passphrase or "", output_file)
+        response = send_file(
+            result.path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"certmon-server-backup-{result.backup_id}.zip",
+        )
+        response.response = ClosingIterator(
+            response.response,
+            lambda: shutil.rmtree(temporary_dir, ignore_errors=True),
+        )
+        audit(
+            "server_backup_exported",
+            target=result.backup_id,
+            details={"created_at": result.created_at},
+        )
+        return response
+    except ServerBackupPackageError as error:
+        shutil.rmtree(temporary_dir, ignore_errors=True)
+        audit(
+            "server_backup_export_failed",
+            success=False,
+            details={"reason": str(error)},
+        )
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        shutil.rmtree(temporary_dir, ignore_errors=True)
+        app.logger.exception("Unexpected server backup export failure")
+        audit(
+            "server_backup_export_failed",
+            success=False,
+            details={"reason": "unexpected"},
+        )
+        return jsonify({"error": "Could not create the server backup"}), 500
+
+
+@app.route("/api/server-backup/restore", methods=["POST"])
+def server_backup_restore():
+    authorize(Permission.MANAGE_SERVER_BACKUP)
+    if server_backup_service is None:
+        return jsonify({"error": "Server backup is unavailable"}), 503
+
+    upload = request.files.get("backup")
+    passphrase = request.form.get("passphrase") or ""
+    if upload is None:
+        return jsonify({"error": "Backup file is required"}), 400
+
+    handle, temporary_name = tempfile.mkstemp(prefix="certmon-server-backup-upload-")
+    os.close(handle)
+    temporary_file = Path(temporary_name)
+    try:
+        limit = current_runtime_config().max_backup_upload_bytes
+        total = 0
+        with temporary_file.open("wb") as output:
+            while True:
+                chunk = upload.stream.read(min(1024 * 1024, limit + 1 - total))
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise BackupUploadTooLarge("Backup upload exceeds the configured limit")
+                output.write(chunk)
+        result = server_backup_service.stage_restore(
+            temporary_file,
+            passphrase,
+            Path(data_dir()).resolve().parent,
+        )
+        audit(
+            "server_restore_staged",
+            target=result.backup_id,
+            details={"staged_path": str(result.staged_path), "created_at": result.created_at},
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "backup_id": result.backup_id,
+                "staged_path": str(result.staged_path),
+                "activation_steps": list(result.activation_steps),
+            }
+        )
+    except BackupUploadTooLarge as error:
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "upload_too_large"},
+        )
+        return jsonify({"error": str(error)}), 413
+    except ServerBackupConflictError as error:
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "destination_exists"},
+        )
+        return jsonify({"error": str(error)}), 409
+    except ServerBackupPackageError as error:
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "invalid_package"},
+        )
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        app.logger.exception("Unexpected server backup restore failure")
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "unexpected"},
+        )
+        return jsonify({"error": "Could not stage the server backup restore"}), 500
+    finally:
+        temporary_file.unlink(missing_ok=True)
 
 
 @app.route("/api/ca/issue", methods=["POST"])

@@ -13,6 +13,7 @@ class Permission(str, Enum):
     DOWNLOAD_PRIVATE_KEY = "download_private_key"
     MANAGE_DNS_CREDENTIALS = "manage_dns_credentials"
     MANAGE_LOCAL_CA = "manage_local_ca"
+    MANAGE_SERVER_BACKUP = "manage_server_backup"
     MANAGE_USERS = "manage_users"
     VIEW_AUDIT = "view_audit"
 
@@ -46,6 +47,7 @@ ROLE_PERMISSIONS = {
             Permission.DOWNLOAD_PUBLIC_CERTIFICATE,
             Permission.DOWNLOAD_PRIVATE_KEY,
             Permission.MANAGE_DNS_CREDENTIALS,
+            Permission.MANAGE_SERVER_BACKUP,
             Permission.VIEW_AUDIT,
         }
     ),

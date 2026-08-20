@@ -6,6 +6,7 @@ from pathlib import Path
 
 LOOPBACK_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
+DEFAULT_MAX_BACKUP_UPLOAD_MB = 512
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -20,6 +21,7 @@ class RuntimeConfig:
     port: int
     server_mode: bool
     auth_required: bool
+    max_backup_upload_bytes: int
 
 
 def resolve_data_dir(*, frozen: bool, executable: Path, source_dir: Path) -> Path:
@@ -70,6 +72,18 @@ def resolve_runtime_config(*, frozen: bool, executable: Path, source_dir: Path) 
     if port < 1 or port > 65535:
         raise ConfigError("CertMon port must be between 1 and 65535")
 
+    upload_mb_value = os.environ.get(
+        "CERTMON_MAX_BACKUP_UPLOAD_MB", str(DEFAULT_MAX_BACKUP_UPLOAD_MB)
+    )
+    try:
+        max_backup_upload_mb = int(upload_mb_value)
+    except ValueError as exc:
+        raise ConfigError(
+            f"Invalid CERTMON_MAX_BACKUP_UPLOAD_MB value: {upload_mb_value!r}"
+        ) from exc
+    if max_backup_upload_mb <= 0:
+        raise ConfigError("CERTMON_MAX_BACKUP_UPLOAD_MB must be greater than zero")
+
     server_mode = _env_flag("CERTMON_SERVER_MODE", default=False)
     lan_bind = _is_wildcard_host(bind_host) or not _is_loopback_host(bind_host)
     if lan_bind and not server_mode:
@@ -84,4 +98,5 @@ def resolve_runtime_config(*, frozen: bool, executable: Path, source_dir: Path) 
         port=port,
         server_mode=server_mode,
         auth_required=server_mode,
+        max_backup_upload_bytes=max_backup_upload_mb * 1024 * 1024,
     )
