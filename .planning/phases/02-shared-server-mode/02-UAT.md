@@ -10,7 +10,15 @@ updated: 2026-08-21T16:30:00+02:00
 
 ## Current Test
 
-[testing complete]
+### Gap-closure retest (Tests 4, 5, and 9)
+
+status: awaiting human verification
+published_commit: e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c
+workflow_run: https://github.com/wilfreddenijs/certmon/actions/runs/32497863521
+workflow_run_id: 32497863521
+build_number: 15
+artifact: CertMon-Windows (artifact ID 9452352191)
+note: The successful Windows artifact is built from the local gap-closure commit, not the stale previously tested remote commit e89fa8d0d9b4159b9c3e2058b787b59ccaeea649. Retest only the unresolved browser workflows before changing any gap status.
 
 ## Tests
 
