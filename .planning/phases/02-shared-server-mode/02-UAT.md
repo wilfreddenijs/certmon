@@ -1,20 +1,16 @@
 ---
-status: testing
+status: complete
 phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
   - .planning/phases/02-shared-server-mode/02-VERIFICATION.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-08-21T10:00:00+02:00
+updated: 2026-08-21T14:40:00+02:00
 ---
 
 ## Current Test
 
-number: 4
-name: Authentication Form Polish
-expected: |
-  Mismatched first-admin passwords are blocked, matching setup succeeds, and pressing Enter signs in exactly once.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -33,12 +29,16 @@ result: [passed]
 
 ### 4. Login, Logout, And Session
 expected: In server mode after first-admin setup, logout should return to the sign-in screen. Wrong credentials should be rejected; correct credentials should sign in and restore app access.
-result: [pending]
+result: issue
+reported: "Pass, klein detail. Op enter klikken werkt, maar op Enter drukken op het toetsenbord niet. Graag ook deze actie toevoegen in het scherm"
+severity: minor
 note: Original login/logout behavior passed. Retest only the added Enter-key submission and first-admin password confirmation behavior.
 
 ### 5. Role Restrictions
 expected: A lower-privilege user such as Viewer should be able to view allowed public information but should not be able to start certificate issuance, manage CA/private-key operations, or view restricted audit/security actions.
-result: [pending]
+result: issue
+reported: "Er is geen administration module"
+severity: major
 note: The missing Administration UI/API has now been implemented. Retest creation of a viewer, role restrictions, role changes, disable/enable, password reset, and session revocation through the normal workflow.
 
 ### 6. CSRF Protection
@@ -58,7 +58,9 @@ note: Confirmed that the ZIP contains the same public CA certificate as Download
 
 ### 9. Backup And Recovery Metadata
 expected: Backup/restore behavior should preserve server-mode users, roles, sessions where applicable, Local CA data, certificate metadata, and audit records; private-key backup/export actions should remain permission-gated.
-result: [pending]
+result: issue
+reported: "Er is geen administration module"
+severity: major
 note: Full server backup and staged recovery are now available in Administration. Retest export, sibling-directory staging, unchanged active data, and the displayed offline activation and rollback steps.
 
 ### 10. LAN Browser UAT
@@ -70,8 +72,8 @@ note: LAN access, authentication, and unaffected desktop mode were confirmed. Th
 
 total: 10
 passed: 7
-issues: 0
-pending: 3
+issues: 3
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -89,10 +91,21 @@ blocked: 0
 - 2026-08-13: UAT 7 retest showed deferred watchdog stuck at 0s. Isolated tab open from audit loading and added a timer-only diagnostic button to distinguish browser timer blockage from audit request blockage.
 - 2026-08-14: UAT 7 retest showed Refresh audit stuck at 0s. Delayed the audit fetch until after 1.5s and added an "Open raw audit JSON" link to test `/api/audit` outside the in-page loader.
 - 2026-08-20: UAT 7 raw JSON proved `/api/audit` returns valid events. Root cause found in UI renderer: audit template used missing `esc()` helper instead of `escapeHtml()`. Fixed audit rendering and added render-error fallback.
-- truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
-  status: implementation_complete_pending_uat
-  reason: "Plans 02-02 implemented and automated the complete user-management API, role enforcement, session revocation, and Administration UI. Browser UAT remains."
-  severity: none
+- gap_id: G-02-1
+  truth: "Pressing Enter on the authentication screen submits the active login or setup action exactly once."
+  status: failed
+  reason: "User reported: Pass, klein detail. Op enter klikken werkt, maar op Enter drukken op het toetsenbord niet. Graag ook deze actie toevoegen in het scherm"
+  severity: minor
+  test: 4
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+- gap_id: G-02-2
+  truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
+  status: failed
+  reason: "User reported: Er is geen administration module"
+  severity: major
   test: 5
   artifacts:
     - path: "certmon/auth.py"
@@ -101,12 +114,15 @@ blocked: 0
       status: implemented
     - path: "templates/index.html"
       status: implemented
-  pending:
-    - "Complete the administrator browser workflow and lower-privilege role UAT."
-- truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
-  status: implementation_complete_pending_uat
-  reason: "Plan 02-03 exposed full server backup and staged recovery to authorized admin and security-admin roles. Browser and operator UAT remains."
-  severity: none
+  missing:
+    - "Expose the Administration module in the tested server-mode interface so user and role management can be completed."
+  root_cause: ""
+  debug_session: ""
+- gap_id: G-02-3
+  truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
+  status: failed
+  reason: "User reported: Er is geen administration module"
+  severity: major
   test: 9
   artifacts:
     - path: "certmon/server_backup.py"
@@ -115,6 +131,8 @@ blocked: 0
       status: implemented
     - path: "templates/index.html"
       status: implemented
-  pending:
-    - "Complete full backup export, staged restore, and activation-instruction UAT."
+  missing:
+    - "Expose the Administration module in the tested server-mode interface so backup export and staged recovery can be completed."
+  root_cause: ""
+  debug_session: ""
 <!-- YAML format for plan-phase --gaps consumption -->
