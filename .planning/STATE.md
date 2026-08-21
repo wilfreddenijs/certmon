@@ -4,15 +4,15 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02-shared-server-mode
 status: gap_closure_executed
-last_updated: "2026-08-20T18:45:00+02:00"
+stopped_at: GSD runtime repaired and plan 02-04 validated
+last_updated: "2026-08-21T15:10:56.277Z"
 last_activity: 2026-08-20
 last_activity_desc: Plan 02-03 completed
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 5
+  completed_phases: 2
+  total_plans: 6
   completed_plans: 5
-  percent: 100
 ---
 
 # CertMon Planning State
@@ -33,6 +33,12 @@ Next planned phase: Verify Phase 02 gap closure
 - `.planning` was introduced after the certificate-renewal phase had already been implemented using `docs/superpowers`.
 - Phase 01 UAT was closed on 2026-07-07. Cloudflare DNS automation remains explicitly skipped for now.
 - Phase 02 human UAT completed on 2026-08-20: 8 tests passed and two major gaps remain. Plans 02-02 and 02-03 cover user/role administration and full server backup/staged recovery.
-- The 2026-08-20 gap plans were produced through the user-approved main-session fallback because planner and checker subagents stalled in the remote runtime; structural and source-grounded review was completed manually.
+- The apparent 2026-08-20 planner/debugger stalls were diagnosed on 2026-08-21 as premature orchestration termination during active, heavyweight agent runs. GSD now uses the budget profile; planner and checker validation complete normally.
 - Phase 3 added: Toolbelt auto-upload UI with device progress and cancellation.
 - Phase 04 completed on 2026-07-02.
+
+## Session
+
+**Last session:** 2026-08-21T15:10:56.209Z
+**Stopped at:** GSD runtime repaired and plan 02-04 validated
+**Resume file:** .planning/phases/02-shared-server-mode/02-04-PLAN.md

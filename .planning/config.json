@@ -6,5 +6,6 @@
     "_auto_chain_active": false,
     "nyquist_validation": true,
     "ai_integration_phase": true
-  }
+  },
+  "model_profile": "budget"
 }
