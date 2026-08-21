@@ -1,11 +1,11 @@
 ---
-status: complete
+status: diagnosed
 phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
   - .planning/phases/02-shared-server-mode/02-VERIFICATION.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-08-21T14:40:00+02:00
+updated: 2026-08-21T16:30:00+02:00
 ---
 
 ## Current Test
@@ -97,10 +97,13 @@ blocked: 0
   reason: "User reported: Pass, klein detail. Op enter klikken werkt, maar op Enter drukken op het toetsenbord niet. Graag ook deze actie toevoegen in het scherm"
   severity: minor
   test: 4
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 60f86cf, which adds native form submission for the Enter key."
+  artifacts:
+    - path: "templates/index.html"
+      issue: "The remote build has a click-only authentication button; local HEAD has the corrected submit form."
+  missing:
+    - "Push the current branch and produce a new executable for browser UAT."
+  debug_session: ".planning/debug/auth-enter-key-stale-build.md"
 - gap_id: G-02-2
   truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
   status: failed
@@ -116,8 +119,8 @@ blocked: 0
       status: implemented
   missing:
     - "Expose the Administration module in the tested server-mode interface so user and role management can be completed."
-  root_cause: ""
-  debug_session: ""
+  root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 60f86cf, which adds the Administration user-management UI."
+  debug_session: ".planning/debug/admin-module-missing-uat-test-5.md"
 - gap_id: G-02-3
   truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
   status: failed
@@ -133,6 +136,6 @@ blocked: 0
       status: implemented
   missing:
     - "Expose the Administration module in the tested server-mode interface so backup export and staged recovery can be completed."
-  root_cause: ""
-  debug_session: ""
+  root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 85c57d6, which adds Administration backup and recovery controls."
+  debug_session: ".planning/debug/admin-backup-recovery-missing.md"
 <!-- YAML format for plan-phase --gaps consumption -->
