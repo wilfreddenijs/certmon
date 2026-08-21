@@ -1,15 +1,20 @@
 ---
-status: complete
+status: testing
 phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
+  - .planning/phases/02-shared-server-mode/02-VERIFICATION.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-08-20T14:15:00+02:00
+updated: 2026-08-21T10:00:00+02:00
 ---
 
 ## Current Test
 
-[testing complete]
+number: 4
+name: Authentication Form Polish
+expected: |
+  Mismatched first-admin passwords are blocked, matching setup succeeds, and pressing Enter signs in exactly once.
+awaiting: user response
 
 ## Tests
 
@@ -28,15 +33,13 @@ result: [passed]
 
 ### 4. Login, Logout, And Session
 expected: In server mode after first-admin setup, logout should return to the sign-in screen. Wrong credentials should be rejected; correct credentials should sign in and restore app access.
-result: [passed]
-note: Follow-up polish requested: Enter key should submit Sign in; first-admin password setup should require entering the password twice with match validation.
+result: [pending]
+note: Original login/logout behavior passed. Retest only the added Enter-key submission and first-admin password confirmation behavior.
 
 ### 5. Role Restrictions
 expected: A lower-privilege user such as Viewer should be able to view allowed public information but should not be able to start certificate issuance, manage CA/private-key operations, or view restricted audit/security actions.
-result: issue
-reported: "All works as expected, however there are no user roles available other than admin. This whole module to create and manage user roles is still missing"
-severity: major
-note: Roles and permission checks exist, but no admin UI/API exists to create or manage users and their roles. End-to-end role restriction testing is therefore unavailable through the normal application workflow.
+result: [pending]
+note: The missing Administration UI/API has now been implemented. Retest creation of a viewer, role restrictions, role changes, disable/enable, password reset, and session revocation through the normal workflow.
 
 ### 6. CSRF Protection
 expected: Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
@@ -55,10 +58,8 @@ note: Confirmed that the ZIP contains the same public CA certificate as Download
 
 ### 9. Backup And Recovery Metadata
 expected: Backup/restore behavior should preserve server-mode users, roles, sessions where applicable, Local CA data, certificate metadata, and audit records; private-key backup/export actions should remain permission-gated.
-result: issue
-reported: "Where is the backup button?"
-severity: major
-note: The Local CA tab exposes Export CA backup and Import CA backup, but these only transfer the encrypted Local CA. The full BackupService exists in code and automated tests, but no UI, API, or CLI workflow exposes full server backup/restore to an operator.
+result: [pending]
+note: Full server backup and staged recovery are now available in Administration. Retest export, sibling-directory staging, unchanged active data, and the displayed offline activation and rollback steps.
 
 ### 10. LAN Browser UAT
 expected: From a second machine or browser on the LAN, open the server-mode URL. Unauthenticated access should show login/setup, authenticated access should work according to role, and desktop/local mode should remain unaffected on the host machine.
@@ -68,9 +69,9 @@ note: LAN access, authentication, and unaffected desktop mode were confirmed. Th
 ## Summary
 
 total: 10
-passed: 8
-issues: 2
-pending: 0
+passed: 7
+issues: 0
+pending: 3
 skipped: 0
 blocked: 0
 
@@ -89,32 +90,31 @@ blocked: 0
 - 2026-08-14: UAT 7 retest showed Refresh audit stuck at 0s. Delayed the audit fetch until after 1.5s and added an "Open raw audit JSON" link to test `/api/audit` outside the in-page loader.
 - 2026-08-20: UAT 7 raw JSON proved `/api/audit` returns valid events. Root cause found in UI renderer: audit template used missing `esc()` helper instead of `escapeHtml()`. Fixed audit rendering and added render-error fallback.
 - truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
-  status: failed
-  reason: "User reported: All works as expected, however there are no user roles available other than admin. This whole module to create and manage user roles is still missing."
-  severity: major
+  status: implementation_complete_pending_uat
+  reason: "Plans 02-02 implemented and automated the complete user-management API, role enforcement, session revocation, and Administration UI. Browser UAT remains."
+  severity: none
   test: 5
   artifacts:
     - path: "certmon/auth.py"
-      issue: "Authentication creates the initial admin but exposes no subsequent user-management service."
+      status: implemented
     - path: "app.py"
-      issue: "No authenticated user-management API routes are available."
+      status: implemented
     - path: "templates/index.html"
-      issue: "No user or role administration interface is available."
-  missing:
-    - "Add permission-gated user creation, editing, disabling, and password reset operations."
-    - "Add role assignment using the supported CertMon roles."
-    - "Add an administrator UI and end-to-end role restriction tests."
+      status: implemented
+  pending:
+    - "Complete the administrator browser workflow and lower-privilege role UAT."
 - truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
-  status: failed
-  reason: "User reported: Where is the backup button? Full BackupService functionality is not exposed through the UI, API, or CLI; only Local CA export/import is available in the UI."
-  severity: major
+  status: implementation_complete_pending_uat
+  reason: "Plan 02-03 exposed full server backup and staged recovery to authorized admin and security-admin roles. Browser and operator UAT remains."
+  severity: none
   test: 9
   artifacts:
-    - path: "certmon/backup.py"
-      issue: "BackupService is implemented but has no operator-facing entry point."
+    - path: "certmon/server_backup.py"
+      status: implemented
+    - path: "app.py"
+      status: implemented
     - path: "templates/index.html"
-      issue: "Only Local CA backup controls are present."
-  missing:
-    - "Add an authenticated, permission-gated full server backup workflow."
-    - "Add a documented restore workflow that restores into a new directory and supports safe activation."
+      status: implemented
+  pending:
+    - "Complete full backup export, staged restore, and activation-instruction UAT."
 <!-- YAML format for plan-phase --gaps consumption -->
