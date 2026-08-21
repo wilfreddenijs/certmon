@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-### Phase 01 — Secure Certificate Renewal
+### Phase 01: Secure Certificate Renewal
 
 Status: complete.
 
@@ -16,7 +16,7 @@ Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped
 
 ## Future Phases
 
-### Phase 02 — Shared Server Mode and Team Local CA
+### Phase 02: Shared Server Mode and Team Local CA
 
 Status: implemented; human UAT completed; all gap-closure plans executed and verification pending.
 
