@@ -45,9 +45,9 @@ note: Original login/logout behavior passed. Retest only the added Enter-key sub
 ### 5. Role Restrictions
 expected: A lower-privilege user such as Viewer should be able to view allowed public information but should not be able to start certificate issuance, manage CA/private-key operations, or view restricted audit/security actions.
 result: issue
-reported: "Er is geen administration module"
+reported: "Viewer still sees role-restricted controls and navigation. In Upload, `Download all Extron PEMs` is visible but returns a function-not-available error when clicked. The Audit tab/button is visible, but Refresh audit reports `Your role cannot view the audit log`."
 severity: major
-note: The missing Administration UI/API has now been implemented. Retest creation of a viewer, role restrictions, role changes, disable/enable, password reset, and session revocation through the normal workflow.
+note: The Administration UI/API is present and backend authorization appears to deny the restricted actions correctly. The remaining UAT 5 failure is frontend role visibility: unauthorized controls and navigation must not be shown to a Viewer. Retest creation of a viewer, role restrictions and visibility, role changes, disable/enable, password reset, and session revocation through the normal workflow.
 
 ### 6. CSRF Protection
 expected: Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
@@ -115,7 +115,7 @@ blocked: 0
 - gap_id: G-02-2
   truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
   status: failed
-  reason: "User reported: Er is geen administration module"
+  reason: "UAT 5 retest: a Viewer still sees role-restricted Upload and Audit controls/navigation. `Download all Extron PEMs` is visible but returns a function-not-available error, and Refresh audit reports `Your role cannot view the audit log`."
   severity: major
   test: 5
   artifacts:
@@ -126,8 +126,9 @@ blocked: 0
     - path: "templates/index.html"
       status: implemented
   missing:
-    - "Expose the Administration module in the tested server-mode interface so user and role management can be completed."
-  root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 60f86cf, which adds the Administration user-management UI."
+    - "Hide or avoid rendering role-restricted navigation and controls for a Viewer, including the Audit tab/button and Upload's `Download all Extron PEMs` control."
+    - "Retest the Viewer workflow after frontend role visibility is corrected; backend authorization currently appears to deny the restricted actions correctly."
+  root_cause: "The stale-build delivery gap was resolved by build 15, which includes the Administration user-management UI. UAT 5 now identifies a separate frontend role-visibility gap: server-side authorization denies the restricted actions, but the Viewer UI still exposes their controls and navigation."
   debug_session: ".planning/debug/admin-module-missing-uat-test-5.md"
 - gap_id: G-02-3
   truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
