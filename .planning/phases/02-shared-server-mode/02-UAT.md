@@ -5,12 +5,20 @@ source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
   - .planning/phases/02-shared-server-mode/02-VERIFICATION.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-08-21T16:30:00+02:00
+updated: 2026-08-24T00:00:00+02:00
 ---
 
 ## Current Test
 
-[testing complete]
+### Gap-closure retest (Tests 4, 5, and 9)
+
+status: completed with remaining issue
+published_commit: e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c
+workflow_run: https://github.com/wilfreddenijs/certmon/actions/runs/32497863521
+workflow_run_id: 32497863521
+build_number: 15
+artifact: CertMon-Windows (artifact ID 9452352191)
+note: The successful Windows artifact is built from the local gap-closure commit, not the stale previously tested remote commit e89fa8d0d9b4159b9c3e2058b787b59ccaeea649. Retest only the unresolved browser workflows before changing any gap status.
 
 ## Tests
 
@@ -29,17 +37,15 @@ result: [passed]
 
 ### 4. Login, Logout, And Session
 expected: In server mode after first-admin setup, logout should return to the sign-in screen. Wrong credentials should be rejected; correct credentials should sign in and restore app access.
-result: issue
-reported: "Pass, klein detail. Op enter klikken werkt, maar op Enter drukken op het toetsenbord niet. Graag ook deze actie toevoegen in het scherm"
-severity: minor
-note: Original login/logout behavior passed. Retest only the added Enter-key submission and first-admin password confirmation behavior.
+result: [passed]
+note: Build 15 UAT confirmed that pressing Enter submits the authentication form. Login/logout, wrong-credential rejection, correct-credential access restoration, and the Enter-key follow-up all passed.
 
 ### 5. Role Restrictions
 expected: A lower-privilege user such as Viewer should be able to view allowed public information but should not be able to start certificate issuance, manage CA/private-key operations, or view restricted audit/security actions.
 result: issue
-reported: "Er is geen administration module"
+reported: "Viewer still sees role-restricted controls and navigation. In Upload, `Download all Extron PEMs` is visible but returns a function-not-available error when clicked. The Audit tab/button is visible, but Refresh audit reports `Your role cannot view the audit log`."
 severity: major
-note: The missing Administration UI/API has now been implemented. Retest creation of a viewer, role restrictions, role changes, disable/enable, password reset, and session revocation through the normal workflow.
+note: The Administration UI/API is present and backend authorization appears to deny the restricted actions correctly. The remaining UAT 5 failure is frontend role visibility: unauthorized controls and navigation must not be shown to a Viewer. Retest creation of a viewer, role restrictions and visibility, role changes, disable/enable, password reset, and session revocation through the normal workflow.
 
 ### 6. CSRF Protection
 expected: Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.
@@ -58,10 +64,8 @@ note: Confirmed that the ZIP contains the same public CA certificate as Download
 
 ### 9. Backup And Recovery Metadata
 expected: Backup/restore behavior should preserve server-mode users, roles, sessions where applicable, Local CA data, certificate metadata, and audit records; private-key backup/export actions should remain permission-gated.
-result: issue
-reported: "Er is geen administration module"
-severity: major
-note: Full server backup and staged recovery are now available in Administration. Retest export, sibling-directory staging, unchanged active data, and the displayed offline activation and rollback steps.
+result: [passed]
+note: Build 15 UAT confirmed that the Administration module exposes full server backup and staged recovery controls, including the displayed offline activation and rollback steps.
 
 ### 10. LAN Browser UAT
 expected: From a second machine or browser on the LAN, open the server-mode URL. Unauthenticated access should show login/setup, authenticated access should work according to role, and desktop/local mode should remain unaffected on the host machine.
@@ -71,8 +75,8 @@ note: LAN access, authentication, and unaffected desktop mode were confirmed. Th
 ## Summary
 
 total: 10
-passed: 7
-issues: 3
+passed: 9
+issues: 1
 pending: 0
 skipped: 0
 blocked: 0
@@ -93,21 +97,20 @@ blocked: 0
 - 2026-08-20: UAT 7 raw JSON proved `/api/audit` returns valid events. Root cause found in UI renderer: audit template used missing `esc()` helper instead of `escapeHtml()`. Fixed audit rendering and added render-error fallback.
 - gap_id: G-02-1
   truth: "Pressing Enter on the authentication screen submits the active login or setup action exactly once."
-  status: failed
-  reason: "User reported: Pass, klein detail. Op enter klikken werkt, maar op Enter drukken op het toetsenbord niet. Graag ook deze actie toevoegen in het scherm"
-  severity: minor
+  status: resolved
+  reason: "Build 15 UAT passed: pressing Enter submits the authentication form."
   test: 4
   root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 60f86cf, which adds native form submission for the Enter key."
   artifacts:
     - path: "templates/index.html"
       issue: "The remote build has a click-only authentication button; local HEAD has the corrected submit form."
-  missing:
-    - "Push the current branch and produce a new executable for browser UAT."
+  resolved_by:
+    - "Build 15 UAT on commit e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c"
   debug_session: ".planning/debug/auth-enter-key-stale-build.md"
 - gap_id: G-02-2
   truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
   status: failed
-  reason: "User reported: Er is geen administration module"
+  reason: "UAT 5 retest: a Viewer still sees role-restricted Upload and Audit controls/navigation. `Download all Extron PEMs` is visible but returns a function-not-available error, and Refresh audit reports `Your role cannot view the audit log`."
   severity: major
   test: 5
   artifacts:
@@ -118,14 +121,14 @@ blocked: 0
     - path: "templates/index.html"
       status: implemented
   missing:
-    - "Expose the Administration module in the tested server-mode interface so user and role management can be completed."
-  root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 60f86cf, which adds the Administration user-management UI."
+    - "Hide or avoid rendering role-restricted navigation and controls for a Viewer, including the Audit tab/button and Upload's `Download all Extron PEMs` control."
+    - "Retest the Viewer workflow after frontend role visibility is corrected; backend authorization currently appears to deny the restricted actions correctly."
+  root_cause: "The stale-build delivery gap was resolved by build 15, which includes the Administration user-management UI. UAT 5 now identifies a separate frontend role-visibility gap: server-side authorization denies the restricted actions, but the Viewer UI still exposes their controls and navigation."
   debug_session: ".planning/debug/admin-module-missing-uat-test-5.md"
 - gap_id: G-02-3
   truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
-  status: failed
-  reason: "User reported: Er is geen administration module"
-  severity: major
+  status: resolved
+  reason: "Build 15 UAT passed: Administration exposes full server backup and staged recovery controls."
   test: 9
   artifacts:
     - path: "certmon/server_backup.py"
@@ -134,8 +137,8 @@ blocked: 0
       status: implemented
     - path: "templates/index.html"
       status: implemented
-  missing:
-    - "Expose the Administration module in the tested server-mode interface so backup export and staged recovery can be completed."
-  root_cause: "The tested executable was built from remote commit e89fa8d and predates local commit 85c57d6, which adds Administration backup and recovery controls."
+  resolved_by:
+    - "Build 15 UAT on commit e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c"
+  root_cause: "The stale-build delivery gap was resolved by build 15, which includes Administration backup and recovery controls."
   debug_session: ".planning/debug/admin-backup-recovery-missing.md"
 <!-- YAML format for plan-phase --gaps consumption -->
