@@ -227,3 +227,58 @@ def test_serial_column_control_click_does_not_follow_with_geometry_click(monkeyp
 
     assert uploader.ensure_serial_column_visible(object(), row_y=100) is False
     assert calls["geometry"] == 0
+
+
+def test_find_device_cell_scrolls_discovery_list_for_offscreen_rows(monkeypatch, uploader):
+    monkeypatch.setattr(uploader, "POLL", 0)
+    monkeypatch.setattr(uploader, "ensure_discovery_started", lambda *args, **kwargs: True)
+
+    class Rect:
+        def __init__(self, top):
+            self.left = 100
+            self.top = top
+            self.right = 220
+            self.bottom = top + 24
+
+    class Cell:
+        def __init__(self, text, top):
+            self.text = text
+            self._rect = Rect(top)
+
+        def window_text(self):
+            return self.text
+
+        def rectangle(self):
+            return self._rect
+
+        def is_visible(self):
+            return True
+
+    class ScrollBar:
+        def __init__(self, window):
+            self.window = window
+
+        def wheel_mouse_input(self, wheel_dist):
+            if wheel_dist < 0:
+                self.window.page += 1
+
+    class Window:
+        def __init__(self):
+            self.page = 0
+
+        def descendants(self, control_type=None):
+            if control_type in {"Text", "Hyperlink"}:
+                if self.page == 0:
+                    return [Cell("192.168.0.10", 120), Cell("192.168.0.11", 150)]
+                return [Cell("192.168.0.99", 120)]
+            if control_type == "ScrollBar":
+                return [ScrollBar(self)]
+            return []
+
+    win = Window()
+
+    found = uploader.find_device_cell(win, "192.168.0.99")
+
+    assert found is not None
+    assert found.window_text() == "192.168.0.99"
+    assert win.page == 1

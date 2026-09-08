@@ -887,16 +887,84 @@ def discover_serial_from_row(win, ip, row_y):
     return sorted(candidates, key=lambda item: item[0])[0][1]
 
 
+def _visible_device_cell(win, ip):
+    for control_type in ("Text", "Hyperlink"):
+        for c in win.descendants(control_type=control_type):
+            try:
+                if hasattr(c, "is_visible") and not c.is_visible():
+                    continue
+                if (c.window_text() or "").strip() == ip:
+                    return c
+            except Exception:
+                continue
+    return None
+
+
+def _scroll_discovery_list_down(win):
+    for control_type in ("ScrollBar", "List", "DataGrid", "Table"):
+        try:
+            controls = win.descendants(control_type=control_type)
+        except Exception:
+            continue
+        for control in controls:
+            try:
+                if hasattr(control, "is_visible") and not control.is_visible():
+                    continue
+                if hasattr(control, "wheel_mouse_input"):
+                    control.wheel_mouse_input(wheel_dist=-5)
+                    time.sleep(0.3)
+                    return True
+                if hasattr(control, "scroll"):
+                    control.scroll("down", "page")
+                    time.sleep(0.3)
+                    return True
+            except Exception as exc:
+                log.debug("could not scroll Toolbelt discovery %s: %s", control_type, exc)
+    try:
+        win.type_keys("{PGDN}", set_foreground=True)
+        time.sleep(0.3)
+        return True
+    except Exception:
+        return False
+
+
+def _visible_discovery_texts(win):
+    texts = []
+    for control_type in ("Text", "Hyperlink"):
+        try:
+            controls = win.descendants(control_type=control_type)
+        except Exception:
+            continue
+        for control in controls:
+            try:
+                text = (_control_text(control) or "").strip()
+            except Exception:
+                continue
+            if text:
+                texts.append(text)
+    return tuple(sorted(texts))
+
+
 def find_device_cell(win, ip):
-    for control_type in ("Text", "Hyperlink"):
-        for c in win.descendants(control_type=control_type):
-            if (c.window_text() or "").strip() == ip:
-                return c
+    found = _visible_device_cell(win, ip)
+    if found is not None:
+        return found
     ensure_discovery_started(win, [ip], timeout=45, require_visible=False)
-    for control_type in ("Text", "Hyperlink"):
-        for c in win.descendants(control_type=control_type):
-            if (c.window_text() or "").strip() == ip:
-                return c
+    found = _visible_device_cell(win, ip)
+    if found is not None:
+        return found
+    seen_pages = set()
+    for _ in range(60):
+        visible = _visible_discovery_texts(win)
+        if visible in seen_pages:
+            break
+        seen_pages.add(visible)
+        if not _scroll_discovery_list_down(win):
+            break
+        found = _visible_device_cell(win, ip)
+        if found is not None:
+            log.info("[%s] found device after scrolling Toolbelt discovery list", ip)
+            return found
     return None
 
 
