@@ -282,3 +282,66 @@ def test_find_device_cell_scrolls_discovery_list_for_offscreen_rows(monkeypatch,
     assert found is not None
     assert found.window_text() == "192.168.0.99"
     assert win.page == 1
+
+
+def test_discovery_refresh_does_not_click_first_device_manage_button(uploader):
+    class ElementInfo:
+        def __init__(self, name="", automation_id=""):
+            self.name = name
+            self.automation_id = automation_id
+
+    class Control:
+        def __init__(self, label, automation_id):
+            self.label = label
+            self.element_info = ElementInfo(label, automation_id)
+            self.clicks = 0
+
+        def window_text(self):
+            return self.label
+
+        def is_visible(self):
+            return True
+
+        def click_input(self):
+            self.clicks += 1
+
+    manage = Control("", "DeviceDiscoveryUserControl_ManageButton")
+    discovery = Control("Discovery", "DeviceDiscoveryUserControl_Discover")
+
+    class Window:
+        def descendants(self, control_type=None):
+            return [manage, discovery] if control_type == "Button" else []
+
+    assert uploader._click_discovery_control(Window()) is True
+    assert manage.clicks == 0
+    assert discovery.clicks == 1
+
+
+def test_discovery_refresh_rejects_manage_button_as_only_candidate(uploader):
+    class ElementInfo:
+        name = ""
+        automation_id = "DeviceDiscoveryUserControl_ManageButton"
+
+    class ManageButton:
+        element_info = ElementInfo()
+
+        def __init__(self):
+            self.clicks = 0
+
+        def window_text(self):
+            return ""
+
+        def is_visible(self):
+            return True
+
+        def click_input(self):
+            self.clicks += 1
+
+    manage = ManageButton()
+
+    class Window:
+        def descendants(self, control_type=None):
+            return [manage] if control_type == "Button" else []
+
+    assert uploader._click_discovery_control(Window()) is False
+    assert manage.clicks == 0

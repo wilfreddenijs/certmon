@@ -287,7 +287,7 @@ def _device_visible(win, selectors):
 
 
 def _click_discovery_control(win):
-    terms = (
+    labels = {
         "discover",
         "discovery",
         "refresh",
@@ -296,11 +296,13 @@ def _click_discovery_control(win):
         "search",
         "start",
         "device discovery",
+    }
+    automation_ids = {
         "DeviceDiscoveryUserControl_Discover",
         "DeviceDiscoveryUserControl_Refresh",
         "DeviceDiscoveryUserControl_Search",
         "DeviceDiscoveryUserControl_Start",
-    )
+    }
     control_types = (
         "Button",
         "Hyperlink",
@@ -319,20 +321,37 @@ def _click_discovery_control(win):
                     continue
             except Exception:
                 continue
-            label = _control_text(control)
-            if not label:
+            try:
+                visible_label = (control.window_text() or "").strip()
+            except Exception:
+                visible_label = ""
+            try:
+                name = (control.element_info.name or "").strip()
+            except Exception:
+                name = ""
+            try:
+                automation_id = (control.element_info.automation_id or "").strip()
+            except Exception:
+                automation_id = ""
+            label = visible_label or name
+            if not label and not automation_id:
                 continue
-            lower = label.lower()
-            if any(term.lower() in lower for term in terms):
-                seen.append(f"{control_type}:{label}")
+            normalized_label = " ".join(label.lower().split())
+            is_discovery_control = (
+                normalized_label in labels
+                or automation_id in automation_ids
+            )
+            display = label or automation_id
+            if is_discovery_control:
+                seen.append(f"{control_type}:{display}")
                 try:
                     control.click_input()
-                    log.info("started/refreshed Toolbelt discovery via %s '%s'", control_type, label)
+                    log.info("started/refreshed Toolbelt discovery via %s '%s'", control_type, display)
                     return True
                 except Exception as exc:
-                    log.info("could not click Toolbelt discovery candidate %s '%s': %s", control_type, label, exc)
+                    log.info("could not click Toolbelt discovery candidate %s '%s': %s", control_type, display, exc)
             elif control_type == "Button":
-                seen.append(f"{control_type}:{label}")
+                seen.append(f"{control_type}:{display}")
     if seen:
         log.info("visible Toolbelt discovery candidates/buttons: %s", "; ".join(seen[:40]))
     return False
