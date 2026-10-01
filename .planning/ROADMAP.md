@@ -18,15 +18,16 @@ Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped
 
 ### Phase 02: Shared Server Mode and Team Local CA
 
-Status: implemented; human UAT completed; all gap-closure plans executed and verification pending.
+Status: implemented; final build-15 UAT has 9 passed tests and one unresolved role-visibility issue. Repair context captured on 2026-10-02; gap-closure planning required.
 
 Plans:
 
 - [x] 02-01-PLAN.md
 - [x] 02-02-PLAN.md
 - [x] 02-03-PLAN.md
+- [ ] 02-04-PLAN.md - publication and retest recorded; summary reconciliation pending, UAT 5 remains unresolved
 
-3/3 plans executed
+3/4 plans have execution summaries. Do not repeat the already-published build-15 delivery or advance the phase before fixing and retesting UAT 5.
 
 **Wave 1 — completed implementation**
 
@@ -52,7 +53,8 @@ Implementation summary:
 - `.planning/phases/02-shared-server-mode/02-01-SUMMARY.md` â€” Shared server mode and team Local CA
 - `.planning/phases/02-shared-server-mode/02-02-SUMMARY.md` — User and role administration plus authentication polish
 - `.planning/phases/02-shared-server-mode/02-03-SUMMARY.md` — Full server backup and staged recovery
-- `.planning/phases/02-shared-server-mode/02-UAT.md` — Human UAT: 8 passed, 2 major gaps captured in Plans 02-02 and 02-03
+- `.planning/phases/02-shared-server-mode/02-UAT.md` - Final build-15 human UAT: 9 passed, 1 major Viewer role-visibility gap
+- `.planning/phases/02-shared-server-mode/02-CONTEXT.md` - Approved visibility and session decisions for the remaining repair
 
 ### Phase 3: Toolbelt auto-upload UI with device progress and cancellation
 
