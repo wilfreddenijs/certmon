@@ -1,0 +1,149 @@
+{\rtf1\ansi\deff0\viewkind4\uc1\pard\sa200\sl276\slmult1\f0\fs28\b\cf1 CertMon User Manual\b0\par
+\pard\sa200\sl276\slmult1\f0\fs22\par
+\b Overview\b0\par
+CertMon is a TLS certificate monitor and ACME renewal tool designed to scan TLS endpoints, track certificate expiry, issue replacement certificates, and deploy them to supported devices such as Extron products.\par
+\par
+\b Current Version\b0\par
+Version: 1.0\par
+Build type: Windows EXE\par
+\par
+\b Security Status\b0\par
+This release is single-user software with no application authentication. Run it on 127.0.0.1 only. Do not bind it to a LAN interface or place it behind a shared reverse proxy until a later phase.\par
+\par
+Certificate private keys, ACME account keys, device credentials, and Cloudflare tokens are encrypted at rest. Manual private-key export is intentionally separate, permission checked, and audited.\par
+\par
+\b Getting Started\b0\par
+\pard\li360\fi-360\par
+\bullet\tab System requirements:\par
+\bullet\tab Windows 10 or later for packaged EXE\par
+\bullet\tab Python 3.8+ for source run\par
+\bullet\tab Network access to target TLS endpoints and ACME services\par
+\pard\par
+\b Run from source\b0\par
+\pard\li720\tab\fs20\par
+pip install -r requirements.txt\par
+python launcher.py\par
+\pard\par
+\b Windows EXE\b0\par
+Download the CertMon-Windows artifact from the GitHub Actions build and run CertMon.exe.\par
+The app header shows the build number as: v1.0 build <GitHub Actions run number>.\par
+\par
+\b Data directory\b0\par
+Set CERTMON_DATA_DIR to choose the writable server data location.\par
+\pard\li720\fs20\par
+$env:CERTMON_DATA_DIR = 'C:\CertMon\Data'\par
+python launcher.py\par
+\pard\par
+Default locations:\par
+- Source/default dev run: data beside the source tree\par
+- Packaged Windows build: %PROGRAMDATA%\CertMon\par
+\par
+\b Web interface\b0\par
+Launch CertMon and open: http://127.0.0.1:5000\par
+\par
+\b Core Features\b0\par
+- Scan TLS endpoints and report certificate state\par
+- Monitor expiry and identify warning/critical/expired certificates\par
+- Issue certificates using ACME, Local CA, or external CA workflows\par
+- Deploy certificates to supported devices\par
+- Upload to Extron devices using Toolbelt batch upload\par
+- Export certificate data to Excel\par
+- Back up and recover secure certificate data\par
+\par
+\b Certificate Scanning\b0\par
+\pard\li360\fi-360\par
+\bullet\tab Add manual hosts or IP ranges\par
+\bullet\tab CertMon checks common TLS ports: 443, 8443, 8080, 4443, 9443, 4523\par
+\bullet\tab Captures CN, SANs, issuer, validity dates, serial, and days remaining\par
+\bullet\tab Classifies status as ok, warning, critical, expired, or error\par
+\pard\par
+\b Certificate Issuance Workflows\b0\par
+\b 1. Let's Encrypt / ACME\b0\par
+Use this for public DNS names. It supports manual DNS or Cloudflare automation.\par
+\pard\li360\fi-360\par
+\bullet\tab Create a renewal job\par
+\bullet\tab Select ACME as issuer type\par
+\bullet\tab Enter DNS names and environment\par
+\bullet\tab Validate against Let's Encrypt staging before production\par
+\bullet\tab Complete DNS challenge and issue certificate\par
+\pard\par
+\b 2. CertMon Local CA\b0\par
+Use this for private IPs, internal DNS names, and internal devices.\par
+\pard\li360\fi-360\par
+\bullet\tab Generate a Local CA\par
+\bullet\tab Install the public CA certificate on operator devices\par
+\bullet\tab Issue signed device certificates\par
+\bullet\tab Download the certificate and private key as needed\par
+\pard\par
+\b 3. External CA\b0\par
+Use this for enterprise or public CA-issued certificates.\par
+\pard\li360\fi-360\par
+\bullet\tab Create CSR job\par
+\bullet\tab Download CSR\par
+\bullet\tab Have the signing authority issue the certificate\par
+\bullet\tab Complete the job or import an existing certificate and key\par
+\pard\par
+\b Extron Toolbelt Batch Upload\b0\par
+This is separate from generic manual upload.\par
+\pard\li360\fi-360\par
+\bullet\tab Device list comes from CertMon Local CA mapping\par
+\bullet\tab Upload tab starts with a dry run before actual upload\par
+\bullet\tab Real upload requires explicit Start Toolbelt upload\par
+\bullet\tab Stop after current device stops safely before the next one\par
+\bullet\tab CertMon materializes combined PEM only in a temporary server-side folder and removes it when done\par
+\pard\par
+\b First-run checklist\b0\par
+1. Install Extron Toolbelt and verify it discovers devices.\par
+2. Run Toolbelt and CertMon at the same privilege level.\par
+3. In Toolbelt's discovered-device list, enable Fields > Serial Number.\par
+4. Confirm the dry-run status before starting a real upload.\par
+\par
+\b Device Credential Behavior\b0\par
+CertMon tries saved per-device credentials first, followed by shared default credentials, then common defaults such as admin/extron.\par
+\par
+\b Cloudflare Integration\b0\par
+When using automatic DNS validation, create a scoped Cloudflare API token that can only edit the zones CertMon manages.\par
+Use these permissions:\par
+- Zone:DNS:Edit\par
+- Zone:Zone:Read\par
+Do not use the Global API Key.\par
+\par
+\b Backup and Recovery\b0\par
+Create and securely store a vault recovery package and passphrase separately.\par
+\pard\li360\fi-360\par
+\bullet\tab Backup creates a consistent SQLite online backup\par
+\bullet\tab Encrypted certificate artifacts and vault files are included\par
+\bullet\tab The backup manifest is hash checked and HMAC authenticated\par
+\bullet\tab The package can restore the installation master key after service-account migration\par
+\pard\par
+\b When moving CertMon to another Windows service account\b0\par
+1. Restore the backup into a new directory.\par
+2. Restore the vault master key with the recovery package and passphrase.\par
+3. Rewrap the master key using DPAPI under the new service account.\par
+4. Verify representative certificates and keys before switching CERTMON_DATA_DIR.\par
+\par
+\b Troubleshooting\b0\par
+\b Common issues\b0\par
+- Scan already running: wait for current scan to finish.\par
+- Certificate import fails: verify PEM formatting and matching key.\par
+- Toolbelt upload fails: confirm toolbelt is running, devices discovered, and credentials valid.\par
+- Cloudflare DNS automation fails: verify token scopes and configured zones.\par
+- ACME staging fails: confirm DNS records are valid before production.\par
+\par
+\b Best practices\b0\par
+- Run CertMon only on localhost in single-user mode.\par
+- Keep CA certificates and recovery packages in secure storage.\par
+- Use staging before production issuance.\par
+- Keep per-device and shared credentials encrypted and limited.\par
+\par
+\b Summary\b0\par
+CertMon is a practical certificate lifecycle and deployment tool for environments that must track TLS certificates, renew them securely, and often deploy them to local devices like Extron equipment. It is strongest when used as a local, single-user control plane with clear separation between public issuance, internal CA actions, and secure private-key handling.\par
+\par
+\b Support and repository\b0\par
+Repository: https://github.com/wilfreddenijs/certmon\par
+\par
+\b Document created as a Word-compatible RTF\b0\par
+This file can be opened directly in Microsoft Word or converted to DOCX if needed.\par
+\par
+\par
+}
