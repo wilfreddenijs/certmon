@@ -1277,12 +1277,59 @@
   let auditLoadSequence = 0;
   let authState = { server_mode: false, authenticated: true, first_admin_required: false, permissions: [] };
   let authSubmitting = false;
+  let authResetInFlight = false;
   let administrationUsers = [];
   let supportedRoles = [];
   let userModalMode = 'add';
   let userModalTargetId = null;
 
   const nativeFetch = window.fetch.bind(window);
+  function isProtectedRequest(requestUrl) {
+    const url = new URL(requestUrl, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) return false;
+    return ![
+      '/api/auth/status',
+      '/api/auth/login',
+      '/api/auth/setup-first-admin',
+      '/api/auth/logout',
+    ].includes(url.pathname);
+  }
+
+  async function handleUnauthorizedSession() {
+    if (authResetInFlight) return;
+    authResetInFlight = true;
+    clearInterval(scanPollInterval);
+    clearTimeout(toolbeltPollTimer);
+    scanPollInterval = null;
+    toolbeltPollTimer = null;
+    auditLoadSequence += 1;
+    currentCertificates = {};
+    administrationUsers = [];
+    supportedRoles = [];
+    toolbeltDevices = [];
+    selectedManualTarget = null;
+    selectedDeviceId = null;
+    pendingDeployment = null;
+    selectedDeviceKeys.clear();
+    document.getElementById('audit-list')?.replaceChildren();
+    document.getElementById('administration-users')?.replaceChildren();
+    document.getElementById('toolbelt-device-list')?.replaceChildren();
+    document.getElementById('push-result').style.display = 'none';
+    authState = { server_mode: true, authenticated: false, first_admin_required: false, permissions: [] };
+    try {
+      await initAuth();
+    } finally {
+      authResetInFlight = false;
+    }
+  }
+
+  async function handleProtectedResponse(response, requestUrl) {
+    if (response.status === 401 && isProtectedRequest(requestUrl)) {
+      await handleUnauthorizedSession();
+    }
+    return response;
+  }
+
   window.fetch = (input, init = {}) => {
     const method = (init.method || 'GET').toUpperCase();
     const url = typeof input === 'string' ? input : input.url;
@@ -1292,7 +1339,7 @@
       headers.set(authState.csrf_header || 'X-CertMon-CSRF', authState.csrf_token);
       init = { ...init, headers };
     }
-    return nativeFetch(input, init);
+    return nativeFetch(input, init).then(response => handleProtectedResponse(response, url));
   };
 
   async function initAuth() {
@@ -1776,7 +1823,12 @@
       if (finished || sequence !== auditLoadSequence) return;
       nativeFetch('/api/audit?limit=100')
         .then(async res => {
+          res = await handleProtectedResponse(res, '/api/audit?limit=100');
           if (finished || sequence !== auditLoadSequence) return;
+          if (res.status === 401) {
+            stop();
+            return;
+          }
           if (res.status === 403) {
             renderFailure('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
             return;
