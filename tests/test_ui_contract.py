@@ -75,6 +75,16 @@ def test_permission_visibility_is_centralized_and_uses_public_catalog_for_upload
     assert "canManageServerBackup()" not in html
 
 
+def test_protected_401_recovery_is_shared_without_auth_polling_or_replay():
+    html = page()
+
+    assert "function handleUnauthorizedSession()" in html
+    assert "function handleProtectedResponse(response, requestUrl)" in html
+    assert "authResetInFlight" in html
+    assert "handleProtectedResponse(res, '/api/audit?limit=100')" in html
+    assert "setInterval(async () => {\n    if (!authState.server_mode || authState.authenticated) await loadData();" in html
+
+
 def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
     html = page()
     loader = html.split("async function loadUsers(message = '')", 1)[1].split(

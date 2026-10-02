@@ -1,5 +1,6 @@
+from importlib import import_module
+
 from playwright.sync_api import expect
-import app
 
 
 def _create_user(page, username, roles):
@@ -20,6 +21,24 @@ def _create_user(page, username, roles):
     )
 
 
+def _replace_roles(page, user_id, roles):
+    return page.evaluate(
+        """async ({userId, roles}) => {
+            const status = await (await fetch('/api/auth/status')).json();
+            const response = await fetch(`/api/users/${userId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    [status.csrf_header]: status.csrf_token,
+                },
+                body: JSON.stringify({roles}),
+            });
+            return response.status;
+        }""",
+        {"userId": user_id, "roles": roles},
+    )
+
+
 def _sign_in_as_viewer(page, live_certmon):
     certmon = live_certmon(server_mode=True)
     page.goto(certmon.base_url)
@@ -29,13 +48,14 @@ def _sign_in_as_viewer(page, live_certmon):
     page.locator("#auth-submit").click()
     expect(page.locator(".main")).to_be_visible()
     assert _create_user(page, "browser-viewer", ["viewer"])["status"] == 201
-    app.artifact_store.create_certificate_set(
+    module = import_module("app")
+    module.artifact_store.create_certificate_set(
         "browser-public-cert",
         {"certificate.pem": b"browser public certificate"},
         {},
         {},
     )
-    app.database.put_certificate(
+    module.database.put_certificate(
         "browser-public-cert",
         {
             "kind": "leaf",
@@ -99,3 +119,35 @@ def test_viewer_hides_restricted_controls_and_uses_only_public_catalog(page, liv
         assert not any("/api/toolbelt/" in url or "/api/audit" in url or "/api/users" in url for url in requests)
     finally:
         viewer.close()
+
+
+def test_revoked_security_admin_audit_next_401_clears_to_sign_in(page, live_certmon):
+    certmon = live_certmon(server_mode=True)
+    page.goto(certmon.base_url)
+    page.locator("#auth-username").fill("browser-admin")
+    page.locator("#auth-password").fill("correct horse")
+    page.locator("#auth-password-confirmation").fill("correct horse")
+    page.locator("#auth-submit").click()
+    expect(page.locator(".main")).to_be_visible()
+    created = _create_user(page, "browser-security", ["security_admin"])
+    assert created["status"] == 201
+
+    security = page.context.browser.new_context()
+    security_page = security.new_page()
+    security_page.goto(certmon.base_url)
+    security_page.locator("#auth-username").fill("browser-security")
+    security_page.locator("#auth-password").fill("correct horse")
+    security_page.locator("#auth-submit").click()
+    expect(security_page.locator('[data-tab="audit"]')).to_be_visible()
+    assert _replace_roles(page, created["body"]["user"]["id"], ["viewer"]) == 200
+
+    requests = []
+    security_page.on("request", lambda request: requests.append(request.url))
+    try:
+        security_page.locator('[data-tab="audit"]').click()
+        security_page.get_by_role("button", name="Refresh audit").click()
+        expect(security_page.locator("#auth-gate")).to_be_visible(timeout=5000)
+        expect(security_page.locator(".main")).to_be_hidden()
+        assert sum("/api/audit?limit=100" in url for url in requests) == 1
+    finally:
+        security.close()
