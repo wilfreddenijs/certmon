@@ -1,6 +1,6 @@
 # Plan 02-05 - Tracer Feedback Checkpoint
 
-Status: awaiting human verification
+Status: approved by user; continuation completed in 2b24f17
 Date: 2026-10-02
 Type: human-verify (blocking tracer feedback gate)
 Executor: 01a0fbda-bec0-7bb0-b2ad-08d939fb0306
@@ -18,6 +18,9 @@ development dependencies and CI installation.
   installation did not include the required shell.
 
 ## Continuation
+
+User selected option 1 (approval) in this conversation. Continue from task
+02-05-02; the completed browser tracer must not be repeated.
 
 Await the user's `verified` response or reported issues. After approval, execute
 only task 02-05-02 (historical 02-04 summary reconciliation), commit 02-05-SUMMARY,

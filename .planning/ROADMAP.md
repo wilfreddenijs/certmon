@@ -25,12 +25,12 @@ Plans:
 - [x] 02-01-PLAN.md
 - [x] 02-02-PLAN.md
 - [x] 02-03-PLAN.md
-- [ ] 02-04-PLAN.md - publication and retest recorded; summary reconciliation pending, UAT 5 remains unresolved
-- [ ] 02-05-PLAN.md - browser harness and evidence-based historical summary reconciliation
+- [x] 02-04-PLAN.md - historical publication summarized; UAT 5 remains unresolved, do not re-execute
+- [x] 02-05-PLAN.md - browser harness and evidence-based historical summary reconciliation
 - [ ] 02-06-PLAN.md - effective permissions, public catalog, UI visibility and protected-session recovery
 - [ ] 02-07-PLAN.md - browser role matrix and UAT 5 acceptance
 
-3/7 plans have execution summaries. Do not repeat the already-published build-15 delivery or advance the phase before fixing and retesting UAT 5.
+5/7 plans have execution summaries. Do not repeat the already-published build-15 delivery or advance the phase before fixing and retesting UAT 5.
 
 **Repair Wave 0 - 02-05**
 
