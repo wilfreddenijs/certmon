@@ -1,4 +1,5 @@
 from playwright.sync_api import expect
+import app
 
 
 def _create_user(page, username, roles):
@@ -28,6 +29,20 @@ def _sign_in_as_viewer(page, live_certmon):
     page.locator("#auth-submit").click()
     expect(page.locator(".main")).to_be_visible()
     assert _create_user(page, "browser-viewer", ["viewer"])["status"] == 201
+    app.artifact_store.create_certificate_set(
+        "browser-public-cert",
+        {"certificate.pem": b"browser public certificate"},
+        {},
+        {},
+    )
+    app.database.put_certificate(
+        "browser-public-cert",
+        {
+            "kind": "leaf",
+            "identifiers": ["browser.example.test"],
+            "profile": "generic-rsa",
+        },
+    )
 
     viewer = page.context.browser.new_context()
     viewer_page = viewer.new_page()
@@ -75,6 +90,8 @@ def test_viewer_hides_restricted_controls_and_uses_only_public_catalog(page, liv
         expect(viewer_page.locator('[data-tab="audit"]')).to_be_hidden()
         expect(viewer_page.locator("#administration-tab")).to_be_hidden()
         expect(viewer_page.locator("#toolbelt-batch")).to_be_hidden()
+        expect(viewer_page.locator("#device-bulk-create-btn")).to_be_hidden()
+        viewer_page.locator('[data-tab="upload"]').click()
         expect(viewer_page.locator("#manual-upload-fallback")).to_be_visible()
         expect(viewer_page.locator("#push-private-artifacts")).to_be_hidden()
         assert any("/api/certificates/public" in url for url in requests)

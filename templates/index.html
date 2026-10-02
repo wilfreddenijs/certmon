@@ -819,7 +819,7 @@
   <aside class="sidebar">
 
     <!-- Manual hosts -->
-    <div>
+    <div data-required-permission="issue_certificate">
       <div class="section-title">Manual Hosts</div>
       <div class="input-row">
         <input type="text" id="host-input" placeholder="hostname or IP" />
@@ -830,7 +830,7 @@
     </div>
 
     <!-- Scan ranges -->
-    <div>
+    <div data-required-permission="issue_certificate">
       <div class="section-title">Network Scan Ranges</div>
       <div class="input-row">
         <input type="text" id="range-input" placeholder="192.168.0.0/24" />
@@ -867,8 +867,8 @@
         <div class="tab" data-tab="renewals" onclick="switchTab('renewals')">Renewals</div>
         <div class="tab" data-tab="ca" onclick="switchTab('ca')">🔐 Local CA</div>
         <div class="tab" data-tab="upload" onclick="switchTab('upload')">⬆ Upload</div>
-        <div class="tab" data-tab="audit" onclick="switchTab('audit')">Audit</div>
-        <div class="tab" data-tab="admin" id="administration-tab" onclick="switchTab('admin')" hidden>Administration</div>
+        <div class="tab" data-tab="audit" data-required-permission="view_audit" onclick="switchTab('audit')">Audit</div>
+        <div class="tab" data-tab="admin" id="administration-tab" data-any-permission="manage_users manage_server_backup" onclick="switchTab('admin')" hidden>Administration</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -908,7 +908,7 @@
           </span>
           <span class="help-text" id="device-filter-count"></span>
         </div>
-        <div class="device-filter-group">
+        <div class="device-filter-group" data-required-permission="manage_local_ca">
           <label style="display:flex;gap:8px;align-items:center">
             <input id="device-select-filtered" type="checkbox" onchange="toggleFilteredDevices(this.checked)" />
             <span style="font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--text)">Select filtered</span>
@@ -938,7 +938,7 @@
       <div id="ca-content" style="max-width:860px"></div>
     </div>
 
-    <div class="tab-panel" id="tab-audit">
+    <div class="tab-panel" id="tab-audit" data-required-permission="view_audit">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
         <div class="section-title" style="margin-bottom:8px">Audit log</div>
         <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
@@ -951,8 +951,8 @@
       </div>
     </div>
 
-    <div class="tab-panel" id="tab-admin" hidden>
-      <section id="server-backup-section">
+    <div class="tab-panel" id="tab-admin" data-any-permission="manage_users manage_server_backup" hidden>
+      <section id="server-backup-section" data-required-permission="manage_server_backup">
         <div class="section-title" style="margin-bottom:6px">Server backup and recovery</div>
         <div class="help-text choice-help" style="margin-bottom:16px">
           Full server backups contain the database, encrypted certificate artifacts, vault files, and encrypted recovery material. This is separate from Local CA Export CA backup and Import CA backup.
@@ -994,7 +994,7 @@
         </div>
         <div id="server-backup-restore-result" role="status" class="help-text" style="margin-bottom:24px"></div>
       </section>
-      <section id="user-administration-section" style="border-top:1px solid var(--border);padding-top:20px">
+      <section id="user-administration-section" data-required-permission="manage_users" style="border-top:1px solid var(--border);padding-top:20px">
       <div class="admin-toolbar">
         <div>
           <div class="section-title" style="margin-bottom:6px">Users</div>
@@ -1013,7 +1013,7 @@
 
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
-      <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+      <div id="toolbelt-batch" data-required-permission="deploy_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
           <div>
             <div class="section-title" style="margin-bottom:8px">Prepared device upload</div>
@@ -1039,7 +1039,7 @@
         <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
-      <details id="manual-upload-fallback" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+      <details id="manual-upload-fallback" data-required-permission="download_public_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
         <summary style="cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent)">Manual upload fallback</summary>
         <div class="help-text choice-help" style="margin:10px 0 16px">
           For unsupported devices only. The automatic Toolbelt prepared-device list above is the primary Upload workflow.
@@ -1047,7 +1047,7 @@
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
             <div class="section-title" style="margin-bottom:0">Download Certificates for Manual Upload</div>
-            <a href="/api/ca/extron-combined-zip" download="certmon-extron-combined-pems.zip"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--warning);border-color:var(--warning)" title="Download all Extron combined PEM files in one ZIP. These files contain private keys; keep the ZIP secret and delete local copies after upload.">Download all Extron PEMs (.zip)</button></a>
+            <a data-required-permission="download_private_key" href="/api/ca/extron-combined-zip" download="certmon-extron-combined-pems.zip"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--warning);border-color:var(--warning)" title="Download all Extron combined PEM files in one ZIP. These files contain private keys; keep the ZIP secret and delete local copies after upload.">Download all Extron PEMs (.zip)</button></a>
           </div>
 
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
@@ -1071,7 +1071,7 @@
               <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:6px">Public certificate downloads</div>
               <div id="push-public-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             </div>
-            <div id="push-private-artifacts" style="display:none;margin-top:14px">
+            <div id="push-private-artifacts" data-required-permission="download_private_key" style="display:none;margin-top:14px">
               <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">Private key download</div>
               <div class="help-text" style="margin-bottom:8px">Keep this file secret. Download it only when a device requires manual certificate import.</div>
               <div id="push-private-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -1275,7 +1275,7 @@
   const selectedDeviceKeys = new Set();
   const renewalActionResults = {};
   let auditLoadSequence = 0;
-  let authState = { server_mode: false, authenticated: true, first_admin_required: false };
+  let authState = { server_mode: false, authenticated: true, first_admin_required: false, permissions: [] };
   let authSubmitting = false;
   let administrationUsers = [];
   let supportedRoles = [];
@@ -1307,7 +1307,7 @@
       main.style.display = 'grid';
       badge.style.display = 'none';
       stats.style.display = 'flex';
-      syncAdministrationVisibility();
+      syncTabVisibility();
       return true;
     }
     if (!authState.authenticated) {
@@ -1323,7 +1323,7 @@
       document.getElementById('auth-confirmation-group').hidden = !authState.first_admin_required;
       document.getElementById('auth-password').autocomplete = authState.first_admin_required ? 'new-password' : 'current-password';
       document.getElementById('auth-password-confirmation').autocomplete = 'new-password';
-      syncAdministrationVisibility();
+      syncTabVisibility();
       updateAuthSubmitState();
       return false;
     }
@@ -1332,7 +1332,7 @@
     stats.style.display = 'flex';
     badge.style.display = 'flex';
     document.getElementById('auth-user-label').textContent = `${authState.user.username} (${authState.user.roles.join(', ')})`;
-    syncAdministrationVisibility();
+    syncTabVisibility();
     return true;
   }
 
@@ -1395,33 +1395,37 @@
     await initAuth();
   }
 
-  function isAuthenticatedAdmin() {
-    return Boolean(
-      authState.server_mode &&
-      authState.authenticated &&
-      authState.user &&
-      authState.user.roles.includes('admin')
-    );
+  function hasPermission(name) {
+    return Boolean(authState.authenticated && (authState.permissions || []).includes(name));
   }
 
-  function canManageServerBackup() {
-    return Boolean(
-      authState.server_mode &&
-      authState.authenticated &&
-      authState.user &&
-      authState.user.roles.some(role => role === 'admin' || role === 'security_admin')
-    );
+  function applyPermissionVisibility(root = document) {
+    root.querySelectorAll('[data-required-permission]').forEach(element => {
+      element.hidden = !hasPermission(element.dataset.requiredPermission);
+    });
+    root.querySelectorAll('[data-any-permission]').forEach(element => {
+      const permissions = element.dataset.anyPermission.split(/\s+/).filter(Boolean);
+      element.hidden = !permissions.some(hasPermission);
+    });
   }
 
-  function syncAdministrationVisibility() {
-    const visible = canManageServerBackup();
-    const tab = document.getElementById('administration-tab');
-    const panel = document.getElementById('tab-admin');
-    const users = document.getElementById('user-administration-section');
-    if (tab) tab.hidden = !visible;
-    if (panel) panel.hidden = !visible;
-    if (users) users.hidden = !isAuthenticatedAdmin();
-    if (!visible && panel && panel.classList.contains('active')) switchTab('certs');
+  function syncTabVisibility() {
+    applyPermissionVisibility();
+    ['certs', 'renewals'].forEach(name => {
+      const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+      const panel = document.getElementById(`tab-${name}`);
+      if (tab) tab.hidden = false;
+      if (panel) panel.hidden = false;
+    });
+    ['ca', 'upload'].forEach(name => {
+      const visible = hasPermission('download_public_certificate') || !authState.server_mode;
+      const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+      const panel = document.getElementById(`tab-${name}`);
+      if (tab) tab.hidden = !visible;
+      if (panel) panel.hidden = !visible;
+    });
+    const active = document.querySelector('.tab-panel.active');
+    if (active && active.hidden) switchTab('certs');
   }
 
   function updateServerBackupControls() {
@@ -1514,7 +1518,7 @@
   }
 
   async function loadUsers(message = '') {
-    if (!isAuthenticatedAdmin()) return;
+    if (!hasPermission('manage_users')) return;
     const res = await fetch('/api/users');
     const data = await res.json().catch(() => ({}));
     const result = document.getElementById('administration-result');
@@ -1529,6 +1533,7 @@
     result.style.color = 'var(--ok)';
     result.textContent = message;
     renderAdministrationUsers();
+    applyPermissionVisibility();
   }
 
   function renderAdministrationUsers() {
@@ -1804,7 +1809,7 @@
       uploadDevices = await udRes.json();
     } catch (e) { /* keep existing uploadDevices */ }
     try {
-      const certRes = await fetch('/api/certificates');
+      const certRes = await fetch('/api/certificates/public');
       availableCertificates = await certRes.json();
     } catch (e) { /* keep existing availableCertificates */ }
     let renewals = [];
@@ -1816,6 +1821,8 @@
     renderCerts(currentCertificates);
     renderRenewals(renewals);
     updateStats(data.certificates || {});
+    applyPermissionVisibility();
+    syncTabVisibility();
   }
 
   function renderSidebar(data) {
@@ -1990,6 +1997,7 @@
     }
     const bulkBtn = document.getElementById('device-bulk-create-btn');
     if (bulkBtn) {
+      bulkBtn.hidden = !hasPermission('manage_local_ca');
       bulkBtn.disabled = !createTargets.length;
       bulkBtn.textContent = createTargets.length ? `Create certificates (${createTargets.length})` : 'Create certificates';
     }
@@ -2015,17 +2023,17 @@
       const canRenew = c.days_remaining !== null && c.days_remaining < 30;
       const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
       const localCaCert = findLocalCaCertificate(c);
-      const certificateAction = localCaCert
+      const certificateAction = hasPermission('manage_local_ca') ? (localCaCert
         ? (localCaCert.profile === 'extron-rsa'
           ? `<button class="btn btn-ca" title="Show the prepared Extron-compatible certificate and open Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}','${localCaCert.certificate_id}')">Upload ready</button>`
           : `<button class="btn btn-upload" title="Open manual certificate downloads for this device" onclick="openManualUploadForCertificate('${localCaCert.certificate_id}')">Upload</button>`)
-        : `<button class="btn btn-ca" title="Create a Local CA certificate for this device" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Create certificate</button>`;
+        : `<button class="btn btn-ca" title="Create a Local CA certificate for this device" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Create certificate</button>`) : '';
 
       return `
         <div class="cert-card ${c.status}">
           <div class="cert-header">
             <div style="display:flex;gap:10px;align-items:flex-start;min-width:0">
-              <input type="checkbox" ${selectedDeviceKeys.has(key) ? 'checked' : ''} onchange="toggleDeviceSelection('${escAttr(key)}', this.checked)" title="Select for bulk certificate creation" />
+              ${hasPermission('manage_local_ca') ? `<input type="checkbox" ${selectedDeviceKeys.has(key) ? 'checked' : ''} onchange="toggleDeviceSelection('${escAttr(key)}', this.checked)" title="Select for bulk certificate creation" />` : ''}
               <div style="min-width:0">
               <div class="cert-host">${c.cn || c.host}</div>
               <div class="cert-port">${c.host}:${c.port}</div>
@@ -2052,14 +2060,15 @@
             <div class="days-fill" style="width:${barW}%;background:${color}"></div>
           </div>
           <div class="cert-actions">
-            <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
-            ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
+            ${hasPermission('issue_certificate') ? `<button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>` : ''}
+            ${canRenew && hasPermission('issue_certificate') ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
             ${certificateAction}
-            <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
+            ${hasPermission('issue_certificate') ? `<button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>` : ''}
           </div>
         </div>
       `;
     }).join('');
+    applyPermissionVisibility(grid);
   }
 
   function renderRenewals(renewals) {
@@ -2488,7 +2497,8 @@
   }
 
   function switchTab(name) {
-    if (name === 'admin' && !canManageServerBackup()) return;
+    const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (!tab || tab.hidden) return;
     document.querySelectorAll('.tab[data-tab]').forEach(t => {
       t.classList.toggle('active', t.dataset.tab === name);
     });
@@ -2496,11 +2506,11 @@
     document.getElementById(`tab-${name}`).classList.add('active');
     if (name === 'ca') loadCA();
     if (name === 'audit') prepareAuditTab();
-    if (name === 'admin' && isAuthenticatedAdmin()) loadUsers();
+    if (name === 'admin' && hasPermission('manage_users')) loadUsers();
     if (name === 'upload') {
       loadUploadDevices();
       loadAvailableCertificates();
-      loadToolbeltDevices(false);
+      if (hasPermission('deploy_certificate')) loadToolbeltDevices(false);
     }
   }
 
@@ -2527,14 +2537,14 @@
           <div class="status-badge ok">${ca.days_remaining} days</div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
+          <button class="btn btn-ghost" data-required-permission="manage_local_ca" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
           <span style="display:inline-flex;align-items:center;gap:6px">
             <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
             <span title="Windows manual trust install: download the CA cert, double-click the .crt, choose Install Certificate, choose Local Machine for all users or Current User for only you, select Place all certificates in the following store, browse to Trusted Root Certification Authorities, finish, confirm the warning, then restart the browser. Install only the public CA certificate, not a private key or backup file." style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--border);border-radius:50%;color:var(--accent);font-size:12px;font-weight:700;cursor:help">i</span>
             <a href="/api/ca/trust-bundle" download="certmon-local-ca-trust-bundle.zip"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" title="Download the public Local CA trust bundle for another CertMon operator's Windows trust store. This ZIP does not include the Local CA private key.">⬇ Trust bundle</button></a>
           </span>
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>
+          <button class="btn btn-ghost" data-required-permission="download_private_key" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
+          <button class="btn btn-ghost" data-required-permission="manage_local_ca" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>
         </div>
         <div class="help-text field-note" style="margin-top:10px">Use an encrypted CA backup to share one Local CA between trusted CertMon desktops without baking private keys into the executable.</div>
         <div id="ca-install-result" style="margin-top:10px;font-size:12px"></div>
@@ -2543,14 +2553,14 @@
         <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">No Local CA yet</div>
         <div style="color:var(--muted);font-size:13px;margin-bottom:16px">Generate a local CA once — then install it in Windows so all browsers trust your device certificates.</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn" onclick="generateCA()">⚡ Generate Local CA</button>
-          <button class="btn btn-ghost" onclick="importLocalCABackup(false)">Import CA backup</button>
+          <button class="btn" data-required-permission="manage_local_ca" onclick="generateCA()">⚡ Generate Local CA</button>
+          <button class="btn btn-ghost" data-required-permission="manage_local_ca" onclick="importLocalCABackup(false)">Import CA backup</button>
         </div>
         <div id="ca-generate-result" style="margin-top:12px;font-size:12px"></div>
       </div>`;
 
     const issueForm = ca.exists ? `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px">
+      <div data-required-permission="manage_local_ca" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px">
         <div class="section-title" style="margin-bottom:14px">Issue Device Certificate</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div>
@@ -2596,9 +2606,9 @@
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <a href="/api/ca/download/${c.certificate_id}" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
-                ${c.profile === 'extron-rsa' ? `<a href="/api/certificates/${c.certificate_id}/private/combined.pem" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
+                ${c.profile === 'extron-rsa' ? `<a data-required-permission="download_private_key" href="/api/certificates/${c.certificate_id}/private/combined.pem" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
-                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
+                <button class="btn btn-danger" data-required-permission="manage_local_ca" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
               </div>
             </div>`).join('')}
         </div>
@@ -2611,7 +2621,8 @@
         <button class="btn btn-ghost" onclick="switchTab('certs')">Open Devices</button>
       </div>` : '';
 
-    el.innerHTML = caCard + deviceHint;
+    el.innerHTML = caCard + issueForm + issuedSection + deviceHint;
+    applyPermissionVisibility(el);
   }
 
   async function generateCA() {
@@ -2994,9 +3005,10 @@
   }
 
   async function loadAvailableCertificates() {
-    const res = await fetch('/api/certificates');
+    const res = await fetch('/api/certificates/public');
     availableCertificates = await res.json();
     renderCertificateSelect();
+    applyPermissionVisibility();
     applyPendingDeployment();
   }
 
@@ -3355,18 +3367,19 @@
     logEl.innerHTML = '<div>Manual upload selected. CertMon does not connect to this device automatically.</div>';
     const selectedCertificate = (availableCertificates || []).find(c => c.certificate_id === certificate_id) || {};
     const isExtronProfile = selectedCertificate.profile === 'extron-rsa';
+    const publicArtifacts = selectedCertificate.public_artifacts || [];
 
     publicArtifactsDiv.style.display = 'block';
-    publicArtifactsEl.innerHTML = ['certificate.pem', 'chain.pem', 'full-chain.pem'].map(name =>
+    publicArtifactsEl.innerHTML = publicArtifacts.map(name =>
       `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/public/${name}" download style="font-size:11px;padding:6px 10px">${name}</a>`
     ).join('');
 
-    privateArtifactsDiv.style.display = 'block';
-    privateArtifactsEl.innerHTML = isExtronProfile
+    privateArtifactsDiv.style.display = hasPermission('download_private_key') ? 'block' : 'none';
+    privateArtifactsEl.innerHTML = hasPermission('download_private_key') ? (isExtronProfile
       ? `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/combined.pem" download style="font-size:11px;padding:6px 10px;color:var(--warning);border-color:var(--warning)" title="Extron combined PEM contains certificate and private key. Keep it secret.">extron-combined.pem</a>`
-      : `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
+      : `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`) : '';
 
-    instrDiv.style.display = 'block';
+    instrDiv.style.display = hasPermission('download_private_key') ? 'block' : 'none';
     instrText.textContent = isExtronProfile
       ? [
           '1. Download extron-combined.pem.',
@@ -3381,6 +3394,7 @@
         ].join('\n');
 
     resultDiv.scrollIntoView({ behavior: 'smooth' });
+    applyPermissionVisibility(resultDiv);
   }
 
   async function startApp() {

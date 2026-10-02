@@ -83,10 +83,10 @@ def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
 
     assert html.count('id="administration-tab"') == 1
     assert 'id="tab-admin"' in html
-    assert "authState.user.roles.includes('admin')" in html
-    assert "if (!isAuthenticatedAdmin()) return;" in loader
+    assert 'data-any-permission="manage_users manage_server_backup"' in html
+    assert "if (!hasPermission('manage_users')) return;" in loader
     assert "fetch('/api/users')" in loader
-    assert loader.index("if (!isAuthenticatedAdmin()) return;") < loader.index("fetch('/api/users')")
+    assert loader.index("if (!hasPermission('manage_users')) return;") < loader.index("fetch('/api/users')")
     assert "data.supported_roles" in html
     assert "supportedRoles.map(role" in html
     for command in ("Add user", "Edit roles", "Enable", "Disable", "Reset password"):
@@ -107,9 +107,9 @@ def test_server_backup_ui_is_security_admin_visible_and_requires_confirmation():
     assert "Stage restore" in html
     assert "Export CA backup" in html
     assert "Import CA backup" in html
-    assert "role === 'admin' || role === 'security_admin'" in html
+    assert 'data-required-permission="manage_server_backup"' in html
     assert 'id="user-administration-section"' in html
-    assert "users.hidden = !isAuthenticatedAdmin()" in html
+    assert 'data-required-permission="manage_users"' in html
     assert "passphrase !== confirmationEl.value" in exporter
     assert exporter.index("passphrase !== confirmationEl.value") < exporter.index("fetch('/api/server-backup/export'")
     assert "passphrase !== confirmationEl.value || !consentEl.checked" in restorer
