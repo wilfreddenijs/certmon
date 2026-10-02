@@ -1,0 +1,1 @@
+No external API integration: Phase 02 gap closure changes only CertMon's existing internal Flask routes, same-origin browser behavior, and local Playwright test harness; it adds no external service or SDK API integration.

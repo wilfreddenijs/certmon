@@ -18,7 +18,7 @@ Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped
 
 ### Phase 02: Shared Server Mode and Team Local CA
 
-Status: implemented; final build-15 UAT has 9 passed tests and one unresolved role-visibility issue. Repair context captured on 2026-10-02; gap-closure planning required.
+Status: implemented; final build-15 UAT has 9 passed tests and one unresolved role-visibility issue. Gap-closure plans 02-05 through 02-07 independently reviewed on 2026-10-02; ready for execution, not yet repaired.
 
 Plans:
 
@@ -26,8 +26,23 @@ Plans:
 - [x] 02-02-PLAN.md
 - [x] 02-03-PLAN.md
 - [ ] 02-04-PLAN.md - publication and retest recorded; summary reconciliation pending, UAT 5 remains unresolved
+- [ ] 02-05-PLAN.md - browser harness and evidence-based historical summary reconciliation
+- [ ] 02-06-PLAN.md - effective permissions, public catalog, UI visibility and protected-session recovery
+- [ ] 02-07-PLAN.md - browser role matrix and UAT 5 acceptance
 
-3/4 plans have execution summaries. Do not repeat the already-published build-15 delivery or advance the phase before fixing and retesting UAT 5.
+3/7 plans have execution summaries. Do not repeat the already-published build-15 delivery or advance the phase before fixing and retesting UAT 5.
+
+**Repair Wave 0 - 02-05**
+
+- Browser infrastructure and historical reconciliation; no dependency on rerunning 02-04.
+
+**Repair Wave 1 - 02-06** *(blocked on repair Wave 0)*
+
+- Permission-driven UI and public downloads; session recovery covers normal fetch and the native Audit request path.
+
+**Repair Wave 2 - 02-07** *(blocked on repair Wave 1)*
+
+- Complete browser matrix and human acceptance; preserve passed UAT 4 and 9.
 
 **Wave 1 — completed implementation**
 
@@ -77,3 +92,12 @@ Plans:
 Plans:
 
 - [x] `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-01-PLAN.md` — Device-first Extron Local CA and Upload workflow
+
+### Phase 05: Direct Extron certificate upload
+
+**Status:** Workflow decisions captured; not yet planned or implemented.
+**Goal:** Replace Toolbelt automation with combined-PEM transfer over SFTP (22022), SIS import over SSH (22023), and HTTPS certificate verification while preserving upload-list and credential workflows.
+**Canonical refs:** `docs/specs/extron-direct-upload.md`
+**Depends on:** Phase 04 upload workflow; preserve Phase 02 authorization boundaries.
+**Decisions:** LAN A by default, optional LAN B per device; no normal reboot. Retire Toolbelt only after the direct replacement is verified.
+**Plans:** 0 plans
