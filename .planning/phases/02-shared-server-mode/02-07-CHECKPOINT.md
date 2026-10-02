@@ -56,3 +56,15 @@ Fresh executor `01a0fe95-17fe-7f10-aa32-118a090d432b` completed 07-02 under that
 Provide fresh observations or an exact remaining failure. Do not infer approval from option 1 authorizing automated work. If a new executable is needed, obtain separate push/build authorization before publishing. After human approval use a fresh executor to record only UAT 5/G-02-2 and complete the plan summary; preserve UAT 4/9.
 
 No summary, phase completion, UAT 5 approval, push or executable build is implied. UAT 4 and 9 remain unchanged. Untracked .gsd/ and data/ are preserved.
+
+## Publication and CI Follow-Up
+
+User explicitly authorized push and test build delivery. Commit f405625 was pushed
+and Windows build 20 succeeded (run 37071962284). Its separate Test CertMon run
+37071945639 failed because session snapshots preceded initial rendering.
+
+The follow-up synchronizes sign-in tests with completed device rendering and
+adds actual rendered-visibility checks. Those checks exposed a CSS override of
+hidden on selection controls, which is now fixed. Latest full local suite:
+286 passed, 1 deselected in 226.98s. Remote verification and replacement executable
+delivery follow; no human acceptance is inferred from these corrections.

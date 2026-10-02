@@ -111,6 +111,8 @@ def _sign_in(browser, certmon, username, password=PASSWORD, controlled_clock=Fal
     page.goto(certmon.base_url)
     _submit_sign_in(page, username, password)
     expect(page.locator(".main")).to_be_visible()
+    # Login reveals the shell before loadData finishes rendering device controls.
+    expect(page.locator("#device-filter-count")).to_contain_text(" shown ")
     return context, page
 
 
@@ -246,6 +248,13 @@ def _assert_permission_visibility(page, permissions):
         assert item["hidden"] is (item["permission"] not in permissions), item
     for item in visibility["any"]:
         assert item["hidden"] is (not bool(set(item["permissions"]) & permissions))
+    for element in page.locator("[data-required-permission]").all():
+        if element.get_attribute("data-required-permission") not in permissions:
+            expect(element).to_be_hidden()
+    for element in page.locator("[data-any-permission]").all():
+        required = set(element.get_attribute("data-any-permission").split())
+        if not required & permissions:
+            expect(element).to_be_hidden()
     visible_tabs = {item["name"] for item in visibility["tabs"] if not item["hidden"]}
     expected_tabs = {"certs", "renewals"}
     if Permission.DOWNLOAD_PUBLIC_CERTIFICATE.value in permissions:

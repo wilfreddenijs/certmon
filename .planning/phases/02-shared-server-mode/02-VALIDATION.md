@@ -114,3 +114,24 @@ this planning document; a later build requires the normal user gate.
 
 **Approval:** Automated validation complete. Human UAT 5 remains the blocking sign-off;
 planning and regression evidence are not a UAT result.
+
+## CI Follow-Up: 2026-10-03
+
+GitHub test run 37071945639 on f405625 failed with 3 session-test failures,
+283 passes and one staging case deselected. The session snapshot was taken after
+the login shell appeared but before loadData finished rendering device controls.
+The sign-in test helper now waits for the rendered device count before capturing
+the snapshot. The four session cases passed in 45.64s after that correction.
+
+Rendered-visibility assertions also exposed a real CSS issue: display:flex could
+override the native hidden attribute on permission-restricted selection controls.
+The new assertion failed for Viewer before the fix (1 failed, 12 deselected in
+18.09s). A global hidden rule now enforces display:none; assertions check actual
+browser visibility as well as permission metadata.
+
+The first full run with both corrections had an unrelated initial-admin
+network failure (Failed to fetch before the setup POST reached the server):
+1 failed, 285 passed, 1 deselected in 226.27s. The unchanged suite was repeated:
+`py -3 -m pytest -m "not acme_staging" -q` returned 286 passed, 1 deselected in
+226.98s. No skips or xfails were introduced. Remote CI confirmation is pending;
+the original local pass is not a substitute for it. Human UAT 5 remains open.
