@@ -4,11 +4,11 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: shared-server-mode
-status: executing
-stopped_at: Plan 02-06 complete; continuing browser role matrix
+status: awaiting_feedback
+stopped_at: Plan 02-07 tracer review found remaining coverage gaps; awaiting feedback
 last_updated: "2026-10-02T09:02:45.532Z"
 last_activity: 2026-10-02
-last_activity_desc: Permission UI and session repair committed; browser role matrix next
+last_activity_desc: 13 Chromium tests passed; tracer review requires additional download and request coverage
 progress:
   total_phases: 5
   completed_phases: 2
@@ -22,14 +22,16 @@ Current phase: 02
 
 ## Current Position
 
-Phase: 02 (shared-server-mode) - browser matrix execution pending
-Plan: 02-05 and 02-06 complete; 02-07 next
-Status: Permission UI and session repair complete; human UAT 5 remains open
-Last activity: 2026-10-02 - Plan 02-06 summary committed as 41824d8; focused suites passed (27, 35 and 23 tests)
+Phase: 02 (shared-server-mode) - tracer feedback checkpoint
+Plan: 02-05 and 02-06 complete; 02-07 task 07-01 at feedback gate, acceptance coverage incomplete
+Status: 13 Chromium tests passed; public-download and background-request coverage still incomplete; human UAT 5 remains open
+Last activity: 2026-10-02 - Task 07-01 commits 6695f6e and 0169c63; 13 passed in 84.03s (executor evidence)
 
-Next action: Execute 02-07 browser matrix and stop at its tracer feedback gate; preserve passed UAT 4 and 9
+Next action: Obtain tracer feedback, strengthen task 07-01 coverage before regression task 07-02; preserve passed UAT 4 and 9
 
 ## Notes
+
+- Active feedback checkpoint: `.planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md`. Executor returned 13 browser passes, but orchestrator review found missing actual public-download tests, dynamic seeded view coverage, explicit restricted catalog suppression and no-background-polling assertions. Do not claim all D-01 through D-10 proven or proceed to human UAT until strengthened.
 
 - Plan 02-06 tracer was approved and all three tasks are complete. Summary commit `41824d8` records API/public catalog, permission-derived UI visibility and protected-401 cleanup. Automated success does not close G-02-2 or replace human UAT 5.
 
@@ -50,5 +52,5 @@ Next action: Execute 02-07 browser matrix and stop at its tracer feedback gate; 
 ## Session
 
 **Last session:** 2026-10-02
-**Stopped at:** Plan 02-06 complete; browser matrix next
-**Resume file:** .planning/phases/02-shared-server-mode/02-07-PLAN.md
+**Stopped at:** Plan 02-07 tracer feedback; test coverage strengthening required
+**Resume file:** .planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md
