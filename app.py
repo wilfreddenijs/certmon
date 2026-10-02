@@ -500,6 +500,15 @@ def index():
 @app.route("/api/auth/status")
 def auth_status():
     token = request.cookies.get(SESSION_COOKIE)
+    if not server_mode_enabled():
+        permissions = sorted(permission.value for permission in Permission)
+    elif current_user() is not None:
+        permissions = sorted(
+            permission.value
+            for permission in permissions_for_roles(current_user().get("roles", []))
+        )
+    else:
+        permissions = []
     return jsonify(
         {
             "server_mode": server_mode_enabled(),
@@ -510,6 +519,7 @@ def auth_status():
             "csrf_token": csrf_token_for_session(token, csrf_secret())
             if current_user() is not None
             else None,
+            "permissions": permissions,
         }
     )
 
@@ -1520,6 +1530,7 @@ def server_backup_restore():
 @app.route("/api/ca/issue", methods=["POST"])
 def ca_issue():
     """Issue a device certificate signed by the local CA."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
     if local_ca_service is None:
@@ -1546,6 +1557,7 @@ def ca_issue():
 @app.route("/api/ca/issue-bulk", methods=["POST"])
 def ca_issue_bulk():
     """Issue multiple Local CA device certificates and report per-device failures."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
     if local_ca_service is None:
@@ -1651,6 +1663,7 @@ def ca_extron_combined_zip():
 def ca_delete_issued(certificate_id):
     """Delete an issued device cert and its companion files (.crt/.key/.pem,
     plus an _encrypted.key if present)."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     metadata = database.get_certificate(certificate_id)
     if (
         metadata is None
@@ -1884,6 +1897,41 @@ def list_deployable_certificates():
     return jsonify(certificates)
 
 
+@app.route("/api/certificates/public")
+def list_public_certificates():
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
+    if artifact_store is None:
+        return jsonify([])
+
+    allowed_names = (
+        "certificate.pem",
+        "chain.pem",
+        "full-chain.pem",
+        "request.csr",
+    )
+    certificates = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf":
+            continue
+        certificate_id = metadata["id"]
+        public_artifacts = []
+        for artifact_name in allowed_names:
+            try:
+                artifact_store.read_public(certificate_id, artifact_name)
+            except (FileNotFoundError, ValueError, PermissionError):
+                continue
+            public_artifacts.append(artifact_name)
+        certificates.append(
+            {
+                "certificate_id": certificate_id,
+                "identifiers": metadata.get("identifiers", []),
+                "profile": metadata.get("profile"),
+                "public_artifacts": public_artifacts,
+            }
+        )
+    return jsonify(certificates)
+
+
 @app.route("/api/certificates/<certificate_id>/private/<artifact_name>")
 def download_private_artifact(certificate_id, artifact_name):
     authorize(Permission.DOWNLOAD_PRIVATE_KEY)
@@ -2059,6 +2107,7 @@ def list_upload_devices():
 
 @app.route("/api/upload/devices", methods=["POST"])
 def add_upload_device():
+    authorize(Permission.DEPLOY_CERTIFICATE)
     data = load_data()
     body = request.json
     required = ("name", "host", "device_type")
@@ -2083,6 +2132,7 @@ def add_upload_device():
 
 @app.route("/api/upload/devices/<device_id>", methods=["DELETE"])
 def remove_upload_device(device_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
     data = load_data()
     data["upload_devices"] = [d for d in data.get("upload_devices", []) if d["id"] != device_id]
     save_data(data)
@@ -2091,6 +2141,7 @@ def remove_upload_device(device_id):
 
 @app.route("/api/upload/devices/<device_id>", methods=["PATCH"])
 def update_upload_device(device_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
     data = load_data()
     body = request.json
     for d in data.get("upload_devices", []):
