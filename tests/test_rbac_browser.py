@@ -95,11 +95,15 @@ def _sign_in(browser, certmon, username, password=PASSWORD):
     context = browser.new_context()
     page = context.new_page()
     page.goto(certmon.base_url)
+    _submit_sign_in(page, username, password)
+    expect(page.locator(".main")).to_be_visible()
+    return context, page
+
+
+def _submit_sign_in(page, username, password=PASSWORD):
     page.locator("#auth-username").fill(username)
     page.locator("#auth-password").fill(password)
     page.locator("#auth-submit").click()
-    expect(page.locator(".main")).to_be_visible()
-    return context, page
 
 
 def _seed_browser_artifacts(module):
@@ -154,7 +158,7 @@ def _assert_permission_visibility(page, permissions):
         })"""
     )
     for item in visibility["required"]:
-        assert item["hidden"] is (item["permission"] not in permissions)
+        assert item["hidden"] is (item["permission"] not in permissions), item
     for item in visibility["any"]:
         assert item["hidden"] is (not bool(set(item["permissions"]) & permissions))
     visible_tabs = {item["name"] for item in visibility["tabs"] if not item["hidden"]}
@@ -176,6 +180,9 @@ def _assert_permission_visibility(page, permissions):
 
 def _assert_public_upload_links(page, certificate_id, expected_artifacts):
     page.locator('[data-tab="upload"]').click()
+    if not page.locator("#push-target-select").is_visible():
+        page.locator("#manual-upload-fallback summary").click()
+    expect(page.locator("#push-target-select")).to_be_visible()
     page.locator("#push-target-select").select_option(certificate_id)
     page.locator("#push-btn").click()
     links = page.locator("#push-public-artifact-links a")
@@ -196,10 +203,10 @@ def test_standalone_roles_match_effective_permissions_and_rendered_controls(
     page, live_certmon, role
 ):
     certmon, _module = _create_admin(page, live_certmon)
-    created = _create_user(page, f"browser-{role}", [role])
+    created = _create_user(page, f"matrix-{role}", [role])
     assert created["status"] == 201
 
-    context, role_page = _sign_in(page.context.browser, certmon, f"browser-{role}")
+    context, role_page = _sign_in(page.context.browser, certmon, f"matrix-{role}")
     requests = _request_paths(role_page)
     try:
         role_page.reload()
@@ -302,6 +309,17 @@ def test_next_protected_request_clears_revoked_or_expired_session(
                     ),
                 )
         _assert_next_protected_request_clears_session(target_page)
+        if mutation == "disabled":
+            _submit_sign_in(target_page, f"browser-{mutation}")
+            expect(target_page.locator("#auth-error")).to_contain_text("Invalid")
+            assert _set_disabled(page, user["id"], False)["status"] == 200
+            _submit_sign_in(target_page, f"browser-{mutation}")
+            expect(target_page.locator(".main")).to_be_visible()
+        elif mutation == "password":
+            _submit_sign_in(target_page, f"browser-{mutation}")
+            expect(target_page.locator("#auth-error")).to_contain_text("Invalid")
+            _submit_sign_in(target_page, f"browser-{mutation}", "replacement horse")
+            expect(target_page.locator(".main")).to_be_visible()
     finally:
         context.close()
 

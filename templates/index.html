@@ -1443,7 +1443,10 @@
   }
 
   function hasPermission(name) {
-    return Boolean(authState.authenticated && (authState.permissions || []).includes(name));
+    return Boolean(
+      (!authState.server_mode || authState.authenticated) &&
+      (authState.permissions || []).includes(name)
+    );
   }
 
   function applyPermissionVisibility(root = document) {
