@@ -1,6 +1,6 @@
 # Plan 02-06 - Public Download Tracer Checkpoint
 
-Status: awaiting human verification
+Status: approved by user; continuation completed (summary commit 41824d8)
 Type: human-verify (blocking tracer feedback gate)
 Date: 2026-10-02
 Executor: 01a0fc22-491c-7c70-b2b5-9a4076d0b883
@@ -19,6 +19,8 @@ mutations check authorization before processing.
 - Executor result: 27 passed in 16.50s.
 
 ## Continuation
+
+User selected option 1 to approve this checkpoint. Tasks 06-02 and 06-03 subsequently completed; see 02-06-SUMMARY.md. Continue with plan 02-07 and its separate feedback gate.
 
 After user approval, spawn a fresh executor at Task 06-02 (effective-permission
 visibility for static and dynamic controls), then Task 06-03 (next protected-401
