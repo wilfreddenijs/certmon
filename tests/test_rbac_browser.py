@@ -1,5 +1,7 @@
+import base64
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
+from urllib.parse import urlparse
 
 import pytest
 from playwright.sync_api import expect
@@ -16,6 +18,12 @@ PUBLIC_ARTIFACTS = (
     "full-chain.pem",
     "request.csr",
 )
+PUBLIC_DOWNLOADS = {
+    "/api/ca/download-cert": b"-----BEGIN CERTIFICATE-----",
+    "/api/ca/trust-bundle": b"PK",
+    "/api/export/excel": b"PK",
+    "/api/ca/devices-txt": b"browser-device.example.test",
+}
 ROLE_EXPECTATIONS = {
     role: frozenset(permission.value for permission in permissions)
     for role, permissions in ROLE_PERMISSIONS.items()
@@ -30,6 +38,10 @@ def _request_paths(page):
     paths = []
     page.on("request", lambda request: paths.append(request.url))
     return paths
+
+
+def _requested_paths(requests):
+    return [urlparse(url).path for url in requests]
 
 
 def _status_permissions(page):
@@ -140,6 +152,77 @@ def _seed_browser_artifacts(module):
     )
 
 
+def _seed_dynamic_browser_state(page, module):
+    host = "browser-device.example.test"
+    now = datetime.now(timezone.utc)
+    data = module.load_data()
+    data["certificates"][f"{host}:443"] = {
+        "host": host,
+        "port": 443,
+        "cn": host,
+        "issuer": "CertMon Browser Test CA",
+        "not_before": (now - timedelta(days=1)).isoformat(),
+        "not_after": (now + timedelta(days=14)).isoformat(),
+        "days_remaining": 14,
+        "status": "warning",
+        "sans": [host],
+        "self_signed": False,
+        "cert_type": "CA-signed",
+        "last_checked": now.isoformat(),
+    }
+    module.save_data(data)
+    module.local_ca_service.generate_ca()
+    issued = module.local_ca_service.issue(
+        identifiers=(host,), profile_name="generic-rsa", device_name=host
+    )
+    renewal = module.renewal_service.create_job(
+        endpoint_host="browser-renewal.example.test",
+        endpoint_port=443,
+        issuer_type="local_ca",
+        identifiers=["browser-renewal.example.test"],
+        profile="generic-rsa",
+        environment="staging",
+        dns_provider="manual",
+    )
+    return {"host": host, "issued_certificate_id": issued["certificate_id"], "renewal_id": renewal["id"]}
+
+
+def _browser_fetch_bytes(page, path):
+    payload = page.evaluate(
+        """async path => {
+            const response = await fetch(path);
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            let binary = '';
+            for (const byte of bytes) binary += String.fromCharCode(byte);
+            return {status: response.status, body: btoa(binary)};
+        }""",
+        path,
+    )
+    assert payload["status"] == 200, path
+    return base64.b64decode(payload["body"])
+
+
+def _assert_dynamic_information_views(page, seeded):
+    page.locator('[data-tab="certs"]').click()
+    expect(page.locator("#cert-grid")).to_contain_text(seeded["host"])
+    actions = page.locator("#cert-grid .cert-actions").inner_text()
+    permissions = _status_permissions(page)
+    assert ("Refresh" in actions) is (Permission.ISSUE_CERTIFICATE.value in permissions)
+    assert ("Renew" in actions) is (Permission.ISSUE_CERTIFICATE.value in permissions)
+    assert (
+        "Upload" in actions or "Create certificate" in actions
+    ) is (Permission.MANAGE_LOCAL_CA.value in permissions)
+    page.locator('[data-tab="renewals"]').click()
+    expect(page.locator("#renewal-list")).to_contain_text("browser-renewal.example.test")
+    page.locator('[data-tab="ca"]').click()
+    expect(page.locator("#ca-content")).to_contain_text(seeded["host"])
+    expect(
+        page.locator(
+            f'#ca-content a[href="/api/ca/download/{seeded["issued_certificate_id"]}"]'
+        )
+    ).to_have_count(1)
+
+
 def _assert_permission_visibility(page, permissions):
     visibility = page.evaluate(
         """() => ({
@@ -178,6 +261,20 @@ def _assert_permission_visibility(page, permissions):
         expect(page.locator(f"#tab-{tab}")).to_be_visible()
 
 
+def _assert_no_unauthorized_loaders(requests, permissions):
+    paths = _requested_paths(requests)
+    restricted_loaders = {
+        "/api/certificates": Permission.DEPLOY_CERTIFICATE.value,
+        "/api/audit": Permission.VIEW_AUDIT.value,
+        "/api/users": Permission.MANAGE_USERS.value,
+        "/api/backup/status": Permission.MANAGE_SERVER_BACKUP.value,
+        "/api/toolbelt/devices": Permission.DEPLOY_CERTIFICATE.value,
+    }
+    for path, required_permission in restricted_loaders.items():
+        if required_permission not in permissions:
+            assert path not in paths, (path, permissions, paths)
+
+
 def _assert_public_upload_links(page, certificate_id, expected_artifacts):
     page.locator('[data-tab="upload"]').click()
     if not page.locator("#push-target-select").is_visible():
@@ -191,6 +288,14 @@ def _assert_public_upload_links(page, certificate_id, expected_artifacts):
         f"/api/certificates/{certificate_id}/public/{artifact}"
         for artifact in expected_artifacts
     }
+    missing_artifacts = set(PUBLIC_ARTIFACTS) - set(expected_artifacts)
+    assert all(
+        page.locator(
+            f'#push-public-artifact-links a[href="/api/certificates/{certificate_id}/public/{artifact}"]'
+        ).count()
+        == 0
+        for artifact in missing_artifacts
+    )
 
 
 def _assert_private_sentinel_never_reaches_browser(page):
@@ -202,7 +307,8 @@ def _assert_private_sentinel_never_reaches_browser(page):
 def test_standalone_roles_match_effective_permissions_and_rendered_controls(
     page, live_certmon, role
 ):
-    certmon, _module = _create_admin(page, live_certmon)
+    certmon, module = _create_admin(page, live_certmon)
+    seeded = _seed_dynamic_browser_state(page, module)
     created = _create_user(page, f"matrix-{role}", [role])
     assert created["status"] == 201
 
@@ -214,8 +320,8 @@ def test_standalone_roles_match_effective_permissions_and_rendered_controls(
         permissions = _status_permissions(role_page)
         assert permissions == ROLE_EXPECTATIONS[role]
         _assert_permission_visibility(role_page, permissions)
-        assert not any("/api/users" in url for url in requests if role != "admin")
-        assert not any("/api/audit" in url for url in requests if role != "security_admin")
+        _assert_dynamic_information_views(role_page, seeded)
+        _assert_no_unauthorized_loaders(requests, permissions)
     finally:
         context.close()
 
@@ -224,7 +330,8 @@ def test_standalone_roles_match_effective_permissions_and_rendered_controls(
 def test_additive_roles_render_exact_status_permission_union(
     page, live_certmon, username, roles
 ):
-    certmon, _module = _create_admin(page, live_certmon)
+    certmon, module = _create_admin(page, live_certmon)
+    seeded = _seed_dynamic_browser_state(page, module)
     created = _create_user(page, username, roles)
     assert created["status"] == 201
 
@@ -234,6 +341,7 @@ def test_additive_roles_render_exact_status_permission_union(
         expected = {permission.value for permission in permissions_for_roles(roles)}
         assert permissions == expected
         _assert_permission_visibility(role_page, permissions)
+        _assert_dynamic_information_views(role_page, seeded)
     finally:
         context.close()
 
@@ -243,6 +351,7 @@ def test_viewer_sees_only_existing_public_artifacts_and_never_private_data(
 ):
     certmon, module = _create_admin(page, live_certmon)
     _seed_browser_artifacts(module)
+    _seed_dynamic_browser_state(page, module)
     created = _create_user(page, "browser-viewer", ["viewer"])
     assert created["status"] == 201
 
@@ -253,23 +362,45 @@ def test_viewer_sees_only_existing_public_artifacts_and_never_private_data(
         expect(viewer_page.locator(".main")).to_be_visible()
         _assert_public_upload_links(viewer_page, "browser-public-full", PUBLIC_ARTIFACTS)
         _assert_public_upload_links(viewer_page, "browser-public-partial", ("certificate.pem",))
+        public_responses = {
+            f"/api/certificates/browser-public-full/public/{artifact}": _browser_fetch_bytes(
+                viewer_page, f"/api/certificates/browser-public-full/public/{artifact}"
+            )
+            for artifact in PUBLIC_ARTIFACTS
+        }
+        public_responses.update(
+            {path: _browser_fetch_bytes(viewer_page, path) for path in PUBLIC_DOWNLOADS}
+        )
+        for path, expected_bytes in PUBLIC_DOWNLOADS.items():
+            assert expected_bytes in public_responses[path], path
+        assert all(
+            f"{PUBLIC_MARKER}:{artifact}".encode() in public_responses[
+                f"/api/certificates/browser-public-full/public/{artifact}"
+            ]
+            for artifact in PUBLIC_ARTIFACTS
+        )
+        assert all(PRIVATE_MARKER.encode() not in body for body in public_responses.values())
         expect(viewer_page.locator("#push-private-artifacts")).to_be_hidden()
         expect(viewer_page.locator("#toolbelt-batch")).to_be_hidden()
         _assert_private_sentinel_never_reaches_browser(viewer_page)
         assert any("/api/certificates/public" in url for url in requests)
-        assert not any(
-            "/api/certificates/" in url and "/private/" in url for url in requests
-        )
-        assert not any(
-            "/api/toolbelt/" in url or "/api/audit" in url or "/api/users" in url
-            for url in requests
-        )
+        assert not any("/api/certificates/" in url and "/private/" in url for url in requests)
+        _assert_no_unauthorized_loaders(requests, ROLE_EXPECTATIONS["viewer"])
     finally:
         context.close()
 
 
-def _assert_next_protected_request_clears_session(page):
-    requests = _request_paths(page)
+def _assert_no_live_permission_refresh(page, protected_snapshot, requests):
+    page.evaluate(
+        """() => new Promise(resolve => requestAnimationFrame(
+            () => requestAnimationFrame(resolve)
+        ))"""
+    )
+    assert page.locator(".main").inner_text() == protected_snapshot
+    assert not any("/api/auth/status" in url or "/api/permissions" in url for url in requests)
+
+
+def _assert_next_protected_request_clears_session(page, requests):
     page.locator('[data-tab="audit"]').click()
     page.get_by_role("button", name="Refresh audit").click()
     expect(page.locator("#auth-gate")).to_be_visible(timeout=5000)
@@ -277,6 +408,7 @@ def _assert_next_protected_request_clears_session(page):
     assert sum("/api/audit?limit=100" in url for url in requests) == 1
     assert sum("/api/auth/status" in url for url in requests) == 1
     assert PRIVATE_MARKER not in page.content()
+    assert page.locator('[data-tab="audit"]').is_hidden()
 
 
 @pytest.mark.parametrize("mutation", ("roles", "disabled", "password", "expired"))
@@ -291,8 +423,10 @@ def test_next_protected_request_clears_revoked_or_expired_session(
     context, target_page = _sign_in(
         page.context.browser, certmon, f"browser-{mutation}"
     )
+    requests = _request_paths(target_page)
     try:
         expect(target_page.locator('[data-tab="audit"]')).to_be_visible()
+        protected_snapshot = target_page.locator(".main").inner_text()
         if mutation == "roles":
             assert _replace_roles(page, user["id"], ["viewer"])["status"] == 200
         elif mutation == "disabled":
@@ -308,7 +442,8 @@ def test_next_protected_request_clears_revoked_or_expired_session(
                         user["id"],
                     ),
                 )
-        _assert_next_protected_request_clears_session(target_page)
+        _assert_no_live_permission_refresh(target_page, protected_snapshot, requests)
+        _assert_next_protected_request_clears_session(target_page, requests)
         if mutation == "disabled":
             _submit_sign_in(target_page, f"browser-{mutation}")
             expect(target_page.locator("#auth-error")).to_contain_text("Invalid")
