@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: shared-server-mode
-status: executing
-stopped_at: Plan 02-05 complete; starting 02-06 permission repair
+status: awaiting_checkpoint
+stopped_at: Plan 02-06 task 1 complete; awaiting public-download tracer approval
 last_updated: "2026-10-02T09:02:45.532Z"
 last_activity: 2026-10-02
 last_activity_desc: Chromium harness committed; two smoke tests passed; tracer feedback gate pending
@@ -23,13 +23,15 @@ Current phase: 02
 ## Current Position
 
 Phase: 02 (shared-server-mode) - awaiting required tracer checkpoint
-Plan: 02-05 complete; 02-06 next; 02-07 not started
-Status: Browser harness and historical reconciliation complete; G-02-2 repair executing
+Plan: 02-05 complete; 02-06 task 1 of 3 complete; 02-07 not started
+Status: Public-download permission tracer awaiting approval; UI repair not yet applied
 Last activity: 2026-10-02 - Chromium smoke tests: 2 passed in 7.64s (executor result)
 
-Next action: Execute 02-06, then 02-07; preserve passed UAT 4 and 9
+Next action: Approve 02-06 tracer, then continue tasks 06-02 and 06-03; preserve passed UAT 4 and 9
 
 ## Notes
+
+- Active checkpoint: `.planning/phases/02-shared-server-mode/02-06-CHECKPOINT.md`. Task 06-01 commits `3134f68` and `87315da`; executor reported 27 focused tests passed in 16.50s. No 02-06 summary yet because expansion tasks await tracer approval.
 
 - Plan 02-05 tracer checkpoint was approved by the user. Task commits `142ad32`, `e90bf72`, `816bedd` and summary commit `2b24f17` complete the browser harness and historical 02-04 reconciliation. Do not repeat these tasks or historical publication.
 
