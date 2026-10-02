@@ -103,9 +103,11 @@ def _create_admin(page, live_certmon):
     return certmon, import_module("app")
 
 
-def _sign_in(browser, certmon, username, password=PASSWORD):
+def _sign_in(browser, certmon, username, password=PASSWORD, controlled_clock=False):
     context = browser.new_context()
     page = context.new_page()
+    if controlled_clock:
+        page.clock.install()
     page.goto(certmon.base_url)
     _submit_sign_in(page, username, password)
     expect(page.locator(".main")).to_be_visible()
@@ -336,12 +338,14 @@ def test_additive_roles_render_exact_status_permission_union(
     assert created["status"] == 201
 
     context, role_page = _sign_in(page.context.browser, certmon, username)
+    requests = _request_paths(role_page)
     try:
         permissions = _status_permissions(role_page)
         expected = {permission.value for permission in permissions_for_roles(roles)}
         assert permissions == expected
         _assert_permission_visibility(role_page, permissions)
         _assert_dynamic_information_views(role_page, seeded)
+        _assert_no_unauthorized_loaders(requests, permissions)
     finally:
         context.close()
 
@@ -391,6 +395,7 @@ def test_viewer_sees_only_existing_public_artifacts_and_never_private_data(
 
 
 def _assert_no_live_permission_refresh(page, protected_snapshot, requests):
+    page.clock.fast_forward(15000)
     page.evaluate(
         """() => new Promise(resolve => requestAnimationFrame(
             () => requestAnimationFrame(resolve)
@@ -421,7 +426,7 @@ def test_next_protected_request_clears_revoked_or_expired_session(
     user = created["body"]["user"]
 
     context, target_page = _sign_in(
-        page.context.browser, certmon, f"browser-{mutation}"
+        page.context.browser, certmon, f"browser-{mutation}", controlled_clock=True
     )
     requests = _request_paths(target_page)
     try:
