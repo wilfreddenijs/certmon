@@ -2,12 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 02-shared-server-mode
-status: ready_to_execute
-stopped_at: Phase 02 gap-closure plans 02-05 through 02-07 independently verified
-last_updated: "2026-10-02T08:49:19.078Z"
+current_phase: 02
+current_phase_name: shared-server-mode
+status: awaiting_checkpoint
+stopped_at: Plan 02-05 task 1 complete; tracer browser-harness verification awaited
+last_updated: "2026-10-02T09:02:45.532Z"
 last_activity: 2026-10-02
-last_activity_desc: Planned remaining UAT 5 repair; independent review and decision coverage passed
+last_activity_desc: Chromium harness committed; two smoke tests passed; tracer feedback gate pending
 progress:
   total_phases: 5
   completed_phases: 2
@@ -17,18 +18,20 @@ progress:
 
 # CertMon Planning State
 
-Current phase: 02-shared-server-mode
+Current phase: 02
 
 ## Current Position
 
-Phase: 02 of 05
-Plan: 02-05 next; 02-05 through 02-07 planned in three repair waves
-Status: Ready to execute repair plans; 9/10 UAT tests passed, G-02-2 still open
-Last activity: 2026-10-02 - Independent plan review passed after one targeted revision; 10/10 decisions covered
+Phase: 02 (shared-server-mode) - awaiting required tracer checkpoint
+Plan: 02-05, task 1 of 2 complete; 02-06 and 02-07 not started
+Status: Awaiting browser-harness verification; G-02-2 remains open
+Last activity: 2026-10-02 - Chromium smoke tests: 2 passed in 7.64s (executor result)
 
-Next action: $gsd-execute-phase 02 --gaps-only --text
+Next action: Confirm the tracer checkpoint with verified, then continue 02-05 task 2 without rerunning task 1
 
 ## Notes
+
+- Active checkpoint: `.planning/phases/02-shared-server-mode/02-05-CHECKPOINT.md`. Task 1 is committed as `142ad32` and `e90bf72`; do not duplicate it. No 02-05 summary yet because task 2 is gated on human verification.
 
 - `.planning` was introduced after the certificate-renewal phase had already been implemented using `docs/superpowers`.
 - Phase 01 UAT was closed on 2026-07-07. Cloudflare DNS automation remains explicitly skipped for now.
