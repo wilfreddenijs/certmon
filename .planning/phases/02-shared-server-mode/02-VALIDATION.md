@@ -9,8 +9,9 @@ created: 2026-10-02
 
 # Phase 02 - Gap-Closure Validation Strategy
 
-This is a validation contract, not evidence of tests having passed. It supplements
-the nine passed UAT cases and targets the remaining G-02-2 visibility gap. Historical
+This validation contract now includes measured automated test evidence below. It
+does not replace human acceptance. It supplements the nine passed UAT cases and
+targets the remaining G-02-2 visibility gap. Historical
 plans 02-01 through 02-04 are retained; their publication work is not repeated.
 
 ## Test Infrastructure

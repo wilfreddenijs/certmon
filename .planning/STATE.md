@@ -5,10 +5,10 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: shared-server-mode
 status: awaiting_feedback
-stopped_at: Plan 02-07 tracer review found remaining coverage gaps; awaiting feedback
-last_updated: "2026-10-02T09:02:45.532Z"
-last_activity: 2026-10-02
-last_activity_desc: 13 Chromium tests passed; tracer review requires additional download and request coverage
+stopped_at: Plan 02-07 automated validation complete; human UAT 5 pending
+last_updated: "2026-10-02T22:05:14Z"
+last_activity: 2026-10-03
+last_activity_desc: 13 browser, 94 focused and 286 full-suite tests passed; human UAT pending
 progress:
   total_phases: 5
   completed_phases: 2
@@ -22,16 +22,16 @@ Current phase: 02
 
 ## Current Position
 
-Phase: 02 (shared-server-mode) - tracer feedback checkpoint
-Plan: 02-05 and 02-06 complete; 02-07 task 07-01 at feedback gate, acceptance coverage incomplete
-Status: 13 Chromium tests passed; public-download and background-request coverage still incomplete; human UAT 5 remains open
-Last activity: 2026-10-02 - Task 07-01 commits 6695f6e and 0169c63; 13 passed in 84.03s (executor evidence)
+Phase: 02 (shared-server-mode) - human verification checkpoint
+Plan: 02-05 and 02-06 complete; 02-07 tasks 07-01 and 07-02 complete, task 07-03 pending
+Status: Automated validation passed; human UAT 5 remains open
+Last activity: 2026-10-03 - Regression evidence commit abb0791: 13 browser, 94 focused and 286 full-suite tests passed; one ACME staging test deselected
 
-Next action: Obtain tracer feedback, strengthen task 07-01 coverage before regression task 07-02; preserve passed UAT 4 and 9
+Next action: Obtain fresh human UAT 5 observations; publication/build requires separate authorization. Preserve passed UAT 4 and 9. No plan 02-07 summary or phase completion until its human gate is satisfied.
 
 ## Notes
 
-- Active feedback checkpoint: `.planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md`. Executor returned 13 browser passes, but orchestrator review found missing actual public-download tests, dynamic seeded view coverage, explicit restricted catalog suppression and no-background-polling assertions. Do not claim all D-01 through D-10 proven or proceed to human UAT until strengthened.
+- Tracer feedback in `.planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md` authorized test strengthening then regressions. Coverage was extended in 0edc25f and 91f8a74. The browser matrix retrieves all listed public downloads, exercises populated views, verifies restricted loaders from permission unions and observes 15 seconds of controlled browser timers before next-request revocation cleanup. Regression task 07-02 passed: 13 browser tests in 113.58s, 94 focused tests in 147.27s, 286 full-suite tests in 232.45s (one external ACME staging case deselected, no skips/xfails). Final human acceptance is separate.
 
 - Plan 02-06 tracer was approved and all three tasks are complete. Summary commit `41824d8` records API/public catalog, permission-derived UI visibility and protected-401 cleanup. Automated success does not close G-02-2 or replace human UAT 5.
 
@@ -51,6 +51,6 @@ Next action: Obtain tracer feedback, strengthen task 07-01 coverage before regre
 
 ## Session
 
-**Last session:** 2026-10-02
-**Stopped at:** Plan 02-07 tracer feedback; test coverage strengthening required
+**Last session:** 2026-10-03
+**Stopped at:** Plan 02-07 human UAT 5 checkpoint
 **Resume file:** .planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md
