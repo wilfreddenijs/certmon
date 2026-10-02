@@ -60,6 +60,21 @@ def test_server_mode_login_and_audit_ui_are_present():
     assert "Audit log request timed out after 10 seconds." in html
 
 
+def test_permission_visibility_is_centralized_and_uses_public_catalog_for_uploads():
+    html = page()
+
+    assert "function hasPermission(name)" in html
+    assert "function applyPermissionVisibility(root = document)" in html
+    assert "function syncTabVisibility()" in html
+    assert 'data-required-permission="view_audit"' in html
+    assert 'data-required-permission="deploy_certificate"' in html
+    assert 'data-required-permission="download_private_key"' in html
+    assert "/api/certificates/public" in html
+    assert "public_artifacts" in html
+    assert "isAuthenticatedAdmin()" not in html
+    assert "canManageServerBackup()" not in html
+
+
 def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
     html = page()
     loader = html.split("async function loadUsers(message = '')", 1)[1].split(
