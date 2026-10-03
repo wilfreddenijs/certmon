@@ -218,6 +218,29 @@ def _assert_dynamic_information_views(page, seeded):
     ) is (Permission.MANAGE_LOCAL_CA.value in permissions)
     page.locator('[data-tab="renewals"]').click()
     expect(page.locator("#renewal-list")).to_contain_text("browser-renewal.example.test")
+    for state in (
+        "draft", "awaiting_dns", "awaiting_external_ca", "cleanup_required",
+        "issued", "deployment_pending", "deployed", "failed", "cancelled",
+    ):
+        page.evaluate(
+            """({id, state}) => renderRenewals([{
+                id, state, endpoint_host: 'browser-renewal.example.test',
+                endpoint_port: 443, issuer_type: 'external_ca', profile: 'generic-rsa',
+                identifiers: [], metadata: {external_ca_workflow: 'existing'},
+            }])""",
+            {"id": seeded["renewal_id"], "state": state},
+        )
+        mutation_buttons = page.locator("#renewal-list button[onclick]")
+        if Permission.ISSUE_CERTIFICATE.value not in permissions:
+            expect(mutation_buttons).to_have_count(0)
+        else:
+            assert mutation_buttons.count() > 0
+        expect(page.locator('#renewal-list button', has_text="Deploy now")).to_have_count(
+            int(state == "issued" and Permission.DEPLOY_CERTIFICATE.value in permissions)
+        )
+        expect(page.locator('#renewal-list button', has_text="Download CSR")).to_have_count(
+            int(state == "awaiting_external_ca")
+        )
     page.locator('[data-tab="ca"]').click()
     expect(page.locator("#ca-content")).to_contain_text(seeded["host"])
     expect(
@@ -335,6 +358,30 @@ def test_standalone_roles_match_effective_permissions_and_rendered_controls(
         _assert_no_unauthorized_loaders(requests, permissions)
     finally:
         context.close()
+
+
+def test_administration_enable_disable_controls_stay_adjacent(page, live_certmon):
+    _create_admin(page, live_certmon)
+    assert _create_user(page, "toggle-viewer", ["viewer"])["status"] == 201
+    page.locator('[data-tab="admin"]').click()
+    row = page.locator(".admin-user-row").filter(has_text="toggle-viewer")
+    enable = row.get_by_role("button", name="Enable", exact=True)
+    disable = row.get_by_role("button", name="Disable", exact=True)
+    expect(enable).to_be_disabled()
+    expect(disable).to_be_enabled()
+    for width in (1440, 390):
+        page.set_viewport_size({"width": width, "height": 900})
+        enable_box = enable.bounding_box()
+        disable_box = disable.bounding_box()
+        assert abs(enable_box["y"] - disable_box["y"]) < 1
+        assert enable_box["x"] + enable_box["width"] <= disable_box["x"]
+    page.on("dialog", lambda dialog: dialog.accept())
+    disable.click()
+    expect(enable).to_be_enabled()
+    expect(disable).to_be_disabled()
+    enable.click()
+    expect(enable).to_be_disabled()
+    expect(disable).to_be_enabled()
 
 
 @pytest.mark.parametrize(("username", "roles"), REPRESENTATIVE_UNIONS)

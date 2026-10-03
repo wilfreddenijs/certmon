@@ -5,7 +5,7 @@ source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
   - .planning/phases/02-shared-server-mode/02-VERIFICATION.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-08-24T00:00:00+02:00
+updated: 2026-10-03
 ---
 
 ## Current Test
@@ -46,6 +46,7 @@ result: issue
 reported: "Viewer still sees role-restricted controls and navigation. In Upload, `Download all Extron PEMs` is visible but returns a function-not-available error when clicked. The Audit tab/button is visible, but Refresh audit reports `Your role cannot view the audit log`."
 severity: major
 note: The Administration UI/API is present and backend authorization appears to deny the restricted actions correctly. The remaining UAT 5 failure is frontend role visibility: unauthorized controls and navigation must not be shown to a Viewer. Retest creation of a viewer, role restrictions and visibility, role changes, disable/enable, password reset, and session revocation through the normal workflow.
+retest_2026_10_03: Build 21 human feedback confirms Viewer public tabs/downloads and absence of Audit, Administration, private exports, issuance, Toolbelt and backup controls; Upload opens without permission errors. Remaining visibility defect: Renewals shows Delete entry and Deploy now to Viewer; backend denies the action. Role changes and password reset sign out at the next protected request, disabling blocks login, enabling restores login, Refresh audit clears a revoked session, and desktop mode requires no login. Requested polish: show Enable and Disable adjacent. Corrections are being tested; UAT 5 remains open until the renewed Renewals controls are accepted. Old/new password rejection, additive-role union and expiry behavior are not inferred beyond the explicit observations.
 
 ### 6. CSRF Protection
 expected: Normal UI actions should work after login, while direct state-changing API calls without the CertMon CSRF header should be rejected in server mode.

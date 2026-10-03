@@ -68,3 +68,22 @@ adds actual rendered-visibility checks. Those checks exposed a CSS override of
 hidden on selection controls, which is now fixed. Latest full local suite:
 286 passed, 1 deselected in 226.98s. Remote verification and replacement executable
 delivery follow; no human acceptance is inferred from these corrections.
+
+## Human Retest Follow-Up (2026-10-03)
+
+Build 21 CI passed (286 tests, one external staging test deselected). Human UAT
+confirmed public Viewer tabs/downloads, forbidden private/security controls absent,
+and successful Upload navigation. Role changes, account disable/enable, password
+reset and Audit refresh after revocation behaved as expected; desktop opens without
+login. Devices/Renewals navigation can show cached data until a protected request.
+
+Remaining reported defect: dynamic Renewals cards expose Delete entry and Deploy
+now to Viewer. These actions are now gated by effective issuance/deployment
+permissions, with public CSR downloads and status information retained. Browser
+coverage now checks nine renewal states for each role and representative union.
+Enable/Disable are separate adjacent controls with the current-state action disabled;
+their enabled/disabled behavior and adjacency are tested at 1440px and 390px.
+
+Focused evidence: expanded existing browser matrix 13 passed in 156.43s; the new
+Administration control test passed in 13.19s (13 deselected). No new build or human
+approval of the corrected controls is implied. UAT 5 remains open for that retest.

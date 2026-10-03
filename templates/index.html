@@ -328,6 +328,11 @@
     flex-wrap: wrap;
   }
 
+  .admin-account-state-actions {
+    display: inline-flex;
+    gap: 6px;
+  }
+
   .role-options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1597,7 +1602,10 @@
         <span class="status-badge ${user.disabled ? 'critical' : 'ok'}">${user.disabled ? 'Disabled' : 'Enabled'}</span>
         <div class="admin-actions">
           <button class="btn btn-ghost" type="button" onclick="openEditRoles('${escAttr(user.id)}')">Edit roles</button>
-          <button class="btn ${user.disabled ? 'btn-ghost' : 'btn-danger'}" type="button" onclick="toggleUserEnabled('${escAttr(user.id)}', ${user.disabled})">${user.disabled ? 'Enable' : 'Disable'}</button>
+          <span class="admin-account-state-actions">
+            <button class="btn btn-ghost" type="button" onclick="toggleUserEnabled('${escAttr(user.id)}', true)" ${user.disabled ? '' : 'disabled'}>Enable</button>
+            <button class="btn btn-danger" type="button" onclick="toggleUserEnabled('${escAttr(user.id)}', false)" ${user.disabled ? 'disabled' : ''}>Disable</button>
+          </span>
           <button class="btn btn-ghost" type="button" onclick="openResetPassword('${escAttr(user.id)}')">Reset password</button>
         </div>
       </div>
@@ -2179,10 +2187,15 @@
   }
 
   function renewalStateActions(r) {
+    if (!hasPermission('issue_certificate')) {
+      if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a>`;
+      if (r.state === 'deployment_pending' || r.state === 'failed') return `<div style="color:var(--warning);font-size:12px;margin-bottom:8px">${escapeHtml(r.error_message || (r.state === 'failed' ? 'Renewal failed' : 'Deployment did not finish yet or needs attention.'))}</div>`;
+      return '';
+    }
     if (r.state === 'awaiting_dns') return `<button class="btn" onclick="resumeRenewal('${r.id}','verify')">Verify and continue</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a> <button class="btn" onclick="resumeRenewal('${r.id}','import-cert')">Import signed certificate</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'cleanup_required') return `<button class="btn" onclick="resumeRenewal('${r.id}','retry-cleanup')">Retry cleanup</button>`;
-    if (r.state === 'issued') return `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'issued') return `${hasPermission('deploy_certificate') ? `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> ` : ''}<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'deployment_pending') return `<div style="color:var(--warning);font-size:12px;margin-bottom:8px">${r.error_message || 'Deployment did not finish yet or needs attention.'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
