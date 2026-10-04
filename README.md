@@ -4,9 +4,88 @@ CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certi
 
 ## Security Status
 
-This release is still single-user software and has no application authentication. Run it on `127.0.0.1` only. Do not bind it to a LAN interface or place it behind a shared reverse proxy until Phase 2 authentication and roles are implemented.
+CertMon starts in desktop mode by default and binds to `127.0.0.1`. LAN binding is refused unless explicit server mode is enabled.
 
 Certificate private keys, ACME account keys, device credentials, and Cloudflare tokens are encrypted at rest. Manual private-key export is intentionally separate, permission checked, and audited. Exported keys must be handled as secrets.
+
+## Shared Server Mode
+
+Server mode is for a trusted LAN or a protected reverse-proxy deployment. Do not expose CertMon directly to the public internet.
+
+### Start The Windows EXE For Role Testing
+
+Quit any running CertMon instance using the system-tray **Quit** command; closing
+the browser does not stop it. Open PowerShell in the folder containing the extracted
+`CertMon.exe`, then start it from that same PowerShell window:
+
+```powershell
+$env:CERTMON_SERVER_MODE = '1'
+$env:CERTMON_BIND_HOST = '127.0.0.1'
+$env:CERTMON_PORT = '5000'
+.\CertMon.exe
+```
+
+Open `http://127.0.0.1:5000`. This enables authenticated server behavior locally
+without exposing the service to the LAN. Create the first administrator if prompted;
+otherwise sign in with an existing account. Use **Administration** to create test
+users and a separate private browser window to test their roles independently.
+The information button beside **Add user** shows the authoritative role/permission
+table. Multiple roles combine their permissions.
+
+For access from another computer, set `CERTMON_BIND_HOST` to `0.0.0.0` before
+starting the EXE. Open `http://<server-IP>:5000` on that computer, not `0.0.0.0`.
+Allow inbound TCP 5000 through Windows Firewall only for the intended trusted
+network. Direct HTTP does not encrypt credentials or traffic; use HTTPS through a
+protected reverse proxy for ongoing shared use. Server mode uses the configured
+port exactly; if it is occupied, stop the old instance or choose another port.
+
+Environment variables above apply to processes started from that PowerShell window.
+They are not permanent Windows settings. To return to desktop mode, quit CertMon
+fully and start it with:
+
+```powershell
+$env:CERTMON_SERVER_MODE = '0'
+$env:CERTMON_BIND_HOST = '127.0.0.1'
+.\CertMon.exe
+```
+
+Do not change `CERTMON_DATA_DIR` for the role test: packaged builds keep the existing
+data in `%PROGRAMDATA%\CertMon` unless that variable is explicitly set. Changing it
+selects a different installation state, including users and CA material.
+
+### Run Server Mode From Source
+
+Enable server mode explicitly:
+
+```powershell
+$env:CERTMON_SERVER_MODE = '1'
+$env:CERTMON_BIND_HOST = '0.0.0.0'
+$env:CERTMON_PORT = '5000'
+python launcher.py
+```
+
+On first open, create the first administrator account. After that, users sign in with local CertMon accounts. Server mode uses HttpOnly session cookies and CSRF tokens for state-changing requests.
+
+Roles:
+
+- **Viewer:** view inventory and public certificate/trust artifacts.
+- **Operator:** start renewals and deploy certificates.
+- **CA Admin:** manage Local CA operations and issue Local CA certificates.
+- **Security Admin:** download private-key material, manage DNS credentials, view audit-sensitive operations, and manage full server backups.
+- **Admin:** all permissions, including user and audit administration.
+
+Signed-in Admin and Security Admin users can open the **Administration** tab for full server backup and recovery. Only Admin users see its Users section, where they can add local users, edit usernames and roles, enable or disable accounts, and reset passwords. CertMon accepts only the five roles above. At least one enabled administrator must always remain, so the final enabled administrator cannot be disabled or lose the Admin role.
+
+Viewer can download existing public certificates, chains, CSRs and trust files,
+but cannot issue/deploy certificates, delete renewal entries, or export private
+keys, combined PEM/ZIP files and backups. A Viewer account that also has CA Admin
+inherits issuance and renewal-management rights, so **Delete entry** is then valid.
+
+Disabling an account, changing its roles, or resetting its password revokes all active sessions for that user. The user must sign in again after a role or password change; disabled users cannot sign in until an administrator enables them. User-management audit events record the acting administrator, source IP, target account, and changed fields without recording passwords or password hashes.
+
+The UI shows the current signed-in user and exposes an Audit tab. Sensitive actions such as login/logout, Local CA backup import/export, DNS credential changes, private artifact downloads, Toolbelt upload runs, and deployment attempts are recorded with username and source IP. Secrets are redacted from audit details.
+
+For team trust distribution, use **Local CA** > **Trust bundle**. The bundle contains only the public CertMon Local CA certificate and installation notes; it does not contain the Local CA private key. Use encrypted CA backup export/import only between trusted CertMon installations that must share the same signing CA.
 
 ## Issuer Workflows
 
@@ -47,16 +126,22 @@ Development defaults to `data` beside the source. The packaged Windows build def
 
 ## Recovery And Backup
 
-Create and securely store a vault recovery package and its passphrase separately. The package can restore the installation master key after service-account migration; possession of both package and passphrase grants access to all encrypted CertMon secrets.
+Use **Administration** > **Server backup and recovery** to download a full server backup. This operation requires the Admin or Security Admin role and a new passphrase entered twice. The ZIP contains a consistent SQLite online backup, encrypted certificate artifacts, encrypted vault files, a passphrase-encrypted recovery package, a versioned authenticated manifest, and recovery notes. The database includes users, applicable sessions, roles, settings, certificate metadata, and audit records. Plaintext private keys and decrypted secrets are never added to the package.
 
-`BackupService` creates a consistent SQLite online backup plus encrypted certificate artifacts and vault files. Its manifest is hash checked, HMAC authenticated, tied to a backup ID, and bound to the recovery package. Restore always writes to a new directory and verifies it completely. Stop CertMon and perform the final directory swap manually after verification.
+The full server backup is different from **Local CA** > **Export CA backup** and **Import CA backup**. Local CA backup moves only Local CA signing state between trusted installations. Full server backup preserves the complete CertMon installation state.
 
-When moving CertMon to another Windows service account:
+Treat the backup ZIP and its passphrase as highly sensitive: together they grant access to encrypted CertMon material. Store them securely, preferably in separate controlled locations, and do not include either one in tickets, logs, or ordinary file shares. `CERTMON_MAX_BACKUP_UPLOAD_MB` controls the restore upload limit and defaults to 512 MiB.
 
-1. Restore the backup into a new directory.
-2. Restore the vault master key with the recovery package and passphrase.
-3. Rewrap the master key using DPAPI under the new service account.
-4. Verify representative certificates and keys before switching `CERTMON_DATA_DIR`.
+**Stage restore** verifies the archive layout, package authentication, manifest, file hashes, backup ID, and representative vault key before writing. It restores into a new sibling directory and re-protects the vault master key for the Windows account running the current CertMon process. It never overwrites, renames, deletes, or activates the current `CERTMON_DATA_DIR` while CertMon is running.
+
+Activate a staged restore on Windows only after the web request has completed:
+
+1. Stop CertMon completely.
+2. Retain or rename the current data directory so it remains available for rollback.
+3. Rename the staged directory to the expected location, or configure `CERTMON_DATA_DIR` to point to the exact staged directory.
+4. Start CertMon and sign in.
+5. Verify the Local CA, representative certificates, encrypted artifacts, users, and audit history.
+6. Remove the old data directory only after the restored installation has been accepted.
 
 ## Run From Source
 
@@ -66,6 +151,20 @@ python launcher.py
 ```
 
 ## Build Windows EXE
+
+### Accepted Phase 02 Build
+
+Shared server mode was accepted on 2026-10-04 using **v1.0 build 23**, source
+`5da496d1501feafbb6d881d89e82aab587c4d5e8`. Human UAT is 10/10 passed, including
+Viewer restrictions, additive roles, account/password/session controls and desktop
+safety. [Build 23](https://github.com/wilfreddenijs/certmon/actions/runs/37218527033)
+and its [full test run](https://github.com/wilfreddenijs/certmon/actions/runs/37218519929)
+(288 passed; one optional external ACME staging case deselected) are the acceptance
+reference. New builds from main receive their own run/build numbers.
+
+Phase 05 direct Extron upload via SFTP/SIS is planned next; it is not included in
+this accepted release. Existing Toolbelt functionality remains until its verified
+replacement is available.
 
 ### GitHub Actions build
 

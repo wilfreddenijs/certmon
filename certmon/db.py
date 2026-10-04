@@ -85,6 +85,31 @@ class Database:
                     details_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    roles_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    disabled_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    username TEXT,
+                    source_ip TEXT,
+                    target TEXT,
+                    success INTEGER NOT NULL DEFAULT 1,
+                    details_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             conn.execute(
@@ -105,6 +130,250 @@ class Database:
         }
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def create_user(self, *, user_id, username, password_hash, roles):
+        now = _utc_now()
+        with self.transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM users WHERE lower(username)=lower(?)", (username,)
+            ).fetchone():
+                raise sqlite3.IntegrityError("username already exists")
+            conn.execute(
+                """
+                INSERT INTO users(id, username, password_hash, roles_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, username, password_hash, json.dumps(list(roles)), now),
+            )
+
+    def list_users(self):
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, username, password_hash, roles_json, created_at, disabled_at
+                FROM users ORDER BY username COLLATE NOCASE, id
+                """
+            ).fetchall()
+        return [self._row_to_user(row) for row in rows]
+
+    def update_user_identity_and_roles(
+        self,
+        user_id,
+        *,
+        username,
+        roles,
+        revoke_sessions=False,
+        protect_final_admin=False,
+    ):
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT roles_json, disabled_at FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            if current is None:
+                return False
+            if (
+                protect_final_admin
+                and current["disabled_at"] is None
+                and "admin" in json.loads(current["roles_json"])
+                and "admin" not in roles
+                and self._count_enabled_admins(conn) <= 1
+            ):
+                raise ValueError("Cannot remove the final enabled administrator")
+            duplicate = conn.execute(
+                "SELECT 1 FROM users WHERE lower(username)=lower(?) AND id != ?",
+                (username, user_id),
+            ).fetchone()
+            if duplicate:
+                raise sqlite3.IntegrityError("username already exists")
+            cursor = conn.execute(
+                "UPDATE users SET username=?, roles_json=? WHERE id=?",
+                (username, json.dumps(list(roles)), user_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            if revoke_sessions:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return True
+
+    def set_user_disabled(
+        self, user_id, disabled, *, revoke_sessions=False, protect_final_admin=False
+    ):
+        disabled_at = _utc_now() if disabled else None
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT roles_json, disabled_at FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            if current is None:
+                return False
+            if (
+                disabled
+                and protect_final_admin
+                and current["disabled_at"] is None
+                and "admin" in json.loads(current["roles_json"])
+                and self._count_enabled_admins(conn) <= 1
+            ):
+                raise ValueError("Cannot disable the final enabled administrator")
+            cursor = conn.execute(
+                "UPDATE users SET disabled_at=? WHERE id=?", (disabled_at, user_id)
+            )
+            if cursor.rowcount != 1:
+                return False
+            if revoke_sessions:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return True
+
+    def set_user_password_hash(self, user_id, password_hash, *, revoke_sessions=False):
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id)
+            )
+            if cursor.rowcount != 1:
+                return False
+            if revoke_sessions:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return True
+
+    def delete_sessions_for_user(self, user_id):
+        with self.transaction() as conn:
+            cursor = conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return cursor.rowcount
+
+    def count_enabled_admins(self):
+        with self.connect() as conn:
+            return self._count_enabled_admins(conn)
+
+    @staticmethod
+    def _count_enabled_admins(conn):
+        rows = conn.execute(
+            "SELECT roles_json FROM users WHERE disabled_at IS NULL"
+        ).fetchall()
+        return sum("admin" in json.loads(row["roles_json"]) for row in rows)
+
+    def users_exist(self):
+        with self.connect() as conn:
+            row = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        return row is not None
+
+    def get_user_by_username(self, username):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username, password_hash, roles_json, created_at, disabled_at
+                FROM users WHERE lower(username)=lower(?)
+                """,
+                (username,),
+            ).fetchone()
+        return self._row_to_user(row)
+
+    def get_user(self, user_id):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username, password_hash, roles_json, created_at, disabled_at
+                FROM users WHERE id=?
+                """,
+                (user_id,),
+            ).fetchone()
+        return self._row_to_user(row)
+
+    def _row_to_user(self, row):
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "password_hash": row["password_hash"],
+            "roles": json.loads(row["roles_json"]),
+            "created_at": row["created_at"],
+            "disabled_at": row["disabled_at"],
+        }
+
+    def create_session(self, *, token_hash, user_id, expires_at):
+        now = _utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (token_hash, user_id, now, now, expires_at),
+            )
+
+    def get_session(self, token_hash):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT token_hash, user_id, created_at, last_seen_at, expires_at
+                FROM sessions WHERE token_hash=?
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def touch_session(self, token_hash):
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE sessions SET last_seen_at=? WHERE token_hash=?",
+                (_utc_now(), token_hash),
+            )
+
+    def delete_session(self, token_hash):
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
+
+    def record_audit_event(
+        self,
+        *,
+        event_type,
+        username=None,
+        source_ip=None,
+        target=None,
+        success=True,
+        details=None,
+    ):
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_events(
+                    event_type, username, source_ip, target, success, details_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_type,
+                    username,
+                    source_ip,
+                    target,
+                    1 if success else 0,
+                    json.dumps(details or {}),
+                    _utc_now(),
+                ),
+            )
+
+    def list_audit_events(self, limit=200):
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_type, username, source_ip, target, success, details_json, created_at
+                FROM audit_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [
+            {
+                "event_type": row["event_type"],
+                "username": row["username"],
+                "source_ip": row["source_ip"],
+                "target": row["target"],
+                "success": bool(row["success"]),
+                "details": json.loads(row["details_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     @contextmanager
     def transaction(self):

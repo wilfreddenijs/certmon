@@ -30,6 +30,28 @@ def test_create_draft_replaces_command_generation(tmp_data_dir):
     assert "command" not in payload
 
 
+def test_duplicate_local_ca_start_returns_conflict(tmp_data_dir):
+    module = load_app(tmp_data_dir)
+    client = module.app.test_client()
+    assert client.post("/api/ca/generate").status_code == 200
+    created = client.post(
+        "/api/renew",
+        json={
+            "endpoint_host": "192.168.1.20",
+            "endpoint_port": 443,
+            "issuer_type": "local_ca",
+            "identifiers": ["device.local"],
+            "profile": "generic-rsa",
+        },
+    ).get_json()
+
+    assert client.post(f"/api/renewals/{created['id']}/start", json={}).status_code == 200
+    second = client.post(f"/api/renewals/{created['id']}/start", json={})
+
+    assert second.status_code == 409
+    assert second.get_json()["error"] == "conflict"
+
+
 def test_job_list_and_detail_are_sanitized(tmp_data_dir):
     module = load_app(tmp_data_dir)
     created = module.app.test_client().post(

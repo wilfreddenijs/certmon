@@ -10,19 +10,34 @@ import json
 import os
 import subprocess
 import threading
+import queue
 import ipaddress
 import io
 import base64
 import uuid
 import zipfile
+import secrets
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file, Response, g
+from werkzeug.wsgi import ClosingIterator
 
-from certmon.config import resolve_data_dir
+from certmon.auth import (
+    AuthError,
+    AuthNotFoundError,
+    AuthService,
+    SESSION_COOKIE,
+    SUPPORTED_ROLES,
+    public_user,
+)
+from certmon.audit import AuditService
+from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
+from certmon.csrf import CSRFError, CSRF_HEADER, csrf_token_for_session, validate_csrf
 from certmon.ca_migration import migrate_legacy_ca_if_present
-from certmon.db import Database
+from certmon.db import ConcurrentUpdateError, Database
 from certmon.artifacts import ArtifactStore
 from certmon.acme_service import (
     ACMEAccountService,
@@ -37,13 +52,27 @@ from certmon.external_ca import ExternalCAService
 from certmon.local_ca import LocalCAService
 from certmon.local_ca_backup import LocalCABackupError, LocalCABackupService
 from certmon.naming import safe_slug
-from certmon.permissions import Permission, authorize
+from certmon.permissions import (
+    AuthorizationError,
+    Permission,
+    ROLE_PERMISSIONS,
+    authorize,
+    permissions_for_roles,
+    reset_current_permissions,
+    set_current_permissions,
+)
 from certmon.renewals import ACMERenewalOrchestrator, RenewalService, StagingRequired
+from certmon.server_backup import (
+    ServerBackupConflictError,
+    ServerBackupPackageError,
+    ServerBackupPackageService,
+)
 from certmon.toolbelt import ToolbeltBatchService
 from certmon.vault import MemoryKeyProtector, Vault, WindowsDpapiProtector
 
 
 APP_VERSION = "1.0"
+AUDIT_QUERY_TIMEOUT_SECONDS = 5
 
 
 def resource_path(relative):
@@ -83,6 +112,8 @@ DATA_FILE = os.path.join(data_dir(), "certmon_data.json")
 DB_FILE = os.path.join(data_dir(), "certmon.db")
 database = Database(Path(DB_FILE))
 database.initialize()
+auth_service = AuthService(database)
+audit_service = AuditService(database)
 legacy_base = (
     Path(sys.executable).parent
     if getattr(sys, "frozen", False)
@@ -125,6 +156,13 @@ def bootstrap_services(
     )
     local_ca_service = LocalCAService(database, artifact_store)
     local_ca_backup_service = LocalCABackupService(database, artifact_store)
+    server_backup_service = ServerBackupPackageService(
+        root,
+        database,
+        vault,
+        key_protector,
+        mutation_lock=artifact_store.mutation_lock,
+    )
     external_ca_service = ExternalCAService(database, artifact_store)
     acme_account_service = ACMEAccountService(
         database, vault, NativeACMEAccountClient
@@ -161,6 +199,7 @@ def bootstrap_services(
         "artifact_store": artifact_store,
         "local_ca_service": local_ca_service,
         "local_ca_backup_service": local_ca_backup_service,
+        "server_backup_service": server_backup_service,
         "external_ca_service": external_ca_service,
         "renewal_service": renewal_service,
         "acme_account_service": acme_account_service,
@@ -175,6 +214,7 @@ vault = None
 artifact_store = None
 local_ca_service = None
 local_ca_backup_service = None
+server_backup_service = None
 external_ca_service = None
 renewal_service = RenewalService(database)
 acme_account_service = None
@@ -192,6 +232,90 @@ ACME_PROD = "https://acme-v02.api.letsencrypt.org/directory"
 COMMON_TLS_PORTS = [443, 8443, 8080, 4443, 9443, 4523]
 
 scan_progress = {"running": False, "progress": 0, "total": 0, "current": ""}
+
+
+def current_runtime_config():
+    return resolve_runtime_config(
+        frozen=getattr(sys, "frozen", False),
+        executable=Path(sys.executable),
+        source_dir=Path(__file__).resolve().parent,
+    )
+
+
+def server_mode_enabled():
+    try:
+        return current_runtime_config().server_mode
+    except ConfigError:
+        return False
+
+
+def current_user():
+    return getattr(g, "current_user", None)
+
+
+def audit(event_type, *, target=None, success=True, details=None, user=None):
+    audit_service.record(
+        event_type,
+        user=current_user() if user is None else user,
+        source_ip=request.remote_addr if request else None,
+        target=target,
+        success=success,
+        details=details,
+    )
+
+
+AUTH_EXEMPT_PATHS = {
+    "/",
+    "/api/auth/status",
+    "/api/auth/setup-first-admin",
+    "/api/auth/login",
+}
+
+
+def csrf_secret():
+    value = database.get_setting("server:csrf-secret")
+    if value:
+        return value
+    value = secrets.token_hex(32)
+    database.put_setting("server:csrf-secret", value)
+    return value
+
+
+@app.before_request
+def require_server_authentication():
+    g.current_user = None
+    g.permission_token = set_current_permissions(None)
+    if not server_mode_enabled():
+        return None
+    token = request.cookies.get(SESSION_COOKIE)
+    g.current_user = auth_service.user_for_token(token)
+    if request.path in AUTH_EXEMPT_PATHS:
+        return None
+    if g.current_user is None:
+        return jsonify({"error": "Authentication required"}), 401
+    set_current_permissions(permissions_for_roles(g.current_user.get("roles", [])))
+    try:
+        validate_csrf(request, session_token=token, secret=csrf_secret())
+    except CSRFError as exc:
+        return jsonify({"error": str(exc)}), 403
+    return None
+
+
+@app.teardown_request
+def reset_request_permissions(_exc):
+    token = getattr(g, "permission_token", None)
+    if token is not None:
+        reset_current_permissions(token)
+
+
+@app.errorhandler(AuthorizationError)
+def handle_authorization_error(exc):
+    return jsonify({"error": str(exc)}), 403
+
+
+@app.errorhandler(ConcurrentUpdateError)
+def handle_concurrent_update_error(exc):
+    return jsonify({"error": "conflict", "message": str(exc)}), 409
 
 
 def load_data():
@@ -371,7 +495,312 @@ def scan_range_worker(ip_range):
 
 @app.route("/")
 def index():
-    return render_template("index.html", build_info=build_info())
+    return render_template(
+        "index.html", build_info=build_info(),
+        role_permissions={
+            role: {permission.value for permission in permissions}
+            for role, permissions in ROLE_PERMISSIONS.items()
+        },
+    )
+
+
+@app.route("/api/auth/status")
+def auth_status():
+    token = request.cookies.get(SESSION_COOKIE)
+    if not server_mode_enabled():
+        permissions = sorted(permission.value for permission in Permission)
+    elif current_user() is not None:
+        permissions = sorted(
+            permission.value
+            for permission in permissions_for_roles(current_user().get("roles", []))
+        )
+    else:
+        permissions = []
+    return jsonify(
+        {
+            "server_mode": server_mode_enabled(),
+            "authenticated": current_user() is not None,
+            "first_admin_required": auth_service.first_admin_required(),
+            "user": public_user(current_user()),
+            "csrf_header": CSRF_HEADER,
+            "csrf_token": csrf_token_for_session(token, csrf_secret())
+            if current_user() is not None
+            else None,
+            "permissions": permissions,
+        }
+    )
+
+
+@app.route("/api/auth/setup-first-admin", methods=["POST"])
+def auth_setup_first_admin():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        audit(
+            "first_admin_setup_failed",
+            success=False,
+            details={"reason": "JSON body must be an object"},
+        )
+        return jsonify({"error": "JSON body must be an object"}), 400
+    try:
+        user = auth_service.create_first_admin(
+            body.get("username", ""),
+            body.get("password", ""),
+            body.get("password_confirmation"),
+        )
+    except AuthError as exc:
+        audit("first_admin_setup_failed", success=False, details={"reason": str(exc)}, user=body.get("username"))
+        return jsonify({"error": str(exc)}), 400
+    audit("first_admin_created", target=user["username"], user=user)
+    token, expires_at = auth_service.start_session(user)
+    response = jsonify({"ok": True, "user": public_user(user)})
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        expires=expires_at,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json(silent=True) or {}
+    user = auth_service.authenticate(body.get("username", ""), body.get("password", ""))
+    if user is None:
+        audit("login_failed", success=False, user=body.get("username"))
+        return jsonify({"error": "Invalid username or password"}), 401
+    audit("login_succeeded", user=user)
+    token, expires_at = auth_service.start_session(user)
+    response = jsonify({"ok": True, "user": public_user(user)})
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        expires=expires_at,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    audit("logout", user=current_user())
+    auth_service.end_session(request.cookies.get(SESSION_COOKIE))
+    response = jsonify({"ok": True})
+    response.delete_cookie(SESSION_COOKIE)
+    return response
+
+
+@app.route("/api/auth/me")
+def auth_me():
+    if server_mode_enabled() and current_user() is None:
+        return jsonify({"error": "Authentication required"}), 401
+    return jsonify({"user": public_user(current_user())})
+
+
+@app.route("/api/users", methods=["GET"])
+def api_users_list():
+    authorize(Permission.MANAGE_USERS)
+    return jsonify(
+        {
+            "users": [public_user(user) for user in auth_service.list_users()],
+            "supported_roles": list(SUPPORTED_ROLES),
+        }
+    )
+
+
+@app.route("/api/users", methods=["POST"])
+def api_users_create():
+    authorize(Permission.MANAGE_USERS)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        message = "JSON body must be an object"
+        audit("user_created_failed", success=False, details={"reason": message})
+        return jsonify({"error": message}), 400
+    unknown = set(body) - {"username", "password", "roles"}
+    if unknown:
+        message = f"Unsupported fields: {sorted(unknown)}"
+        audit(
+            "user_created_failed",
+            target=body.get("username"),
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    try:
+        user = auth_service.create_user(
+            body.get("username"), body.get("password"), body.get("roles")
+        )
+    except AuthError as exc:
+        audit(
+            "user_created_failed",
+            target=body.get("username"),
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 400
+    audit("user_created", target=user["username"], details={"roles": user["roles"]})
+    return jsonify({"ok": True, "user": public_user(user)}), 201
+
+
+@app.route("/api/users/<user_id>", methods=["PATCH"])
+def api_users_update(user_id):
+    authorize(Permission.MANAGE_USERS)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        message = "JSON body must be an object"
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    unknown = set(body) - {"username", "roles", "disabled"}
+    if unknown or not body:
+        message = (
+            f"Unsupported fields: {sorted(unknown)}"
+            if unknown
+            else "At least one field is required"
+        )
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    if "disabled" in body and not isinstance(body["disabled"], bool):
+        message = "disabled must be a boolean"
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+
+    changed_fields = [field for field in ("username", "roles", "disabled") if field in body]
+    try:
+        user = auth_service.database.get_user(user_id)
+        if user is None:
+            raise AuthNotFoundError("User not found")
+        if (
+            body.get("disabled") is True
+            and user.get("disabled_at") is None
+            and "admin" in user.get("roles", [])
+            and auth_service.database.count_enabled_admins() <= 1
+        ):
+            raise AuthError("Cannot disable the final enabled administrator")
+        if "username" in body or "roles" in body:
+            user = auth_service.update_user(
+                user_id,
+                username=body.get("username") if "username" in body else None,
+                roles=body.get("roles") if "roles" in body else None,
+            )
+        if "disabled" in body:
+            user = auth_service.set_user_enabled(user_id, not body["disabled"])
+    except AuthNotFoundError as exc:
+        audit(
+            "user_updated_failed",
+            target=user_id,
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 404
+    except AuthError as exc:
+        event_type = _user_update_event(body, failed=True)
+        audit(
+            event_type,
+            target=user_id,
+            success=False,
+            details={"reason": str(exc), "changed_fields": changed_fields},
+        )
+        return jsonify({"error": str(exc)}), 400
+
+    event_type = _user_update_event(body)
+    details = {"changed_fields": changed_fields}
+    if "roles" in body:
+        details["roles"] = user["roles"]
+    audit(event_type, target=user["username"], details=details)
+    return jsonify({"ok": True, "user": public_user(user)})
+
+
+def _user_update_event(body, *, failed=False):
+    suffix = "_failed" if failed else ""
+    if set(body) == {"disabled"}:
+        return ("user_disabled" if body["disabled"] else "user_enabled") + suffix
+    return "user_updated" + suffix
+
+
+@app.route("/api/users/<user_id>/password", methods=["POST"])
+def api_users_password(user_id):
+    authorize(Permission.MANAGE_USERS)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        message = "JSON body must be an object"
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    if set(body) != {"password"}:
+        message = "Password endpoint accepts only password"
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": message},
+        )
+        return jsonify({"error": message}), 400
+    try:
+        user = auth_service.reset_user_password(user_id, body.get("password"))
+    except AuthNotFoundError as exc:
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 404
+    except AuthError as exc:
+        audit(
+            "user_password_reset_failed",
+            target=user_id,
+            success=False,
+            details={"reason": str(exc)},
+        )
+        return jsonify({"error": str(exc)}), 400
+    audit("user_password_reset", target=user["username"])
+    return jsonify({"ok": True, "user": public_user(user)})
+
+
+@app.route("/api/audit")
+def api_audit():
+    authorize(Permission.VIEW_AUDIT)
+    limit = min(int(request.args.get("limit", 200)), 500)
+    result_queue = queue.Queue(maxsize=1)
+
+    def load_events():
+        try:
+            result_queue.put(("ok", audit_service.list(limit=limit)), block=False)
+        except Exception as exc:
+            result_queue.put(("error", str(exc)), block=False)
+
+    worker = threading.Thread(target=load_events, daemon=True)
+    worker.start()
+    try:
+        status, payload = result_queue.get(timeout=AUDIT_QUERY_TIMEOUT_SECONDS)
+    except queue.Empty:
+        return jsonify({"error": "Audit log query timed out"}), 504
+    if status == "error":
+        return jsonify({"error": payload}), 500
+    return jsonify(payload)
 
 
 @app.route("/api/data")
@@ -843,6 +1272,7 @@ def ca_status():
 
 @app.route("/api/ca/generate", methods=["POST"])
 def ca_generate():
+    authorize(Permission.MANAGE_LOCAL_CA)
     if local_ca_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     if ca_exists():
@@ -856,6 +1286,7 @@ def ca_generate():
 @app.route("/api/ca/install", methods=["POST"])
 def ca_install():
     """Install CA cert into Windows trust store."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
     if sys.platform != "win32":
@@ -885,6 +1316,7 @@ def ca_install():
 @app.route("/api/ca/download-cert")
 def ca_download_cert():
     """Download the CA certificate for manual installation."""
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
     if not ca_exists():
         return jsonify({"error": "No CA found"}), 404
     data = artifact_store.read_public(
@@ -895,8 +1327,39 @@ def ca_download_cert():
     return response
 
 
+@app.route("/api/ca/trust-bundle")
+def ca_trust_bundle():
+    """Download the public Local CA trust bundle for other team machines."""
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
+    if not ca_exists():
+        return jsonify({"error": "No CA found"}), 404
+    if artifact_store is None:
+        return jsonify({"error": "Secure certificate storage is unavailable"}), 503
+    cert_data = artifact_store.read_public(
+        LocalCAService.CA_CERTIFICATE_ID, "certificate.pem"
+    )
+    readme = (
+        "CertMon Local CA trust bundle\n\n"
+        "Install certmon-ca.crt into Windows Trusted Root Certification Authorities.\n"
+        "This bundle contains only the public CA certificate, not the Local CA private key.\n"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("certmon-ca.crt", cert_data)
+        archive.writestr("README.txt", readme)
+    buffer.seek(0)
+    audit("local_ca_trust_bundle_downloaded")
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="certmon-local-ca-trust-bundle.zip",
+    )
+
+
 @app.route("/api/ca/backup/export", methods=["POST"])
 def ca_backup_export():
+    authorize(Permission.DOWNLOAD_PRIVATE_KEY)
     if local_ca_backup_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     body = request.get_json(silent=True) or {}
@@ -904,8 +1367,10 @@ def ca_backup_export():
     try:
         package = local_ca_backup_service.export_package(passphrase)
     except LocalCABackupError as error:
+        audit("local_ca_backup_export_failed", success=False, details={"reason": str(error)})
         return jsonify({"error": str(error)}), 400
     database.record_event("local_ca_backup_exported", {})
+    audit("local_ca_backup_exported")
     return send_file(
         io.BytesIO(package),
         mimetype="application/json",
@@ -916,6 +1381,7 @@ def ca_backup_export():
 
 @app.route("/api/ca/backup/import", methods=["POST"])
 def ca_backup_import():
+    authorize(Permission.MANAGE_LOCAL_CA)
     if local_ca_backup_service is None:
         return jsonify({"error": "Secure certificate storage is unavailable"}), 503
     upload = request.files.get("backup")
@@ -930,17 +1396,148 @@ def ca_backup_import():
             replace=replace,
         )
     except LocalCABackupError as error:
+        audit("local_ca_backup_import_failed", success=False, details={"replace": replace, "reason": str(error)})
         return jsonify({"error": str(error)}), 400
     except Exception:
         app.logger.exception("Unexpected Local CA backup import failure")
+        audit("local_ca_backup_import_failed", success=False, details={"replace": replace, "reason": "unexpected"})
         return jsonify({"error": "Could not import Local CA backup. Check the file and passphrase."}), 400
     database.record_event("local_ca_backup_imported", {"replace": replace})
+    audit("local_ca_backup_imported", details={"replace": replace})
     return jsonify({"ok": True, **result})
+
+
+class BackupUploadTooLarge(ValueError):
+    pass
+
+
+@app.route("/api/server-backup/export", methods=["POST"])
+def server_backup_export():
+    authorize(Permission.MANAGE_SERVER_BACKUP)
+    if server_backup_service is None:
+        return jsonify({"error": "Server backup is unavailable"}), 503
+    body = request.get_json(silent=True) or {}
+    passphrase = body.get("passphrase") if isinstance(body, dict) else ""
+    temporary_dir = Path(tempfile.mkdtemp(prefix="certmon-server-backup-download-"))
+    output_file = temporary_dir / "server-backup.zip"
+    try:
+        result = server_backup_service.export_package(passphrase or "", output_file)
+        response = send_file(
+            result.path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"certmon-server-backup-{result.backup_id}.zip",
+        )
+        response.response = ClosingIterator(
+            response.response,
+            lambda: shutil.rmtree(temporary_dir, ignore_errors=True),
+        )
+        audit(
+            "server_backup_exported",
+            target=result.backup_id,
+            details={"created_at": result.created_at},
+        )
+        return response
+    except ServerBackupPackageError as error:
+        shutil.rmtree(temporary_dir, ignore_errors=True)
+        audit(
+            "server_backup_export_failed",
+            success=False,
+            details={"reason": str(error)},
+        )
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        shutil.rmtree(temporary_dir, ignore_errors=True)
+        app.logger.exception("Unexpected server backup export failure")
+        audit(
+            "server_backup_export_failed",
+            success=False,
+            details={"reason": "unexpected"},
+        )
+        return jsonify({"error": "Could not create the server backup"}), 500
+
+
+@app.route("/api/server-backup/restore", methods=["POST"])
+def server_backup_restore():
+    authorize(Permission.MANAGE_SERVER_BACKUP)
+    if server_backup_service is None:
+        return jsonify({"error": "Server backup is unavailable"}), 503
+
+    upload = request.files.get("backup")
+    passphrase = request.form.get("passphrase") or ""
+    if upload is None:
+        return jsonify({"error": "Backup file is required"}), 400
+
+    handle, temporary_name = tempfile.mkstemp(prefix="certmon-server-backup-upload-")
+    os.close(handle)
+    temporary_file = Path(temporary_name)
+    try:
+        limit = current_runtime_config().max_backup_upload_bytes
+        total = 0
+        with temporary_file.open("wb") as output:
+            while True:
+                chunk = upload.stream.read(min(1024 * 1024, limit + 1 - total))
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise BackupUploadTooLarge("Backup upload exceeds the configured limit")
+                output.write(chunk)
+        result = server_backup_service.stage_restore(
+            temporary_file,
+            passphrase,
+            Path(data_dir()).resolve().parent,
+        )
+        audit(
+            "server_restore_staged",
+            target=result.backup_id,
+            details={"staged_path": str(result.staged_path), "created_at": result.created_at},
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "backup_id": result.backup_id,
+                "staged_path": str(result.staged_path),
+                "activation_steps": list(result.activation_steps),
+            }
+        )
+    except BackupUploadTooLarge as error:
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "upload_too_large"},
+        )
+        return jsonify({"error": str(error)}), 413
+    except ServerBackupConflictError as error:
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "destination_exists"},
+        )
+        return jsonify({"error": str(error)}), 409
+    except ServerBackupPackageError as error:
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "invalid_package"},
+        )
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        app.logger.exception("Unexpected server backup restore failure")
+        audit(
+            "server_restore_failed",
+            success=False,
+            details={"reason": "unexpected"},
+        )
+        return jsonify({"error": "Could not stage the server backup restore"}), 500
+    finally:
+        temporary_file.unlink(missing_ok=True)
 
 
 @app.route("/api/ca/issue", methods=["POST"])
 def ca_issue():
     """Issue a device certificate signed by the local CA."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
     if local_ca_service is None:
@@ -967,6 +1564,7 @@ def ca_issue():
 @app.route("/api/ca/issue-bulk", methods=["POST"])
 def ca_issue_bulk():
     """Issue multiple Local CA device certificates and report per-device failures."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     if not ca_exists():
         return jsonify({"error": "No CA found. Generate one first."}), 400
     if local_ca_service is None:
@@ -1052,6 +1650,11 @@ def ca_extron_combined_zip():
                 "private_artifact_downloaded",
                 {"certificate_id": certificate_id, "artifact_name": "combined.pem", "bundle": "extron_zip"},
             )
+            audit(
+                "private_artifact_downloaded",
+                target=certificate_id,
+                details={"artifact_name": "combined.pem", "bundle": "extron_zip"},
+            )
     if count == 0:
         return jsonify({"error": "No Extron combined PEM certificates are available"}), 404
     buffer.seek(0)
@@ -1067,6 +1670,7 @@ def ca_extron_combined_zip():
 def ca_delete_issued(certificate_id):
     """Delete an issued device cert and its companion files (.crt/.key/.pem,
     plus an _encrypted.key if present)."""
+    authorize(Permission.MANAGE_LOCAL_CA)
     metadata = database.get_certificate(certificate_id)
     if (
         metadata is None
@@ -1095,6 +1699,7 @@ def ca_delete_issued(certificate_id):
         database.record_event(
             "local_ca_certificate_deleted", {"certificate_id": certificate_id}
         )
+    audit("local_ca_certificate_deleted", target=certificate_id)
     return jsonify({"ok": True, "removed": [certificate_id]})
 
 
@@ -1244,8 +1849,10 @@ def create_cloudflare_credentials():
         if acme_orchestrator is not None:
             acme_orchestrator.dns_providers["cloudflare"] = provider
         config = database.get_setting(CloudflareDNSProvider.SETTING_ID)
+        audit("dns_credentials_updated", target="cloudflare", details={"zones": config["zones"]})
         return jsonify({"configured": True, "zones": config["zones"]}), 201
     except (TypeError, ValueError, CloudflareError):
+        audit("dns_credentials_update_failed", target="cloudflare", success=False)
         return jsonify({"error": "Cloudflare credentials are invalid"}), 400
 
 
@@ -1256,6 +1863,7 @@ def delete_cloudflare_credentials():
     database.delete_setting(CloudflareDNSProvider.SETTING_ID)
     if acme_orchestrator is not None:
         acme_orchestrator.dns_providers.pop("cloudflare", None)
+    audit("dns_credentials_deleted", target="cloudflare")
     return "", 204
 
 
@@ -1296,6 +1904,41 @@ def list_deployable_certificates():
     return jsonify(certificates)
 
 
+@app.route("/api/certificates/public")
+def list_public_certificates():
+    authorize(Permission.DOWNLOAD_PUBLIC_CERTIFICATE)
+    if artifact_store is None:
+        return jsonify([])
+
+    allowed_names = (
+        "certificate.pem",
+        "chain.pem",
+        "full-chain.pem",
+        "request.csr",
+    )
+    certificates = []
+    for metadata in database.list_certificates():
+        if metadata.get("kind") != "leaf":
+            continue
+        certificate_id = metadata["id"]
+        public_artifacts = []
+        for artifact_name in allowed_names:
+            try:
+                artifact_store.read_public(certificate_id, artifact_name)
+            except (FileNotFoundError, ValueError, PermissionError):
+                continue
+            public_artifacts.append(artifact_name)
+        certificates.append(
+            {
+                "certificate_id": certificate_id,
+                "identifiers": metadata.get("identifiers", []),
+                "profile": metadata.get("profile"),
+                "public_artifacts": public_artifacts,
+            }
+        )
+    return jsonify(certificates)
+
+
 @app.route("/api/certificates/<certificate_id>/private/<artifact_name>")
 def download_private_artifact(certificate_id, artifact_name):
     authorize(Permission.DOWNLOAD_PRIVATE_KEY)
@@ -1309,6 +1952,11 @@ def download_private_artifact(certificate_id, artifact_name):
     database.record_event(
         "private_artifact_downloaded",
         {"certificate_id": certificate_id, "artifact_name": artifact_name},
+    )
+    audit(
+        "private_artifact_downloaded",
+        target=certificate_id,
+        details={"artifact_name": artifact_name},
     )
     response = Response(data, status=200, mimetype="application/x-pem-file")
     filename = _certificate_download_filename(certificate_id, artifact_name)
@@ -1368,10 +2016,12 @@ def toolbelt_credentials(selector):
     if username == "admin" and str(password) == "":
         if hasattr(toolbelt_service, "delete_credentials"):
             toolbelt_service.delete_credentials(selector)
+        audit("toolbelt_device_credentials_cleared", target=selector)
         return jsonify({"ok": True, "credentials_saved": False})
     toolbelt_service.save_credentials(
         selector, username=username, password=str(password)
     )
+    audit("toolbelt_device_credentials_saved", target=selector, details={"username": username})
     return jsonify({"ok": True})
 
 
@@ -1388,6 +2038,7 @@ def toolbelt_default_credentials():
     toolbelt_service.save_default_credentials(
         username=username, password=str(password)
     )
+    audit("toolbelt_shared_credentials_saved", details={"username": username})
     return jsonify({"ok": True, "devices": toolbelt_service.list_devices()})
 
 
@@ -1406,6 +2057,7 @@ def toolbelt_dry_run():
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+    audit("toolbelt_dry_run_started", target=run.get("id"), details={"selectors": selectors})
     return jsonify({"ok": True, "run": run})
 
 
@@ -1424,6 +2076,7 @@ def toolbelt_upload():
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+    audit("toolbelt_upload_started", target=run.get("id"), details={"selectors": selectors})
     return jsonify({"ok": True, "run": run})
 
 
@@ -1446,6 +2099,7 @@ def toolbelt_stop(run_id):
     run = toolbelt_service.stop(run_id)
     if run is None:
         return jsonify({"error": "Run not found"}), 404
+    audit("toolbelt_run_stop_requested", target=run_id)
     return jsonify({"ok": True, "run": run})
 
 
@@ -1460,6 +2114,7 @@ def list_upload_devices():
 
 @app.route("/api/upload/devices", methods=["POST"])
 def add_upload_device():
+    authorize(Permission.DEPLOY_CERTIFICATE)
     data = load_data()
     body = request.json
     required = ("name", "host", "device_type")
@@ -1484,6 +2139,7 @@ def add_upload_device():
 
 @app.route("/api/upload/devices/<device_id>", methods=["DELETE"])
 def remove_upload_device(device_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
     data = load_data()
     data["upload_devices"] = [d for d in data.get("upload_devices", []) if d["id"] != device_id]
     save_data(data)
@@ -1492,6 +2148,7 @@ def remove_upload_device(device_id):
 
 @app.route("/api/upload/devices/<device_id>", methods=["PATCH"])
 def update_upload_device(device_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
     data = load_data()
     body = request.json
     for d in data.get("upload_devices", []):
@@ -1715,7 +2372,19 @@ def push_cert():
     try:
         result = deployment_service.deploy_certificate(device, certificate_id)
     except (KeyError, ValueError) as error:
+        audit(
+            "deployment_failed",
+            target=device_id,
+            success=False,
+            details={"certificate_id": certificate_id, "reason": str(error)},
+        )
         return jsonify({"error": str(error)}), 400
+    audit(
+        "deployment_started",
+        target=device_id,
+        success=result.ok,
+        details={"certificate_id": certificate_id},
+    )
 
     payload = {
         "ok": result.ok,
@@ -1768,6 +2437,15 @@ def test_device_connection():
 
 if __name__ == "__main__":
     os.makedirs(data_dir(), exist_ok=True)
-    port = int(os.environ.get("PORT", 5000))
-    print(f"CertMon running at http://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    try:
+        runtime = resolve_runtime_config(
+            frozen=getattr(sys, "frozen", False),
+            executable=Path(sys.executable),
+            source_dir=Path(__file__).resolve().parent,
+        )
+    except ConfigError as exc:
+        print(f"CertMon configuration error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    mode = "server" if runtime.server_mode else "desktop"
+    print(f"CertMon running in {mode} mode at http://{runtime.bind_host}:{runtime.port}")
+    app.run(host=runtime.bind_host, port=runtime.port, debug=False)

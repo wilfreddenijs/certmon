@@ -36,6 +36,120 @@ def test_header_shows_version_and_build_number_badge():
     assert "v{{ build_info.version }} build {{ build_info.build_number }}" in html
 
 
+def test_server_mode_login_and_audit_ui_are_present():
+    html = page()
+
+    assert 'id="auth-gate"' in html
+    assert "/api/auth/status" in html
+    assert "/api/auth/setup-first-admin" in html
+    assert "/api/auth/login" in html
+    assert "Audit log" in html
+    assert "/api/audit" in html
+    assert "prepareAuditTab()" in html
+    assert "Test timer" in html
+    assert "Open raw audit JSON" in html
+    assert 'href="/api/audit?limit=100"' in html
+    assert "Audit timer test completed after 10 seconds." in html
+    assert "delayed fetch watchdog active" in html
+    assert "setInterval" in html
+    assert "nativeFetch('/api/audit?limit=100')" in html
+    assert "Audit backend query timed out." in html
+    assert "Audit log render failed." in html
+    assert "escapeHtml(ev.event_type)" in html
+    assert "esc(ev.event_type)" not in html
+    assert "Audit log request timed out after 10 seconds." in html
+
+
+def test_permission_visibility_is_centralized_and_uses_public_catalog_for_uploads():
+    html = page()
+
+    assert "function hasPermission(name)" in html
+    assert "function applyPermissionVisibility(root = document)" in html
+    assert "function syncTabVisibility()" in html
+    assert 'data-required-permission="view_audit"' in html
+    assert 'data-required-permission="deploy_certificate"' in html
+    assert 'data-required-permission="download_private_key"' in html
+    assert "/api/certificates/public" in html
+    assert "public_artifacts" in html
+    assert "isAuthenticatedAdmin()" not in html
+    assert "canManageServerBackup()" not in html
+
+
+def test_protected_401_recovery_is_shared_without_auth_polling_or_replay():
+    html = page()
+
+    assert "function handleUnauthorizedSession()" in html
+    assert "function handleProtectedResponse(response, requestUrl)" in html
+    assert "authResetInFlight" in html
+    assert "handleProtectedResponse(res, '/api/audit?limit=100')" in html
+    assert "setInterval(async () => {\n    if (!authState.server_mode || authState.authenticated) await loadData();" in html
+
+
+def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
+    html = page()
+    loader = html.split("async function loadUsers(message = '')", 1)[1].split(
+        "function renderAdministrationUsers", 1
+    )[0]
+
+    assert html.count('id="administration-tab"') == 1
+    assert 'id="tab-admin"' in html
+    assert 'data-any-permission="manage_users manage_server_backup"' in html
+    assert "if (!hasPermission('manage_users')) return;" in loader
+    assert "fetch('/api/users')" in loader
+    assert loader.index("if (!hasPermission('manage_users')) return;") < loader.index("fetch('/api/users')")
+    assert "data.supported_roles" in html
+    assert "supportedRoles.map(role" in html
+    for command in ("Add user", "Edit roles", "Enable", "Disable", "Reset password"):
+        assert command in html
+
+
+def test_server_backup_ui_is_security_admin_visible_and_requires_confirmation():
+    html = page()
+    exporter = html.split("async function downloadFullServerBackup()", 1)[1].split(
+        "async function stageFullServerRestore()", 1
+    )[0]
+    restorer = html.split("async function stageFullServerRestore()", 1)[1].split(
+        "async function loadUsers", 1
+    )[0]
+
+    assert "Server backup and recovery" in html
+    assert "Download full backup" in html
+    assert "Stage restore" in html
+    assert "Export CA backup" in html
+    assert "Import CA backup" in html
+    assert 'data-required-permission="manage_server_backup"' in html
+    assert 'id="user-administration-section"' in html
+    assert 'data-required-permission="manage_users"' in html
+    assert "passphrase !== confirmationEl.value" in exporter
+    assert exporter.index("passphrase !== confirmationEl.value") < exporter.index("fetch('/api/server-backup/export'")
+    assert "passphrase !== confirmationEl.value || !consentEl.checked" in restorer
+    assert restorer.index("passphrase !== confirmationEl.value || !consentEl.checked") < restorer.index("fetch('/api/server-backup/restore'")
+    assert "path.textContent = data.staged_path" in restorer
+    assert "data.activation_steps" in restorer
+    assert "window.location" not in restorer
+    assert "await loadUsers(successMessage)" in html
+    assert "await loadUsers(currentlyDisabled ? 'User enabled'" in html
+
+
+def test_authentication_form_supports_enter_and_confirmed_first_admin_setup():
+    html = page()
+    submit = html.split("async function submitAuth()", 1)[1].split(
+        "async function logout()", 1
+    )[0]
+
+    assert 'id="auth-form"' in html
+    assert 'onsubmit="event.preventDefault(); submitAuth()"' in html
+    assert 'type="submit" id="auth-submit"' in html
+    assert 'id="auth-password-confirmation"' in html
+    assert "authSubmitting" in submit
+    assert "password.length < 8 || password !== passwordConfirmation" in submit
+    assert "payload.password_confirmation = passwordConfirmation" in submit
+    assert submit.index("password !== passwordConfirmation") < submit.index("fetch(endpoint")
+    assert "passwordEl.value = '';" in submit
+    assert "confirmationEl.value = '';" in submit
+    assert "authState.first_admin_required ? 'new-password' : 'current-password'" in html
+
+
 def test_wizard_has_external_ca_and_resumable_state_actions():
     html = page()
 

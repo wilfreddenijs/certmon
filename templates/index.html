@@ -24,6 +24,8 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  [hidden] { display: none !important; }
+
   body {
     background: var(--bg);
     color: var(--text);
@@ -60,6 +62,38 @@
     font-weight: 600;
     letter-spacing: 0;
     white-space: nowrap;
+  }
+
+  .auth-badge {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .auth-gate {
+    display: none;
+    min-height: calc(100vh - 65px);
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .auth-panel {
+    width: min(420px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    box-shadow: var(--card-shadow);
+  }
+
+  .auth-panel h1 {
+    font-family: 'Syne', sans-serif;
+    color: var(--accent);
+    font-size: 22px;
+    margin-bottom: 12px;
   }
 
   .header-stats {
@@ -118,7 +152,7 @@
     margin-bottom: 8px;
   }
 
-  input[type="text"], input[type="number"] {
+  input[type="text"], input[type="number"], input[type="password"] {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -270,6 +304,53 @@
 
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+
+  .admin-toolbar, .admin-user-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.6fr) 110px minmax(300px, auto);
+    gap: 12px;
+    align-items: center;
+  }
+
+  .admin-toolbar {
+    margin-bottom: 12px;
+  }
+
+  .admin-user-row {
+    border-top: 1px solid var(--border);
+    padding: 12px 0;
+  }
+
+  .admin-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .admin-account-state-actions {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .role-info-button { width: 34px; height: 34px; padding: 0; font-size: 20px; }
+  #role-permissions-dialog { width: 850px; max-height: 85vh; margin: auto; overflow: auto; color: var(--text); }
+  #role-permissions-dialog::backdrop { background: rgba(0,0,0,0.7); }
+  .role-permissions-scroll { overflow-x: auto; margin-bottom: 16px; }
+  .role-permissions-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .role-permissions-table th, .role-permissions-table td { padding: 10px; border-bottom: 1px solid var(--border); text-align: center; }
+  .role-permissions-table th:first-child { text-align: left; min-width: 190px; }
+
+  .role-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  @media (max-width: 980px) {
+    .admin-toolbar, .admin-user-row { grid-template-columns: 1fr; }
+    .admin-actions { justify-content: flex-start; }
+  }
 
   .device-filter-bar {
     display: flex;
@@ -719,14 +800,41 @@
     <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Critical" onclick="filterDeviceStatusFromSummary('critical')"><div class="stat-dot" style="background:var(--critical)"></div><span id="stat-crit">0 Critical</span></div>
     <div class="stat-pill" style="cursor:pointer" title="Filter Devices by Expired" onclick="filterDeviceStatusFromSummary('expired')"><div class="stat-dot" style="background:var(--expired)"></div><span id="stat-exp">0 Expired</span></div>
   </div>
+  <div class="auth-badge" id="auth-badge">
+    <span id="auth-user-label"></span>
+    <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="logout()">Logout</button>
+  </div>
 </header>
+
+<div class="auth-gate" id="auth-gate">
+  <div class="auth-panel">
+    <h1 id="auth-title">Sign in</h1>
+    <div class="help-text choice-help" id="auth-copy" style="margin-bottom:16px"></div>
+    <form id="auth-form" onsubmit="event.preventDefault(); submitAuth()">
+      <div class="form-group">
+        <label class="form-label" for="auth-username">Username</label>
+        <input id="auth-username" type="text" autocomplete="username" style="width:100%" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="auth-password">Password</label>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" style="width:100%" oninput="updateAuthSubmitState()" />
+      </div>
+      <div class="form-group" id="auth-confirmation-group" hidden>
+        <label class="form-label" for="auth-password-confirmation">Confirm password</label>
+        <input id="auth-password-confirmation" type="password" autocomplete="new-password" minlength="8" style="width:100%" oninput="updateAuthSubmitState()" />
+      </div>
+      <div id="auth-error" role="alert" style="font-size:12px;color:var(--critical);min-height:18px;margin-bottom:10px"></div>
+      <button class="btn" type="submit" id="auth-submit">Sign in</button>
+    </form>
+  </div>
+</div>
 
 <div class="main">
   <!-- Sidebar -->
   <aside class="sidebar">
 
     <!-- Manual hosts -->
-    <div>
+    <div data-required-permission="issue_certificate">
       <div class="section-title">Manual Hosts</div>
       <div class="input-row">
         <input type="text" id="host-input" placeholder="hostname or IP" />
@@ -737,7 +845,7 @@
     </div>
 
     <!-- Scan ranges -->
-    <div>
+    <div data-required-permission="issue_certificate">
       <div class="section-title">Network Scan Ranges</div>
       <div class="input-row">
         <input type="text" id="range-input" placeholder="192.168.0.0/24" />
@@ -770,10 +878,12 @@
   <div class="content">
     <div class="tabs" style="justify-content:space-between">
       <div style="display:flex">
-        <div class="tab active" onclick="switchTab('certs')">Devices</div>
-        <div class="tab" onclick="switchTab('renewals')">Renewals</div>
-        <div class="tab" onclick="switchTab('ca')">🔐 Local CA</div>
-        <div class="tab" onclick="switchTab('upload')">⬆ Upload</div>
+        <div class="tab active" data-tab="certs" onclick="switchTab('certs')">Devices</div>
+        <div class="tab" data-tab="renewals" onclick="switchTab('renewals')">Renewals</div>
+        <div class="tab" data-tab="ca" onclick="switchTab('ca')">🔐 Local CA</div>
+        <div class="tab" data-tab="upload" onclick="switchTab('upload')">⬆ Upload</div>
+        <div class="tab" data-tab="audit" data-required-permission="view_audit" onclick="switchTab('audit')">Audit</div>
+        <div class="tab" data-tab="admin" id="administration-tab" data-any-permission="manage_users manage_server_backup" onclick="switchTab('admin')" hidden>Administration</div>
       </div>
       <a href="/api/export/excel" download>
         <button class="btn" style="margin:6px 0;padding:6px 16px;font-size:12px">⬇ Export Excel</button>
@@ -813,7 +923,7 @@
           </span>
           <span class="help-text" id="device-filter-count"></span>
         </div>
-        <div class="device-filter-group">
+        <div class="device-filter-group" data-required-permission="manage_local_ca">
           <label style="display:flex;gap:8px;align-items:center">
             <input id="device-select-filtered" type="checkbox" onchange="toggleFilteredDevices(this.checked)" />
             <span style="font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--text)">Select filtered</span>
@@ -843,9 +953,83 @@
       <div id="ca-content" style="max-width:860px"></div>
     </div>
 
+    <div class="tab-panel" id="tab-audit" data-required-permission="view_audit">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+        <div class="section-title" style="margin-bottom:8px">Audit log</div>
+        <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
+        <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="loadAudit()">Refresh audit</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="testAuditTimer()">Test timer</button>
+        <a href="/api/audit?limit=100" target="_blank" rel="noopener" style="display:inline-block;margin-bottom:12px">
+          <button class="btn btn-ghost" type="button" style="font-size:11px;padding:6px 10px">Open raw audit JSON</button>
+        </a>
+        <div id="audit-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="tab-admin" data-any-permission="manage_users manage_server_backup" hidden>
+      <section id="server-backup-section" data-required-permission="manage_server_backup">
+        <div class="section-title" style="margin-bottom:6px">Server backup and recovery</div>
+        <div class="help-text choice-help" style="margin-bottom:16px">
+          Full server backups contain the database, encrypted certificate artifacts, vault files, and encrypted recovery material. This is separate from Local CA Export CA backup and Import CA backup.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;margin-bottom:24px">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;margin-bottom:10px">Download full backup</div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-export-passphrase">Passphrase</label>
+              <input id="server-backup-export-passphrase" type="password" autocomplete="new-password" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-export-confirmation">Confirm passphrase</label>
+              <input id="server-backup-export-confirmation" type="password" autocomplete="new-password" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <button class="btn" id="server-backup-export-button" type="button" onclick="downloadFullServerBackup()" disabled>Download full backup</button>
+            <div id="server-backup-export-result" role="status" class="help-text" style="min-height:20px;margin-top:10px"></div>
+          </div>
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;margin-bottom:10px">Stage restore</div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-restore-file">Backup ZIP</label>
+              <input id="server-backup-restore-file" type="file" accept=".zip,application/zip" style="width:100%" onchange="updateServerBackupControls()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-restore-passphrase">Passphrase</label>
+              <input id="server-backup-restore-passphrase" type="password" autocomplete="off" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="server-backup-restore-confirmation">Confirm passphrase</label>
+              <input id="server-backup-restore-confirmation" type="password" autocomplete="off" style="width:100%" oninput="updateServerBackupControls()" />
+            </div>
+            <label class="checkbox-row help-text" style="align-items:flex-start;margin-bottom:14px">
+              <input id="server-backup-restore-consent" type="checkbox" onchange="updateServerBackupControls()" />
+              <span>Validation creates a new staged directory. It does not switch or restart the running CertMon installation.</span>
+            </label>
+            <button class="btn" id="server-backup-restore-button" type="button" onclick="stageFullServerRestore()" disabled>Stage restore</button>
+          </div>
+        </div>
+        <div id="server-backup-restore-result" role="status" class="help-text" style="margin-bottom:24px"></div>
+      </section>
+      <section id="user-administration-section" data-required-permission="manage_users" style="border-top:1px solid var(--border);padding-top:20px">
+      <div class="admin-toolbar">
+        <div>
+          <div class="section-title" style="margin-bottom:6px">Users</div>
+          <div class="help-text">Local users and role assignments</div>
+        </div>
+        <div></div>
+        <div></div>
+        <div class="admin-actions">
+          <button class="btn btn-ghost role-info-button" id="administration-role-info" type="button" title="Roles and permissions" aria-label="Roles and permissions" onclick="document.getElementById('role-permissions-dialog').showModal()">ⓘ</button>
+          <button class="btn" id="administration-add-user" type="button" onclick="openAddUser()" disabled>Add user</button>
+        </div>
+      </div>
+      <div id="administration-result" role="status" class="help-text" style="min-height:20px;margin-bottom:6px"></div>
+      <div id="administration-users"></div>
+      </section>
+    </div>
+
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
-      <div id="toolbelt-batch" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+      <div id="toolbelt-batch" data-required-permission="deploy_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
           <div>
             <div class="section-title" style="margin-bottom:8px">Prepared device upload</div>
@@ -871,7 +1055,7 @@
         <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
-      <details id="manual-upload-fallback" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+      <details id="manual-upload-fallback" data-required-permission="download_public_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
         <summary style="cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent)">Manual upload fallback</summary>
         <div class="help-text choice-help" style="margin:10px 0 16px">
           For unsupported devices only. The automatic Toolbelt prepared-device list above is the primary Upload workflow.
@@ -879,7 +1063,7 @@
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
             <div class="section-title" style="margin-bottom:0">Download Certificates for Manual Upload</div>
-            <a href="/api/ca/extron-combined-zip" download="certmon-extron-combined-pems.zip"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--warning);border-color:var(--warning)" title="Download all Extron combined PEM files in one ZIP. These files contain private keys; keep the ZIP secret and delete local copies after upload.">Download all Extron PEMs (.zip)</button></a>
+            <a data-required-permission="download_private_key" href="/api/ca/extron-combined-zip" download="certmon-extron-combined-pems.zip"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--warning);border-color:var(--warning)" title="Download all Extron combined PEM files in one ZIP. These files contain private keys; keep the ZIP secret and delete local copies after upload.">Download all Extron PEMs (.zip)</button></a>
           </div>
 
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
@@ -903,7 +1087,7 @@
               <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:6px">Public certificate downloads</div>
               <div id="push-public-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             </div>
-            <div id="push-private-artifacts" style="display:none;margin-top:14px">
+            <div id="push-private-artifacts" data-required-permission="download_private_key" style="display:none;margin-top:14px">
               <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">Private key download</div>
               <div class="help-text" style="margin-bottom:8px">Keep this file secret. Download it only when a device requires manual certificate import.</div>
               <div id="push-private-artifact-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -918,6 +1102,61 @@
         </div>
       </details>
       </div>
+    </div>
+  </div>
+</div>
+
+<dialog class="modal" id="role-permissions-dialog" aria-labelledby="role-permissions-title">
+  <div class="modal-title" id="role-permissions-title">Roles and permissions</div>
+  <div class="role-permissions-scroll">
+    <table class="role-permissions-table">
+      <thead><tr><th scope="col">Permission</th>{% for role in role_permissions %}<th scope="col">{{ role }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for permission, label in [
+          ('download_public_certificate', 'View inventory and download public certificates, CSR and trust files'),
+          ('issue_certificate', 'Issue certificates and manage renewal entries'),
+          ('deploy_certificate', 'Deploy certificates and operate Toolbelt'),
+          ('download_private_key', 'Download private keys, combined PEM, PEM ZIP and CA backup'),
+          ('manage_dns_credentials', 'Manage DNS credentials'),
+          ('manage_local_ca', 'Manage Local CA and import CA backup'),
+          ('manage_server_backup', 'Export and stage full server backups'),
+          ('manage_users', 'Manage users, roles and passwords'),
+          ('view_audit', 'View audit log')
+        ] %}
+        <tr data-permission="{{ permission }}"><th scope="row">{{ label }}</th>{% for role, permissions in role_permissions.items() %}<td data-role="{{ role }}">{{ 'Yes' if permission in permissions else 'No' }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="help-text">Multiple roles combine their permissions. Desktop mode grants full local access without sign-in.</p>
+  <form method="dialog"><button class="btn btn-ghost" type="submit">Close</button></form>
+</dialog>
+
+<div class="modal-overlay" id="user-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+    <div class="modal-title" id="user-modal-title">Add user</div>
+    <div class="form-group" id="user-username-group">
+      <label class="form-label" for="user-username">Username</label>
+      <input id="user-username" type="text" autocomplete="off" style="width:100%" />
+    </div>
+    <div class="form-group" id="user-roles-group">
+      <span class="form-label">Roles</span>
+      <div class="role-options" id="user-role-options"></div>
+    </div>
+    <div id="user-password-fields">
+      <div class="form-group">
+        <label class="form-label" for="user-password">Password</label>
+        <input id="user-password" type="password" autocomplete="new-password" minlength="8" style="width:100%" oninput="updateUserSubmitState()" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="user-password-confirmation">Confirm password</label>
+        <input id="user-password-confirmation" type="password" autocomplete="new-password" minlength="8" style="width:100%" oninput="updateUserSubmitState()" />
+      </div>
+    </div>
+    <div id="user-modal-error" role="alert" style="color:var(--critical);font-size:12px;min-height:18px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" type="button" onclick="closeUserModal()">Cancel</button>
+      <button class="btn" type="button" id="user-modal-submit" onclick="submitUserModal()">Add user</button>
     </div>
   </div>
 </div>
@@ -1077,7 +1316,591 @@
   let deviceCertificateFilter = 'all';
   const selectedDeviceKeys = new Set();
   const renewalActionResults = {};
+  let auditLoadSequence = 0;
+  let authState = { server_mode: false, authenticated: true, first_admin_required: false, permissions: [] };
+  let authSubmitting = false;
+  let authResetInFlight = false;
+  let administrationUsers = [];
+  let supportedRoles = [];
+  let userModalMode = 'add';
+  let userModalTargetId = null;
 
+  const nativeFetch = window.fetch.bind(window);
+  function isProtectedRequest(requestUrl) {
+    const url = new URL(requestUrl, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) return false;
+    return ![
+      '/api/auth/status',
+      '/api/auth/login',
+      '/api/auth/setup-first-admin',
+      '/api/auth/logout',
+    ].includes(url.pathname);
+  }
+
+  async function handleUnauthorizedSession() {
+    if (authResetInFlight) return;
+    authResetInFlight = true;
+    clearInterval(scanPollInterval);
+    clearTimeout(toolbeltPollTimer);
+    scanPollInterval = null;
+    toolbeltPollTimer = null;
+    auditLoadSequence += 1;
+    currentCertificates = {};
+    administrationUsers = [];
+    supportedRoles = [];
+    document.getElementById('role-permissions-dialog')?.close();
+    toolbeltDevices = [];
+    selectedManualTarget = null;
+    selectedDeviceId = null;
+    pendingDeployment = null;
+    selectedDeviceKeys.clear();
+    document.getElementById('audit-list')?.replaceChildren();
+    document.getElementById('administration-users')?.replaceChildren();
+    document.getElementById('toolbelt-device-list')?.replaceChildren();
+    document.getElementById('push-result').style.display = 'none';
+    authState = { server_mode: true, authenticated: false, first_admin_required: false, permissions: [] };
+    try {
+      await initAuth();
+    } finally {
+      authResetInFlight = false;
+    }
+  }
+
+  async function handleProtectedResponse(response, requestUrl) {
+    if (response.status === 401 && isProtectedRequest(requestUrl)) {
+      await handleUnauthorizedSession();
+    }
+    return response;
+  }
+
+  window.fetch = (input, init = {}) => {
+    const method = (init.method || 'GET').toUpperCase();
+    const url = typeof input === 'string' ? input : input.url;
+    const sameOrigin = !/^https?:\/\//i.test(url || '') || (url || '').startsWith(window.location.origin);
+    if (authState && authState.csrf_token && sameOrigin && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const headers = new Headers(init.headers || {});
+      headers.set(authState.csrf_header || 'X-CertMon-CSRF', authState.csrf_token);
+      init = { ...init, headers };
+    }
+    return nativeFetch(input, init).then(response => handleProtectedResponse(response, url));
+  };
+
+  async function initAuth() {
+    const res = await fetch('/api/auth/status');
+    authState = await res.json();
+    const gate = document.getElementById('auth-gate');
+    const main = document.querySelector('.main');
+    const badge = document.getElementById('auth-badge');
+    const stats = document.getElementById('header-stats');
+    if (!authState.server_mode) {
+      gate.style.display = 'none';
+      main.style.display = 'grid';
+      badge.style.display = 'none';
+      stats.style.display = 'flex';
+      syncTabVisibility();
+      return true;
+    }
+    if (!authState.authenticated) {
+      main.style.display = 'none';
+      stats.style.display = 'none';
+      badge.style.display = 'none';
+      gate.style.display = 'flex';
+      document.getElementById('auth-title').textContent = authState.first_admin_required ? 'Create first admin' : 'Sign in';
+      document.getElementById('auth-copy').textContent = authState.first_admin_required
+        ? 'Server mode is enabled. Create the first administrator before using CertMon over the LAN.'
+        : 'Server mode is enabled. Sign in to use CertMon.';
+      document.getElementById('auth-submit').textContent = authState.first_admin_required ? 'Create admin' : 'Sign in';
+      document.getElementById('auth-confirmation-group').hidden = !authState.first_admin_required;
+      document.getElementById('auth-password').autocomplete = authState.first_admin_required ? 'new-password' : 'current-password';
+      document.getElementById('auth-password-confirmation').autocomplete = 'new-password';
+      syncTabVisibility();
+      updateAuthSubmitState();
+      return false;
+    }
+    gate.style.display = 'none';
+    main.style.display = 'grid';
+    stats.style.display = 'flex';
+    badge.style.display = 'flex';
+    document.getElementById('auth-user-label').textContent = `${authState.user.username} (${authState.user.roles.join(', ')})`;
+    syncTabVisibility();
+    return true;
+  }
+
+  function updateAuthSubmitState() {
+    const password = document.getElementById('auth-password').value;
+    const confirmation = document.getElementById('auth-password-confirmation').value;
+    const validSetup = password.length >= 8 && password === confirmation;
+    document.getElementById('auth-submit').disabled = authSubmitting || (authState.first_admin_required && !validSetup);
+  }
+
+  async function submitAuth() {
+    if (authSubmitting) return;
+    const errorEl = document.getElementById('auth-error');
+    errorEl.textContent = '';
+    const passwordEl = document.getElementById('auth-password');
+    const confirmationEl = document.getElementById('auth-password-confirmation');
+    const password = passwordEl.value;
+    const passwordConfirmation = confirmationEl.value;
+    if (authState.first_admin_required && (password.length < 8 || password !== passwordConfirmation)) {
+      errorEl.textContent = password.length < 8
+        ? 'Password must be at least 8 characters'
+        : 'Passwords do not match';
+      updateAuthSubmitState();
+      return;
+    }
+    authSubmitting = true;
+    updateAuthSubmitState();
+    const endpoint = authState.first_admin_required ? '/api/auth/setup-first-admin' : '/api/auth/login';
+    const payload = {
+      username: document.getElementById('auth-username').value.trim(),
+      password
+    };
+    if (authState.first_admin_required) payload.password_confirmation = passwordConfirmation;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      passwordEl.value = '';
+      confirmationEl.value = '';
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errorEl.textContent = data.error || 'Authentication failed';
+        return;
+      }
+      await startApp();
+    } catch (error) {
+      errorEl.textContent = error.message || 'Authentication failed';
+    } finally {
+      authSubmitting = false;
+      passwordEl.value = '';
+      confirmationEl.value = '';
+      updateAuthSubmitState();
+    }
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    await initAuth();
+  }
+
+  function hasPermission(name) {
+    return Boolean(
+      (!authState.server_mode || authState.authenticated) &&
+      (authState.permissions || []).includes(name)
+    );
+  }
+
+  function applyPermissionVisibility(root = document) {
+    root.querySelectorAll('[data-required-permission]').forEach(element => {
+      element.hidden = !hasPermission(element.dataset.requiredPermission);
+    });
+    root.querySelectorAll('[data-any-permission]').forEach(element => {
+      const permissions = element.dataset.anyPermission.split(/\s+/).filter(Boolean);
+      element.hidden = !permissions.some(hasPermission);
+    });
+  }
+
+  function syncTabVisibility() {
+    applyPermissionVisibility();
+    ['certs', 'renewals'].forEach(name => {
+      const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+      const panel = document.getElementById(`tab-${name}`);
+      if (tab) tab.hidden = false;
+      if (panel) panel.hidden = false;
+    });
+    ['ca', 'upload'].forEach(name => {
+      const visible = hasPermission('download_public_certificate') || !authState.server_mode;
+      const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+      const panel = document.getElementById(`tab-${name}`);
+      if (tab) tab.hidden = !visible;
+      if (panel) panel.hidden = !visible;
+    });
+    const active = document.querySelector('.tab-panel.active');
+    if (active && active.hidden) switchTab('certs');
+  }
+
+  function updateServerBackupControls() {
+    const exportPassphrase = document.getElementById('server-backup-export-passphrase').value;
+    const exportConfirmation = document.getElementById('server-backup-export-confirmation').value;
+    document.getElementById('server-backup-export-button').disabled = !exportPassphrase || exportPassphrase !== exportConfirmation;
+
+    const restorePassphrase = document.getElementById('server-backup-restore-passphrase').value;
+    const restoreConfirmation = document.getElementById('server-backup-restore-confirmation').value;
+    const restoreFile = document.getElementById('server-backup-restore-file').files[0];
+    const consent = document.getElementById('server-backup-restore-consent').checked;
+    document.getElementById('server-backup-restore-button').disabled = !restoreFile || !restorePassphrase || restorePassphrase !== restoreConfirmation || !consent;
+  }
+
+  async function downloadFullServerBackup() {
+    const passphraseEl = document.getElementById('server-backup-export-passphrase');
+    const confirmationEl = document.getElementById('server-backup-export-confirmation');
+    const result = document.getElementById('server-backup-export-result');
+    const passphrase = passphraseEl.value;
+    if (!passphrase || passphrase !== confirmationEl.value) return;
+    result.style.color = 'var(--muted)';
+    result.textContent = 'Creating full server backup...';
+    const response = await fetch('/api/server-backup/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({passphrase})
+    });
+    passphraseEl.value = '';
+    confirmationEl.value = '';
+    updateServerBackupControls();
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'Could not create full server backup';
+      return;
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename=?"?([^";]+)"?/i);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = match ? match[1] : 'certmon-server-backup.zip';
+    document.body.appendChild(link);
+    link.click();
+    URL.revokeObjectURL(link.href);
+    link.remove();
+    result.style.color = 'var(--ok)';
+    result.textContent = 'Full server backup downloaded.';
+  }
+
+  async function stageFullServerRestore() {
+    const fileEl = document.getElementById('server-backup-restore-file');
+    const passphraseEl = document.getElementById('server-backup-restore-passphrase');
+    const confirmationEl = document.getElementById('server-backup-restore-confirmation');
+    const consentEl = document.getElementById('server-backup-restore-consent');
+    const result = document.getElementById('server-backup-restore-result');
+    const file = fileEl.files[0];
+    const passphrase = passphraseEl.value;
+    if (!file || !passphrase || passphrase !== confirmationEl.value || !consentEl.checked) return;
+    result.style.color = 'var(--muted)';
+    result.textContent = 'Validating and staging restore...';
+    const form = new FormData();
+    form.append('backup', file);
+    form.append('passphrase', passphrase);
+    const response = await fetch('/api/server-backup/restore', {method: 'POST', body: form});
+    passphraseEl.value = '';
+    confirmationEl.value = '';
+    consentEl.checked = false;
+    updateServerBackupControls();
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'Could not stage full server restore';
+      return;
+    }
+    result.replaceChildren();
+    result.style.color = 'var(--ok)';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Restore staged at: ';
+    const path = document.createElement('code');
+    path.textContent = data.staged_path;
+    const instructions = document.createElement('ol');
+    instructions.style.cssText = 'margin:12px 0 0 22px;color:var(--text);line-height:1.7';
+    (data.activation_steps || []).forEach(step => {
+      const item = document.createElement('li');
+      item.textContent = step;
+      instructions.appendChild(item);
+    });
+    result.append(heading, path, instructions);
+  }
+
+  async function loadUsers(message = '') {
+    if (!hasPermission('manage_users')) return;
+    const res = await fetch('/api/users');
+    const data = await res.json().catch(() => ({}));
+    const result = document.getElementById('administration-result');
+    if (!res.ok) {
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'Could not load users';
+      return;
+    }
+    administrationUsers = data.users || [];
+    supportedRoles = data.supported_roles || [];
+    document.getElementById('administration-add-user').disabled = supportedRoles.length === 0;
+    result.style.color = 'var(--ok)';
+    result.textContent = message;
+    renderAdministrationUsers();
+    applyPermissionVisibility();
+  }
+
+  function renderAdministrationUsers() {
+    const list = document.getElementById('administration-users');
+    list.innerHTML = administrationUsers.map(user => `
+      <div class="admin-user-row">
+        <strong>${escapeHtml(user.username)}</strong>
+        <div>${user.roles.map(role => `<span class="tag">${escapeHtml(role)}</span>`).join('')}</div>
+        <span class="status-badge ${user.disabled ? 'critical' : 'ok'}">${user.disabled ? 'Disabled' : 'Enabled'}</span>
+        <div class="admin-actions">
+          <button class="btn btn-ghost" type="button" onclick="openEditRoles('${escAttr(user.id)}')">Edit roles</button>
+          <span class="admin-account-state-actions">
+            <button class="btn btn-ghost" type="button" onclick="toggleUserEnabled('${escAttr(user.id)}', true)" ${user.disabled ? '' : 'disabled'}>Enable</button>
+            <button class="btn btn-danger" type="button" onclick="toggleUserEnabled('${escAttr(user.id)}', false)" ${user.disabled ? 'disabled' : ''}>Disable</button>
+          </span>
+          <button class="btn btn-ghost" type="button" onclick="openResetPassword('${escAttr(user.id)}')">Reset password</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderRoleCheckboxes(selectedRoles) {
+    document.getElementById('user-role-options').innerHTML = supportedRoles.map(role => `
+      <label class="checkbox-row">
+        <input type="checkbox" name="user-role" value="${escapeHtml(role)}" ${selectedRoles.includes(role) ? 'checked' : ''} onchange="updateUserSubmitState()" />
+        <span>${escapeHtml(role)}</span>
+      </label>
+    `).join('');
+  }
+
+  function openAddUser() {
+    userModalMode = 'add';
+    userModalTargetId = null;
+    document.getElementById('user-modal-title').textContent = 'Add user';
+    document.getElementById('user-modal-submit').textContent = 'Add user';
+    document.getElementById('user-username').value = '';
+    document.getElementById('user-username-group').hidden = false;
+    document.getElementById('user-roles-group').hidden = false;
+    document.getElementById('user-password-fields').hidden = false;
+    renderRoleCheckboxes(['viewer']);
+    openUserModal();
+  }
+
+  function openEditRoles(userId) {
+    const user = administrationUsers.find(item => item.id === userId);
+    if (!user) return;
+    userModalMode = 'edit';
+    userModalTargetId = userId;
+    document.getElementById('user-modal-title').textContent = 'Edit roles';
+    document.getElementById('user-modal-submit').textContent = 'Save user';
+    document.getElementById('user-username').value = user.username;
+    document.getElementById('user-username-group').hidden = false;
+    document.getElementById('user-roles-group').hidden = false;
+    document.getElementById('user-password-fields').hidden = true;
+    renderRoleCheckboxes(user.roles);
+    openUserModal();
+  }
+
+  function openResetPassword(userId) {
+    const user = administrationUsers.find(item => item.id === userId);
+    if (!user) return;
+    userModalMode = 'password';
+    userModalTargetId = userId;
+    document.getElementById('user-modal-title').textContent = `Reset password for ${user.username}`;
+    document.getElementById('user-modal-submit').textContent = 'Reset password';
+    document.getElementById('user-username-group').hidden = true;
+    document.getElementById('user-roles-group').hidden = true;
+    document.getElementById('user-password-fields').hidden = false;
+    openUserModal();
+  }
+
+  function openUserModal() {
+    document.getElementById('user-modal-error').textContent = '';
+    document.getElementById('user-password').value = '';
+    document.getElementById('user-password-confirmation').value = '';
+    document.getElementById('user-modal').classList.add('open');
+    updateUserSubmitState();
+  }
+
+  function closeUserModal() {
+    document.getElementById('user-password').value = '';
+    document.getElementById('user-password-confirmation').value = '';
+    document.getElementById('user-modal').classList.remove('open');
+  }
+
+  function selectedUserRoles() {
+    return Array.from(document.querySelectorAll('input[name="user-role"]:checked')).map(input => input.value);
+  }
+
+  function updateUserSubmitState() {
+    const submit = document.getElementById('user-modal-submit');
+    const rolesValid = userModalMode === 'password' || selectedUserRoles().length > 0;
+    const password = document.getElementById('user-password').value;
+    const confirmation = document.getElementById('user-password-confirmation').value;
+    const passwordValid = userModalMode === 'edit' || (password.length >= 8 && password === confirmation);
+    submit.disabled = !(rolesValid && passwordValid);
+  }
+
+  async function submitUserModal() {
+    const passwordEl = document.getElementById('user-password');
+    const confirmationEl = document.getElementById('user-password-confirmation');
+    const password = passwordEl.value;
+    const confirmation = confirmationEl.value;
+    if (userModalMode !== 'edit' && (password.length < 8 || password !== confirmation)) return;
+
+    let endpoint = '/api/users';
+    let method = 'POST';
+    let payload = {
+      username: document.getElementById('user-username').value.trim(),
+      roles: selectedUserRoles()
+    };
+    let successMessage = 'User added';
+    if (userModalMode === 'add') payload.password = password;
+    if (userModalMode === 'edit') {
+      endpoint = `/api/users/${encodeURIComponent(userModalTargetId)}`;
+      method = 'PATCH';
+      successMessage = 'User roles updated';
+    }
+    if (userModalMode === 'password') {
+      endpoint = `/api/users/${encodeURIComponent(userModalTargetId)}/password`;
+      payload = { password };
+      successMessage = 'Password reset; active sessions revoked';
+    }
+    passwordEl.value = '';
+    confirmationEl.value = '';
+    updateUserSubmitState();
+    const res = await fetch(endpoint, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      document.getElementById('user-modal-error').textContent = data.error || 'User change failed';
+      return;
+    }
+    closeUserModal();
+    await loadUsers(successMessage);
+  }
+
+  async function toggleUserEnabled(userId, currentlyDisabled) {
+    if (!currentlyDisabled && !confirm('Disable this user and revoke all active sessions?')) return;
+    const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled: !currentlyDisabled })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const result = document.getElementById('administration-result');
+      result.style.color = 'var(--critical)';
+      result.textContent = data.error || 'User change failed';
+      return;
+    }
+    await loadUsers(currentlyDisabled ? 'User enabled' : 'User disabled; active sessions revoked');
+  }
+
+  function prepareAuditTab() {
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    list.innerHTML = '<div class="help-text">Audit tab ready. Click Refresh audit to load events, or Test timer to verify browser timers.</div>';
+  }
+
+  function testAuditTimer() {
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    const sequence = ++auditLoadSequence;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (sequence !== auditLoadSequence) {
+        clearInterval(timer);
+        return;
+      }
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      list.innerHTML = `<div class="help-text">Audit timer test: ${seconds}s</div>`;
+      if (seconds >= 10) {
+        clearInterval(timer);
+        list.innerHTML = '<div class="help-text" style="color:var(--accent)">Audit timer test completed after 10 seconds.</div>';
+      }
+    }, 1000);
+    list.innerHTML = '<div class="help-text">Audit timer test: 0s</div>';
+  }
+
+  function loadAudit() {
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    const sequence = ++auditLoadSequence;
+    const startedAt = Date.now();
+    let finished = false;
+    const showIfCurrent = html => {
+      if (sequence === auditLoadSequence) list.innerHTML = html;
+    };
+    const renderLoading = () => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      showIfCurrent(`<div class="help-text">Loading audit... <span style="opacity:.7">(delayed fetch watchdog active, ${seconds}s)</span></div>`);
+    };
+    const stop = () => {
+      finished = true;
+      clearInterval(interval);
+      clearTimeout(watchdog);
+    };
+    const renderFailure = html => {
+      stop();
+      showIfCurrent(html);
+    };
+    const renderEvents = events => {
+      try {
+        if (!Array.isArray(events) || !events.length) {
+          stop();
+          showIfCurrent('<div class="help-text">No audit events yet.</div>');
+          return;
+        }
+        const html = events.map(ev => {
+          const details = ev.details && Object.keys(ev.details).length
+            ? `<div class="help-text">${escapeHtml(JSON.stringify(ev.details))}</div>`
+            : '';
+          return `
+            <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">
+              <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                <b style="color:${ev.success ? 'var(--accent)' : 'var(--warning)'}">${escapeHtml(ev.event_type)}</b>
+                <span class="help-text">${escapeHtml(ev.created_at || '')}</span>
+              </div>
+              <div class="help-text">user: ${escapeHtml(ev.username || 'system')} &middot; source: ${escapeHtml(ev.source_ip || '-')} &middot; target: ${escapeHtml(ev.target || '-')}</div>
+              ${details}
+            </div>`;
+        }).join('');
+        stop();
+        showIfCurrent(html);
+      } catch (err) {
+        renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log render failed. ${escapeHtml(err && err.message ? err.message : '')}</div>`);
+      }
+    };
+
+    renderLoading();
+    const interval = setInterval(() => {
+      if (!finished) renderLoading();
+    }, 1000);
+    const watchdog = setTimeout(() => {
+      if (!finished) renderFailure('<div class="help-text" style="color:var(--critical)">Audit log request timed out after 10 seconds.</div>');
+    }, 10000);
+
+    setTimeout(() => {
+      if (finished || sequence !== auditLoadSequence) return;
+      nativeFetch('/api/audit?limit=100')
+        .then(async res => {
+          res = await handleProtectedResponse(res, '/api/audit?limit=100');
+          if (finished || sequence !== auditLoadSequence) return;
+          if (res.status === 401) {
+            stop();
+            return;
+          }
+          if (res.status === 403) {
+            renderFailure('<div class="help-text" style="color:var(--warning)">Your role cannot view the audit log.</div>');
+            return;
+          }
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            const statusHint = res.status === 504
+              ? 'Audit backend query timed out.'
+              : `Audit log failed to load (${res.status}).`;
+            renderFailure(`<div class="help-text" style="color:var(--critical)">${escapeHtml(statusHint)} ${escapeHtml(text || 'Check certmon_error.log.')}</div>`);
+            return;
+          }
+          try {
+            renderEvents(await res.json());
+          } catch (err) {
+            renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log returned invalid JSON. ${escapeHtml(err && err.message ? err.message : '')}</div>`);
+          }
+        })
+        .catch(err => {
+          if (!finished) renderFailure(`<div class="help-text" style="color:var(--critical)">Audit log failed to load. ${escapeHtml(err && err.message ? err.message : '')}</div>`);
+        });
+    }, 1500);
+  }
   async function loadData() {
     const res = await fetch('/api/data');
     const data = await res.json();
@@ -1087,7 +1910,7 @@
       uploadDevices = await udRes.json();
     } catch (e) { /* keep existing uploadDevices */ }
     try {
-      const certRes = await fetch('/api/certificates');
+      const certRes = await fetch('/api/certificates/public');
       availableCertificates = await certRes.json();
     } catch (e) { /* keep existing availableCertificates */ }
     let renewals = [];
@@ -1099,6 +1922,8 @@
     renderCerts(currentCertificates);
     renderRenewals(renewals);
     updateStats(data.certificates || {});
+    applyPermissionVisibility();
+    syncTabVisibility();
   }
 
   function renderSidebar(data) {
@@ -1273,6 +2098,7 @@
     }
     const bulkBtn = document.getElementById('device-bulk-create-btn');
     if (bulkBtn) {
+      bulkBtn.hidden = !hasPermission('manage_local_ca');
       bulkBtn.disabled = !createTargets.length;
       bulkBtn.textContent = createTargets.length ? `Create certificates (${createTargets.length})` : 'Create certificates';
     }
@@ -1298,17 +2124,17 @@
       const canRenew = c.days_remaining !== null && c.days_remaining < 30;
       const sansHtml = (c.sans || []).slice(0, 4).map(s => `<span class="tag">${s}</span>`).join('');
       const localCaCert = findLocalCaCertificate(c);
-      const certificateAction = localCaCert
+      const certificateAction = hasPermission('manage_local_ca') ? (localCaCert
         ? (localCaCert.profile === 'extron-rsa'
           ? `<button class="btn btn-ca" title="Show the prepared Extron-compatible certificate and open Upload" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}','${localCaCert.certificate_id}')">Upload ready</button>`
           : `<button class="btn btn-upload" title="Open manual certificate downloads for this device" onclick="openManualUploadForCertificate('${localCaCert.certificate_id}')">Upload</button>`)
-        : `<button class="btn btn-ca" title="Create a Local CA certificate for this device" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Create certificate</button>`;
+        : `<button class="btn btn-ca" title="Create a Local CA certificate for this device" onclick="openDeviceLocalCAModal('${c.host}','${escAttr(c.cn || '')}')">Create certificate</button>`) : '';
 
       return `
         <div class="cert-card ${c.status}">
           <div class="cert-header">
             <div style="display:flex;gap:10px;align-items:flex-start;min-width:0">
-              <input type="checkbox" ${selectedDeviceKeys.has(key) ? 'checked' : ''} onchange="toggleDeviceSelection('${escAttr(key)}', this.checked)" title="Select for bulk certificate creation" />
+              ${hasPermission('manage_local_ca') ? `<input type="checkbox" ${selectedDeviceKeys.has(key) ? 'checked' : ''} onchange="toggleDeviceSelection('${escAttr(key)}', this.checked)" title="Select for bulk certificate creation" />` : ''}
               <div style="min-width:0">
               <div class="cert-host">${c.cn || c.host}</div>
               <div class="cert-port">${c.host}:${c.port}</div>
@@ -1335,14 +2161,15 @@
             <div class="days-fill" style="width:${barW}%;background:${color}"></div>
           </div>
           <div class="cert-actions">
-            <button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>
-            ${canRenew ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
+            ${hasPermission('issue_certificate') ? `<button class="btn btn-refresh" onclick="refreshCert('${c.host}',${c.port})">↻ Refresh</button>` : ''}
+            ${canRenew && hasPermission('issue_certificate') ? `<button class="btn btn-renew" onclick="openModal('${c.host}',${c.port})">⟳ Renew</button>` : ''}
             ${certificateAction}
-            <button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>
+            ${hasPermission('issue_certificate') ? `<button class="btn btn-danger" onclick="removeHost('${c.host}',${c.port})">✕</button>` : ''}
           </div>
         </div>
       `;
     }).join('');
+    applyPermissionVisibility(grid);
   }
 
   function renderRenewals(renewals) {
@@ -1396,10 +2223,15 @@
   }
 
   function renewalStateActions(r) {
+    if (!hasPermission('issue_certificate')) {
+      if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a>`;
+      if (r.state === 'deployment_pending' || r.state === 'failed') return `<div style="color:var(--warning);font-size:12px;margin-bottom:8px">${escapeHtml(r.error_message || (r.state === 'failed' ? 'Renewal failed' : 'Deployment did not finish yet or needs attention.'))}</div>`;
+      return '';
+    }
     if (r.state === 'awaiting_dns') return `<button class="btn" onclick="resumeRenewal('${r.id}','verify')">Verify and continue</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'awaiting_external_ca') return `<a href="/api/renewals/${r.id}/external/csr" download><button class="btn btn-ghost">Download CSR</button></a> <button class="btn" onclick="resumeRenewal('${r.id}','import-cert')">Import signed certificate</button> <button class="btn btn-danger" onclick="resumeRenewal('${r.id}','cancel')">Cancel renewal</button>`;
     if (r.state === 'cleanup_required') return `<button class="btn" onclick="resumeRenewal('${r.id}','retry-cleanup')">Retry cleanup</button>`;
-    if (r.state === 'issued') return `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> <button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
+    if (r.state === 'issued') return `${hasPermission('deploy_certificate') ? `<button class="btn" onclick="resumeRenewal('${r.id}','deploy')">Deploy now</button> ` : ''}<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'deployment_pending') return `<div style="color:var(--warning);font-size:12px;margin-bottom:8px">${r.error_message || 'Deployment did not finish yet or needs attention.'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'deployed') return `<button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
     if (r.state === 'failed') return `<div style="color:var(--critical);font-size:12px;margin-bottom:8px">${r.error_message || 'Renewal failed'}</div><button class="btn btn-danger" onclick="deleteRenewal('${r.id}')">Delete entry</button>`;
@@ -1771,16 +2603,20 @@
   }
 
   function switchTab(name) {
-    document.querySelectorAll('.tab').forEach((t, i) => {
-      t.classList.toggle('active', ['certs','renewals','ca','upload'][i] === name);
+    const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (!tab || tab.hidden) return;
+    document.querySelectorAll('.tab[data-tab]').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === name);
     });
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${name}`).classList.add('active');
     if (name === 'ca') loadCA();
+    if (name === 'audit') prepareAuditTab();
+    if (name === 'admin' && hasPermission('manage_users')) loadUsers();
     if (name === 'upload') {
       loadUploadDevices();
       loadAvailableCertificates();
-      loadToolbeltDevices(false);
+      if (hasPermission('deploy_certificate')) loadToolbeltDevices(false);
     }
   }
 
@@ -1807,13 +2643,14 @@
           <div class="status-badge ok">${ca.days_remaining} days</div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
+          <button class="btn btn-ghost" data-required-permission="manage_local_ca" style="font-size:12px;padding:6px 14px" onclick="installCA()">⬇ Install in Windows</button>
           <span style="display:inline-flex;align-items:center;gap:6px">
             <a href="/api/ca/download-cert" download="certmon-ca.crt"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">⬇ Download CA cert</button></a>
             <span title="Windows manual trust install: download the CA cert, double-click the .crt, choose Install Certificate, choose Local Machine for all users or Current User for only you, select Place all certificates in the following store, browse to Trusted Root Certification Authorities, finish, confirm the warning, then restart the browser. Install only the public CA certificate, not a private key or backup file." style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--border);border-radius:50%;color:var(--accent);font-size:12px;font-weight:700;cursor:help">i</span>
+            <a href="/api/ca/trust-bundle" download="certmon-local-ca-trust-bundle.zip"><button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" title="Download the public Local CA trust bundle for another CertMon operator's Windows trust store. This ZIP does not include the Local CA private key.">⬇ Trust bundle</button></a>
           </span>
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
-          <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>
+          <button class="btn btn-ghost" data-required-permission="download_private_key" style="font-size:12px;padding:6px 14px" onclick="exportLocalCABackup()">Export CA backup</button>
+          <button class="btn btn-ghost" data-required-permission="manage_local_ca" style="font-size:12px;padding:6px 14px" onclick="importLocalCABackup(true)">Import CA backup</button>
         </div>
         <div class="help-text field-note" style="margin-top:10px">Use an encrypted CA backup to share one Local CA between trusted CertMon desktops without baking private keys into the executable.</div>
         <div id="ca-install-result" style="margin-top:10px;font-size:12px"></div>
@@ -1822,14 +2659,14 @@
         <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">No Local CA yet</div>
         <div style="color:var(--muted);font-size:13px;margin-bottom:16px">Generate a local CA once — then install it in Windows so all browsers trust your device certificates.</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn" onclick="generateCA()">⚡ Generate Local CA</button>
-          <button class="btn btn-ghost" onclick="importLocalCABackup(false)">Import CA backup</button>
+          <button class="btn" data-required-permission="manage_local_ca" onclick="generateCA()">⚡ Generate Local CA</button>
+          <button class="btn btn-ghost" data-required-permission="manage_local_ca" onclick="importLocalCABackup(false)">Import CA backup</button>
         </div>
         <div id="ca-generate-result" style="margin-top:12px;font-size:12px"></div>
       </div>`;
 
     const issueForm = ca.exists ? `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px">
+      <div data-required-permission="manage_local_ca" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px">
         <div class="section-title" style="margin-bottom:14px">Issue Device Certificate</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div>
@@ -1875,9 +2712,9 @@
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <a href="/api/ca/download/${c.certificate_id}" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
-                ${c.profile === 'extron-rsa' ? `<a href="/api/certificates/${c.certificate_id}/private/combined.pem" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
+                ${c.profile === 'extron-rsa' ? `<a data-required-permission="download_private_key" href="/api/certificates/${c.certificate_id}/private/combined.pem" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
                 <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
-                <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
+                <button class="btn btn-danger" data-required-permission="manage_local_ca" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
               </div>
             </div>`).join('')}
         </div>
@@ -1890,7 +2727,8 @@
         <button class="btn btn-ghost" onclick="switchTab('certs')">Open Devices</button>
       </div>` : '';
 
-    el.innerHTML = caCard + deviceHint;
+    el.innerHTML = caCard + issueForm + issuedSection + deviceHint;
+    applyPermissionVisibility(el);
   }
 
   async function generateCA() {
@@ -2273,9 +3111,10 @@
   }
 
   async function loadAvailableCertificates() {
-    const res = await fetch('/api/certificates');
+    const res = await fetch('/api/certificates/public');
     availableCertificates = await res.json();
     renderCertificateSelect();
+    applyPermissionVisibility();
     applyPendingDeployment();
   }
 
@@ -2634,18 +3473,19 @@
     logEl.innerHTML = '<div>Manual upload selected. CertMon does not connect to this device automatically.</div>';
     const selectedCertificate = (availableCertificates || []).find(c => c.certificate_id === certificate_id) || {};
     const isExtronProfile = selectedCertificate.profile === 'extron-rsa';
+    const publicArtifacts = selectedCertificate.public_artifacts || [];
 
     publicArtifactsDiv.style.display = 'block';
-    publicArtifactsEl.innerHTML = ['certificate.pem', 'chain.pem', 'full-chain.pem'].map(name =>
+    publicArtifactsEl.innerHTML = publicArtifacts.map(name =>
       `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/public/${name}" download style="font-size:11px;padding:6px 10px">${name}</a>`
     ).join('');
 
-    privateArtifactsDiv.style.display = 'block';
-    privateArtifactsEl.innerHTML = isExtronProfile
+    privateArtifactsDiv.style.display = hasPermission('download_private_key') ? 'block' : 'none';
+    privateArtifactsEl.innerHTML = hasPermission('download_private_key') ? (isExtronProfile
       ? `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/combined.pem" download style="font-size:11px;padding:6px 10px;color:var(--warning);border-color:var(--warning)" title="Extron combined PEM contains certificate and private key. Keep it secret.">extron-combined.pem</a>`
-      : `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`;
+      : `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`) : '';
 
-    instrDiv.style.display = 'block';
+    instrDiv.style.display = hasPermission('download_private_key') ? 'block' : 'none';
     instrText.textContent = isExtronProfile
       ? [
           '1. Download extron-combined.pem.',
@@ -2660,11 +3500,20 @@
         ].join('\n');
 
     resultDiv.scrollIntoView({ behavior: 'smooth' });
+    applyPermissionVisibility(resultDiv);
+  }
+
+  async function startApp() {
+    if (await initAuth()) {
+      await loadData();
+    }
   }
 
   // Initial load + auto-refresh every 60s
-  loadData();
-  setInterval(loadData, 60000);
+  startApp();
+  setInterval(async () => {
+    if (!authState.server_mode || authState.authenticated) await loadData();
+  }, 60000);
 </script>
 </body>
 </html>

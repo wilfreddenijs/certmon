@@ -1,6 +1,16 @@
 # CertMon Project
 
+## What This Is
+
 CertMon is a Windows-focused certificate monitoring and management tool for local devices, internal services, and certificate renewal workflows.
+
+## Core Value
+
+CertMon makes certificate monitoring, renewal, trust distribution, and deployment manageable without exposing private keys or weakening the safe desktop defaults.
+
+## Requirements
+
+The active functional and security requirements are maintained in `.planning/REQUIREMENTS.md`. Implementations must preserve secure key handling, loopback-safe desktop behavior, and authenticated, authorized, audited mutations in shared server mode.
 
 ## Current State
 
@@ -19,4 +29,3 @@ The certificate-renewal phase adds secure renewal jobs, Local CA issuance, Exter
 ## Next Milestone Direction
 
 After certificate-renewal UAT is complete, the next planned phase is shared server mode for team use and shared Local CA operations.
-

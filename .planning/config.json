@@ -1,9 +1,11 @@
 {
   "project_code": "certmon",
+  "runtime": "codex",
   "workflow": {
-    "text_mode": true
+    "text_mode": true,
+    "_auto_chain_active": false,
+    "nyquist_validation": true,
+    "ai_integration_phase": true
   },
-  "current_phase": "01-secure-certificate-renewal",
-  "next_phase": "02-shared-server-mode"
+  "model_profile": "budget"
 }
-
