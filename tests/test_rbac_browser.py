@@ -360,6 +360,33 @@ def test_standalone_roles_match_effective_permissions_and_rendered_controls(
         context.close()
 
 
+def test_administration_role_information_matches_authoritative_permissions(page, live_certmon, tmp_path):
+    _create_admin(page, live_certmon)
+    page.locator('[data-tab="admin"]').click()
+    info = page.get_by_role("button", name="Roles and permissions", exact=True)
+    info.click()
+    dialog = page.get_by_role("dialog", name="Roles and permissions", exact=True)
+    expect(dialog).to_be_visible()
+    for permission in Permission:
+        row = dialog.locator(f'tr[data-permission="{permission.value}"]')
+        expect(row).to_have_count(1)
+        for role, granted in ROLE_PERMISSIONS.items():
+            expect(row.locator(f'td[data-role="{role}"]')).to_have_text(
+                "Yes" if permission in granted else "No"
+            )
+    for width in (1440, 390):
+        page.set_viewport_size({"width": width, "height": 900})
+        box = dialog.bounding_box()
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= width
+        page.screenshot(path=str(tmp_path / f"role-permissions-{width}.png"))
+    page.keyboard.press("Escape")
+    expect(dialog).not_to_be_visible()
+    info.click()
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(dialog).not_to_be_visible()
+
+
 def test_administration_enable_disable_controls_stay_adjacent(page, live_certmon):
     _create_admin(page, live_certmon)
     assert _create_user(page, "toggle-viewer", ["viewer"])["status"] == 201

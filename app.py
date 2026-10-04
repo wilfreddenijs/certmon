@@ -55,6 +55,7 @@ from certmon.naming import safe_slug
 from certmon.permissions import (
     AuthorizationError,
     Permission,
+    ROLE_PERMISSIONS,
     authorize,
     permissions_for_roles,
     reset_current_permissions,
@@ -494,7 +495,13 @@ def scan_range_worker(ip_range):
 
 @app.route("/")
 def index():
-    return render_template("index.html", build_info=build_info())
+    return render_template(
+        "index.html", build_info=build_info(),
+        role_permissions={
+            role: {permission.value for permission in permissions}
+            for role, permissions in ROLE_PERMISSIONS.items()
+        },
+    )
 
 
 @app.route("/api/auth/status")

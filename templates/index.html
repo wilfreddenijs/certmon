@@ -333,6 +333,14 @@
     gap: 6px;
   }
 
+  .role-info-button { width: 34px; height: 34px; padding: 0; font-size: 20px; }
+  #role-permissions-dialog { width: 850px; max-height: 85vh; margin: auto; overflow: auto; color: var(--text); }
+  #role-permissions-dialog::backdrop { background: rgba(0,0,0,0.7); }
+  .role-permissions-scroll { overflow-x: auto; margin-bottom: 16px; }
+  .role-permissions-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .role-permissions-table th, .role-permissions-table td { padding: 10px; border-bottom: 1px solid var(--border); text-align: center; }
+  .role-permissions-table th:first-child { text-align: left; min-width: 190px; }
+
   .role-options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1010,6 +1018,7 @@
         <div></div>
         <div></div>
         <div class="admin-actions">
+          <button class="btn btn-ghost role-info-button" id="administration-role-info" type="button" title="Roles and permissions" aria-label="Roles and permissions" onclick="document.getElementById('role-permissions-dialog').showModal()">ⓘ</button>
           <button class="btn" id="administration-add-user" type="button" onclick="openAddUser()" disabled>Add user</button>
         </div>
       </div>
@@ -1096,6 +1105,32 @@
     </div>
   </div>
 </div>
+
+<dialog class="modal" id="role-permissions-dialog" aria-labelledby="role-permissions-title">
+  <div class="modal-title" id="role-permissions-title">Roles and permissions</div>
+  <div class="role-permissions-scroll">
+    <table class="role-permissions-table">
+      <thead><tr><th scope="col">Permission</th>{% for role in role_permissions %}<th scope="col">{{ role }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for permission, label in [
+          ('download_public_certificate', 'View inventory and download public certificates, CSR and trust files'),
+          ('issue_certificate', 'Issue certificates and manage renewal entries'),
+          ('deploy_certificate', 'Deploy certificates and operate Toolbelt'),
+          ('download_private_key', 'Download private keys, combined PEM, PEM ZIP and CA backup'),
+          ('manage_dns_credentials', 'Manage DNS credentials'),
+          ('manage_local_ca', 'Manage Local CA and import CA backup'),
+          ('manage_server_backup', 'Export and stage full server backups'),
+          ('manage_users', 'Manage users, roles and passwords'),
+          ('view_audit', 'View audit log')
+        ] %}
+        <tr data-permission="{{ permission }}"><th scope="row">{{ label }}</th>{% for role, permissions in role_permissions.items() %}<td data-role="{{ role }}">{{ 'Yes' if permission in permissions else 'No' }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="help-text">Multiple roles combine their permissions. Desktop mode grants full local access without sign-in.</p>
+  <form method="dialog"><button class="btn btn-ghost" type="submit">Close</button></form>
+</dialog>
 
 <div class="modal-overlay" id="user-modal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
@@ -1313,6 +1348,7 @@
     currentCertificates = {};
     administrationUsers = [];
     supportedRoles = [];
+    document.getElementById('role-permissions-dialog')?.close();
     toolbeltDevices = [];
     selectedManualTarget = null;
     selectedDeviceId = null;
