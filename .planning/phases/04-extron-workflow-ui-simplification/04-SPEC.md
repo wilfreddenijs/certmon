@@ -112,6 +112,6 @@ The desired workflow is device-first: scan devices, choose Extron-compatible Loc
 
 ---
 
-*Phase: certmon-04-extron-workflow-ui-simplification*
+*Phase: 04-extron-workflow-ui-simplification*
 *Spec created: 2026-06-30*
 *Next step: $gsd-discuss-phase 4 - implementation decisions, then $gsd-plan-phase 4*

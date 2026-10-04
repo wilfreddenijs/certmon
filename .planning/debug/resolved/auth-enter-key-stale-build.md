@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Test 4: pressing Enter should submit authentication, but only clicking the button works."
 created: 2026-08-21T16:30:00+02:00
-updated: 2026-08-21T16:30:00+02:00
+updated: 2026-10-04
 goal: find_root_cause_only
 ---
 
@@ -11,7 +11,7 @@ goal: find_root_cause_only
 hypothesis: "The tested build predates the form-based authentication UI."
 test: "Compare the remote branch template used by GitHub builds with local HEAD and run the UI contract tests."
 expecting: "Remote has a click-only button while local HEAD has a submit form and passing contract coverage."
-next_action: "Publish local HEAD and build a new executable for UAT."
+next_action: "None; preserved passed UAT 4 confirms keyboard submission."
 
 ## Symptoms
 
@@ -35,5 +35,5 @@ reproduction: "UAT test 4 in the currently downloaded GitHub build."
 
 root_cause: "The tested executable was built from remote commit e89fa8d and does not contain local commit 60f86cf, which adds keyboard Enter submission through native form semantics."
 fix: "Push the current branch and create a new build; no additional product-code change is required for this finding."
-verification: "Local source comparison and passing UI contract tests; browser UAT remains after rebuilding."
+verification: "Build 15 human UAT 4 passed Enter submission; preserved in 02-UAT.md. Phase 02 accepted on build 23 and merged to main as 3fae74b."
 files_changed: []

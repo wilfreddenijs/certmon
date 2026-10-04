@@ -129,6 +129,6 @@ Status: ✓ = met minimum, ⚠ = below minimum (planner treats as assumption)
 
 ---
 
-*Phase: certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio*
+*Phase: 03-toolbelt-auto-upload-ui-with-device-progress-and-cancellation*
 *Spec created: 2026-06-28*
 *Next step: $gsd-discuss-phase 3 — implementation decisions (how to build what's specified above)*

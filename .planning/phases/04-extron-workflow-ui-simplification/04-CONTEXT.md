@@ -84,7 +84,7 @@ Downstream agents MUST read `04-SPEC.md` before planning or implementing. Requir
 
 ### Phase Requirements
 
-- `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-SPEC.md` - Locked Phase 04 requirements, boundaries, acceptance criteria, and source notes.
+- `.planning/phases/04-extron-workflow-ui-simplification/04-SPEC.md` - Locked Phase 04 requirements, boundaries, acceptance criteria, and source notes.
 - `.planning/ROADMAP.md` - Phase ordering and relationship to Phase 03 Toolbelt auto-upload UI.
 
 ### Source Workflow Notes

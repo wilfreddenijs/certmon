@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Test 5: An administrator should see an Administration module and manage users and roles. Actual: Er is geen administration module."
 created: 2026-08-21T16:15:03.2984538+02:00
-updated: 2026-08-21T16:30:00+02:00
+updated: 2026-10-04
 goal: find_root_cause_only
 ---
 
@@ -12,7 +12,7 @@ goal: find_root_cause_only
 hypothesis: The tested build predates the Administration user-management implementation.
 test: Compare remote branch content with local HEAD and run user-management and UI contract tests.
 expecting: Remote lacks the module while local HEAD contains it with passing coverage.
-next_action: Push local HEAD and create a new executable for UAT.
+next_action: None; build 23 human UAT 5 accepted the complete user and role workflow.
 
 ## Symptoms
 <!-- Written during gathering, then IMMUTABLE -->
@@ -57,5 +57,5 @@ started: Observed during UAT; start date is not reported.
 
 root_cause: "The tested executable came from remote commit e89fa8d, while the Administration user-management UI exists only in unpushed local commit 60f86cf and later commits."
 fix: "Push the current branch and create a new executable; no additional user-management implementation is required."
-verification: "Remote/local source comparison and 57 passing focused tests; browser UAT remains after rebuilding."
+verification: "Human build 23 UAT accepted the Administration module, user lifecycle, permissions and session cleanup. G-02-2 resolved in 02-UAT.md; merged to main as 3fae74b."
 files_changed: []

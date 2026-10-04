@@ -1,6 +1,14 @@
 # CertMon Roadmap
 
-## Current Phase
+## Phase Status
+
+- [x] Phase 01: Secure Certificate Renewal (accepted 2026-07-07; Cloudflare UAT deferred)
+- [x] Phase 02: Shared Server Mode and Team Local CA (accepted 2026-10-04)
+- [x] Phase 03: Toolbelt auto-upload UI with device progress and cancellation
+- [x] Phase 04: Extron workflow/UI simplification
+- [ ] Phase 05: Direct Extron certificate upload (not planned)
+
+## Phase Details
 
 ### Phase 01: Secure Certificate Renewal
 
@@ -72,27 +80,27 @@ Implementation summary:
 - `.planning/phases/02-shared-server-mode/02-UAT.md` - Final build-23 human acceptance: 10 passed, no unresolved gaps
 - `.planning/phases/02-shared-server-mode/02-CONTEXT.md` - Approved visibility and session decisions for the remaining repair
 
-### Phase 3: Toolbelt auto-upload UI with device progress and cancellation
+### Phase 03: Toolbelt auto-upload UI with device progress and cancellation
 
 **Goal:** Add a desktop UI flow that uses the existing CertMon `devices.txt` list to run Extron Toolbelt dry-runs and uploads with visible per-device progress, cancellation, and saved last-result status.
-**Requirements**: Locked in `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-SPEC.md`
+**Requirements**: Locked in `.planning/phases/03-toolbelt-auto-upload-ui-with-device-progress-and-cancellation/03-SPEC.md`
 **Depends on:** Phase 1 / current `main`
 **Plans:** 1 plan
 
 Plans:
 
-- [x] `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation
+- [x] `.planning/phases/03-toolbelt-auto-upload-ui-with-device-progress-and-cancellation/03-01-PLAN.md` — Toolbelt auto-upload UI with device progress and cancellation
 
 ### Phase 04: Extron workflow/UI simplification
 
 **Goal:** Restructure the CertMon workflow around scanned Extron devices, a single upload list, and centralized Local CA device-certificate handling in the Upload tab, while keeping the existing certificate and Toolbelt implementation logic unchanged.
-**Requirements:** Locked in `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-SPEC.md`
+**Requirements:** Locked in `.planning/phases/04-extron-workflow-ui-simplification/04-SPEC.md`
 **Depends on:** Phase 03 Toolbelt auto-upload UI
 **Plans:** 1 plan
 
 Plans:
 
-- [x] `.planning/phases/certmon-04-extron-workflow-ui-simplification/04-01-PLAN.md` — Device-first Extron Local CA and Upload workflow
+- [x] `.planning/phases/04-extron-workflow-ui-simplification/04-01-PLAN.md` — Device-first Extron Local CA and Upload workflow
 
 ### Phase 05: Direct Extron certificate upload
 

@@ -83,7 +83,7 @@ pending: 0
 skipped: 0
 blocked: 0
 
-## Gaps
+## Historical Reports (Resolved)
 
 - 2026-07-09: UAT 2 found that the Windows launcher bypassed the LAN bind safety gate. Fixed in `launcher.py`; retest required with a new build.
 - 2026-07-09: UAT 4 polish follow-up: Sign in should submit on Enter, and first-admin password setup should require password confirmation with a match check.
@@ -97,6 +97,8 @@ blocked: 0
 - 2026-08-13: UAT 7 retest showed deferred watchdog stuck at 0s. Isolated tab open from audit loading and added a timer-only diagnostic button to distinguish browser timer blockage from audit request blockage.
 - 2026-08-14: UAT 7 retest showed Refresh audit stuck at 0s. Delayed the audit fetch until after 1.5s and added an "Open raw audit JSON" link to test `/api/audit` outside the in-page loader.
 - 2026-08-20: UAT 7 raw JSON proved `/api/audit` returns valid events. Root cause found in UI renderer: audit template used missing `esc()` helper instead of `escapeHtml()`. Fixed audit rendering and added render-error fallback.
+## Gaps
+
 - gap_id: G-02-1
   truth: "Pressing Enter on the authentication screen submits the active login or setup action exactly once."
   status: resolved
@@ -108,7 +110,7 @@ blocked: 0
       issue: "The remote build has a click-only authentication button; local HEAD has the corrected submit form."
   resolved_by:
     - "Build 15 UAT on commit e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c"
-  debug_session: ".planning/debug/auth-enter-key-stale-build.md"
+  debug_session: ".planning/debug/resolved/auth-enter-key-stale-build.md"
 - gap_id: G-02-2
   truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
   status: resolved
@@ -126,7 +128,7 @@ blocked: 0
       status: implemented
   missing: []
   root_cause: "The stale-build delivery gap was resolved by build 15, which includes the Administration user-management UI. UAT 5 now identifies a separate frontend role-visibility gap: server-side authorization denies the restricted actions, but the Viewer UI still exposes their controls and navigation."
-  debug_session: ".planning/debug/admin-module-missing-uat-test-5.md"
+  debug_session: ".planning/debug/resolved/admin-module-missing-uat-test-5.md"
 - gap_id: G-02-3
   truth: "An operator can create and restore a full server backup preserving users, roles, applicable sessions, Local CA data, certificate metadata, and audit records."
   status: resolved
@@ -142,5 +144,5 @@ blocked: 0
   resolved_by:
     - "Build 15 UAT on commit e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c"
   root_cause: "The stale-build delivery gap was resolved by build 15, which includes Administration backup and recovery controls."
-  debug_session: ".planning/debug/admin-backup-recovery-missing.md"
+  debug_session: ".planning/debug/resolved/admin-backup-recovery-missing.md"
 <!-- YAML format for plan-phase --gaps consumption -->

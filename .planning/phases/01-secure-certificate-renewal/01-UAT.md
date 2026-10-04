@@ -68,7 +68,7 @@ blocked: 0
 
 ## Gaps
 
-- none
+No unresolved gaps. Cloudflare DNS automation remains explicitly skipped in Test 6.
 
 ## Closeout
 

@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Test 9: Administration should expose full server backup export and staged recovery. Actual: Er is geen administration module."
 created: 2026-08-21T16:15:59+02:00
-updated: 2026-08-21T16:30:00+02:00
+updated: 2026-10-04
 goal: find_root_cause_only
 symptoms_prefilled: true
 ---
@@ -13,7 +13,7 @@ symptoms_prefilled: true
 hypothesis: "The tested build predates the Administration backup-and-recovery implementation."
 test: "Compare remote branch content with local HEAD and run backup and UI contract tests."
 expecting: "Remote lacks backup controls while local HEAD contains them with passing coverage."
-next_action: "Push local HEAD and create a new executable for UAT."
+next_action: "None; preserved passed UAT 9 confirms Administration backup and recovery controls."
 
 ## Symptoms
 <!-- Written during gathering, then IMMUTABLE -->
@@ -53,5 +53,5 @@ started: "Observed during UAT test 9; onset not reported."
 
 root_cause: "The tested executable came from remote commit e89fa8d, while the server backup Administration UI exists only in unpushed local commit 85c57d6 and later commits."
 fix: "Push the current branch and create a new executable; no additional backup UI implementation is required."
-verification: "Remote/local source comparison and 57 passing focused tests; browser UAT remains after rebuilding."
+verification: "Build 15 human UAT 9 passed the Administration backup/staging UI and offline recovery instructions; preserved in 02-UAT.md. Build 24 main CI passed 288 tests."
 files_changed: []

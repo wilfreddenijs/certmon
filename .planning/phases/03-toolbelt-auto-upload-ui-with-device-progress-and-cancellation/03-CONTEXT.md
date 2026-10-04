@@ -90,7 +90,7 @@ Downstream agents MUST read `03-SPEC.md` before planning or implementing. Requir
 
 ### Locked requirements
 
-- `.planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-SPEC.md` — Locked Phase 03 requirements, boundaries, constraints, and acceptance criteria.
+- `.planning/phases/03-toolbelt-auto-upload-ui-with-device-progress-and-cancellation/03-SPEC.md` — Locked Phase 03 requirements, boundaries, constraints, and acceptance criteria.
 
 ### Project planning context
 

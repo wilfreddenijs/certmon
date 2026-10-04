@@ -2,7 +2,7 @@
 status: complete
 phase: 03-toolbelt-auto-upload-ui-with-device-progress-and-cancellation
 source:
-  - .planning/phases/certmon-03-toolbelt-auto-upload-ui-with-device-progress-and-cancellatio/03-01-SUMMARY.md
+  - .planning/phases/03-toolbelt-auto-upload-ui-with-device-progress-and-cancellation/03-01-SUMMARY.md
 started: 2026-07-01T10:52:00+02:00
 updated: 2026-07-01T11:08:00+02:00
 ---
@@ -56,4 +56,4 @@ blocked: 0
 
 ## Gaps
 
-[none yet]
+No unresolved gaps.
