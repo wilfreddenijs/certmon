@@ -1,24 +1,24 @@
 ---
-status: diagnosed
+status: complete
 phase: 02-shared-server-mode
 source:
   - .planning/phases/02-shared-server-mode/02-01-SUMMARY.md
   - .planning/phases/02-shared-server-mode/02-VERIFICATION.md
 started: 2026-07-07T22:47:18+02:00
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 ## Current Test
 
 ### Gap-closure retest (Tests 4, 5, and 9)
 
-status: completed with remaining issue
-published_commit: e2e806d50f3f5f6a99eb32b3dea5535d5f9fab7c
-workflow_run: https://github.com/wilfreddenijs/certmon/actions/runs/32497863521
-workflow_run_id: 32497863521
-build_number: 15
-artifact: CertMon-Windows (artifact ID 9452352191)
-note: The successful Windows artifact is built from the local gap-closure commit, not the stale previously tested remote commit e89fa8d0d9b4159b9c3e2058b787b59ccaeea649. Retest only the unresolved browser workflows before changing any gap status.
+status: completed and accepted
+published_commit: 5da496d1501feafbb6d881d89e82aab587c4d5e8
+workflow_run: https://github.com/wilfreddenijs/certmon/actions/runs/37218527033
+workflow_run_id: 37218527033
+build_number: 23
+artifact: CertMon-Windows (artifact ID 11309680161)
+note: On 2026-10-04 the user confirmed all six final build-23 retest items passed and authorized phase closure and merge. Historical passed Tests 4 and 9 are preserved unchanged.
 
 ## Tests
 
@@ -42,10 +42,11 @@ note: Build 15 UAT confirmed that pressing Enter submits the authentication form
 
 ### 5. Role Restrictions
 expected: A lower-privilege user such as Viewer should be able to view allowed public information but should not be able to start certificate issuance, manage CA/private-key operations, or view restricted audit/security actions.
-result: issue
+result: [passed]
 reported: "Viewer still sees role-restricted controls and navigation. In Upload, `Download all Extron PEMs` is visible but returns a function-not-available error when clicked. The Audit tab/button is visible, but Refresh audit reports `Your role cannot view the audit log`."
 severity: major
 note: The Administration UI/API is present and backend authorization appears to deny the restricted actions correctly. The remaining UAT 5 failure is frontend role visibility: unauthorized controls and navigation must not be shown to a Viewer. Retest creation of a viewer, role restrictions and visibility, role changes, disable/enable, password reset, and session revocation through the normal workflow.
+accepted_2026_10_04: The user confirmed final build-23 retest items 1 through 6 passed: Viewer Renewals restrictions, adjacent Enable/Disable controls, authoritative role information table, old/new password behavior after reset, additive-role permissions, and expired-session cleanup. Earlier observations confirmed public downloads, no Upload permission error, revoked Audit session cleanup, disable/re-enable and desktop access. Delete entry remains intentionally available to the viewer account in the supplied screenshot because it also has ca_admin. G-02-2 is resolved.
 retest_2026_10_03: Build 21 human feedback confirms Viewer public tabs/downloads and absence of Audit, Administration, private exports, issuance, Toolbelt and backup controls; Upload opens without permission errors. Remaining visibility defect: Renewals shows Delete entry and Deploy now to Viewer; backend denies the action. Role changes and password reset sign out at the next protected request, disabling blocks login, enabling restores login, Refresh audit clears a revoked session, and desktop mode requires no login. Requested polish: show Enable and Disable adjacent. Corrections are being tested; UAT 5 remains open until the renewed Renewals controls are accepted. Old/new password rejection, additive-role union and expiry behavior are not inferred beyond the explicit observations.
 
 ### 6. CSRF Protection
@@ -76,8 +77,8 @@ note: LAN access, authentication, and unaffected desktop mode were confirmed. Th
 ## Summary
 
 total: 10
-passed: 9
-issues: 1
+passed: 10
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -110,8 +111,10 @@ blocked: 0
   debug_session: ".planning/debug/auth-enter-key-stale-build.md"
 - gap_id: G-02-2
   truth: "An administrator can create and manage users, assign supported roles, and verify that lower-privilege users are restricted accordingly."
-  status: failed
-  reason: "UAT 5 retest: a Viewer still sees role-restricted Upload and Audit controls/navigation. `Download all Extron PEMs` is visible but returns a function-not-available error, and Refresh audit reports `Your role cannot view the audit log`."
+  status: resolved
+  reason: "Human build-23 acceptance on 2026-10-04 confirms role visibility, public access, additive permissions, account controls and next-request session cleanup."
+  resolved_by:
+    - "Build 23 human UAT on commit 5da496d1501feafbb6d881d89e82aab587c4d5e8"
   severity: major
   test: 5
   artifacts:
@@ -121,9 +124,7 @@ blocked: 0
       status: implemented
     - path: "templates/index.html"
       status: implemented
-  missing:
-    - "Hide or avoid rendering role-restricted navigation and controls for a Viewer, including the Audit tab/button and Upload's `Download all Extron PEMs` control."
-    - "Retest the Viewer workflow after frontend role visibility is corrected; backend authorization currently appears to deny the restricted actions correctly."
+  missing: []
   root_cause: "The stale-build delivery gap was resolved by build 15, which includes the Administration user-management UI. UAT 5 now identifies a separate frontend role-visibility gap: server-side authorization denies the restricted actions, but the Viewer UI still exposes their controls and navigation."
   debug_session: ".planning/debug/admin-module-missing-uat-test-5.md"
 - gap_id: G-02-3

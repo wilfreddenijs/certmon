@@ -18,29 +18,29 @@ Closed: 2026-07-07. UAT passed with Cloudflare DNS automation explicitly skipped
 
 ### Phase 02: Shared Server Mode and Team Local CA
 
-Status: implemented; final build-15 UAT has 9 passed tests and one unresolved role-visibility issue. Plans 02-05 and 02-06 completed; plan 02-07 browser matrix and regression suites passed. Fresh human UAT 5 remains pending; no phase completion claimed.
+Status: complete. Closed 2026-10-04 after human acceptance of build 23. All 10 UAT tests passed; G-02-2 is resolved. Latest full CI suite: 288 passed, one opt-in ACME staging test deselected.
 
 Plans:
 
 - [x] 02-01-PLAN.md
 - [x] 02-02-PLAN.md
 - [x] 02-03-PLAN.md
-- [x] 02-04-PLAN.md - historical publication summarized; UAT 5 remains unresolved, do not re-execute
+- [x] 02-04-PLAN.md - historical publication summarized; do not re-execute
 - [x] 02-05-PLAN.md - browser harness and evidence-based historical summary reconciliation
 - [x] 02-06-PLAN.md - effective permissions, public catalog, UI visibility and protected-session recovery
-- [ ] 02-07-PLAN.md - browser role matrix and UAT 5 acceptance
+- [x] 02-07-PLAN.md - browser role matrix and UAT 5 acceptance
 
-6/7 plans have execution summaries. Do not repeat the already-published build-15 delivery or advance the phase before retesting UAT 5.
+7/7 plans have execution summaries. Phase 05 is next; do not repeat the historical build-15 delivery.
 
 **Repair Wave 0 - 02-05**
 
 - Browser infrastructure and historical reconciliation; no dependency on rerunning 02-04.
 
-**Repair Wave 1 - 02-06** *(blocked on repair Wave 0)*
+**Repair Wave 1 - 02-06** *(complete)*
 
 - Permission-driven UI and public downloads; session recovery covers normal fetch and the native Audit request path.
 
-**Repair Wave 2 - 02-07** *(blocked on repair Wave 1)*
+**Repair Wave 2 - 02-07** *(complete)*
 
 - Complete browser matrix and human acceptance; preserve passed UAT 4 and 9.
 
@@ -68,7 +68,8 @@ Implementation summary:
 - `.planning/phases/02-shared-server-mode/02-01-SUMMARY.md` â€” Shared server mode and team Local CA
 - `.planning/phases/02-shared-server-mode/02-02-SUMMARY.md` — User and role administration plus authentication polish
 - `.planning/phases/02-shared-server-mode/02-03-SUMMARY.md` — Full server backup and staged recovery
-- `.planning/phases/02-shared-server-mode/02-UAT.md` - Final build-15 human UAT: 9 passed, 1 major Viewer role-visibility gap
+- `.planning/phases/02-shared-server-mode/02-07-SUMMARY.md` - Browser matrix, visibility corrections and final human acceptance
+- `.planning/phases/02-shared-server-mode/02-UAT.md` - Final build-23 human acceptance: 10 passed, no unresolved gaps
 - `.planning/phases/02-shared-server-mode/02-CONTEXT.md` - Approved visibility and session decisions for the remaining repair
 
 ### Phase 3: Toolbelt auto-upload UI with device progress and cancellation

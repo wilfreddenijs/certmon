@@ -9,6 +9,15 @@ created: 2026-10-02
 
 # Phase 02 - Gap-Closure Validation Strategy
 
+## Final Acceptance (2026-10-04)
+
+Build 23 human UAT passed all final six retest items; UAT total is 10/10 passed.
+G-02-2 is resolved. Latest full CI run 37218519929: 288 passed, one external
+ACME staging test deselected in 83.07s. Build run 37218527033 succeeded on
+`5da496d1501feafbb6d881d89e82aab587c4d5e8`. Earlier tables below are historical
+measured evidence. Build-22's intermittent SQLite file-comparison failure passed
+on the subsequent run with unchanged backup code; keep as test-stability risk.
+
 This validation contract now includes measured automated test evidence below. It
 does not replace human acceptance. It supplements the nine passed UAT cases and
 targets the remaining G-02-2 visibility gap. Historical

@@ -71,6 +71,10 @@ delivery follow; no human acceptance is inferred from these corrections.
 
 ## Human Retest Follow-Up (2026-10-03)
 
+Final status (2026-10-04): superseded by build-23 human acceptance. All six final
+retest items passed. G-02-2 is resolved and 02-07-SUMMARY.md records completion.
+The user separately authorized closure, documentation and merge to main.
+
 Build 21 CI passed (286 tests, one external staging test deselected). Human UAT
 confirmed public Viewer tabs/downloads, forbidden private/security controls absent,
 and successful Upload navigation. Role changes, account disable/enable, password

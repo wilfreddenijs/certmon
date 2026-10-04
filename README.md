@@ -12,6 +12,49 @@ Certificate private keys, ACME account keys, device credentials, and Cloudflare 
 
 Server mode is for a trusted LAN or a protected reverse-proxy deployment. Do not expose CertMon directly to the public internet.
 
+### Start The Windows EXE For Role Testing
+
+Quit any running CertMon instance using the system-tray **Quit** command; closing
+the browser does not stop it. Open PowerShell in the folder containing the extracted
+`CertMon.exe`, then start it from that same PowerShell window:
+
+```powershell
+$env:CERTMON_SERVER_MODE = '1'
+$env:CERTMON_BIND_HOST = '127.0.0.1'
+$env:CERTMON_PORT = '5000'
+.\CertMon.exe
+```
+
+Open `http://127.0.0.1:5000`. This enables authenticated server behavior locally
+without exposing the service to the LAN. Create the first administrator if prompted;
+otherwise sign in with an existing account. Use **Administration** to create test
+users and a separate private browser window to test their roles independently.
+The information button beside **Add user** shows the authoritative role/permission
+table. Multiple roles combine their permissions.
+
+For access from another computer, set `CERTMON_BIND_HOST` to `0.0.0.0` before
+starting the EXE. Open `http://<server-IP>:5000` on that computer, not `0.0.0.0`.
+Allow inbound TCP 5000 through Windows Firewall only for the intended trusted
+network. Direct HTTP does not encrypt credentials or traffic; use HTTPS through a
+protected reverse proxy for ongoing shared use. Server mode uses the configured
+port exactly; if it is occupied, stop the old instance or choose another port.
+
+Environment variables above apply to processes started from that PowerShell window.
+They are not permanent Windows settings. To return to desktop mode, quit CertMon
+fully and start it with:
+
+```powershell
+$env:CERTMON_SERVER_MODE = '0'
+$env:CERTMON_BIND_HOST = '127.0.0.1'
+.\CertMon.exe
+```
+
+Do not change `CERTMON_DATA_DIR` for the role test: packaged builds keep the existing
+data in `%PROGRAMDATA%\CertMon` unless that variable is explicitly set. Changing it
+selects a different installation state, including users and CA material.
+
+### Run Server Mode From Source
+
 Enable server mode explicitly:
 
 ```powershell
@@ -32,6 +75,11 @@ Roles:
 - **Admin:** all permissions, including user and audit administration.
 
 Signed-in Admin and Security Admin users can open the **Administration** tab for full server backup and recovery. Only Admin users see its Users section, where they can add local users, edit usernames and roles, enable or disable accounts, and reset passwords. CertMon accepts only the five roles above. At least one enabled administrator must always remain, so the final enabled administrator cannot be disabled or lose the Admin role.
+
+Viewer can download existing public certificates, chains, CSRs and trust files,
+but cannot issue/deploy certificates, delete renewal entries, or export private
+keys, combined PEM/ZIP files and backups. A Viewer account that also has CA Admin
+inherits issuance and renewal-management rights, so **Delete entry** is then valid.
 
 Disabling an account, changing its roles, or resetting its password revokes all active sessions for that user. The user must sign in again after a role or password change; disabled users cannot sign in until an administrator enables them. User-management audit events record the acting administrator, source IP, target account, and changed fields without recording passwords or password hashes.
 
@@ -103,6 +151,20 @@ python launcher.py
 ```
 
 ## Build Windows EXE
+
+### Accepted Phase 02 Build
+
+Shared server mode was accepted on 2026-10-04 using **v1.0 build 23**, source
+`5da496d1501feafbb6d881d89e82aab587c4d5e8`. Human UAT is 10/10 passed, including
+Viewer restrictions, additive roles, account/password/session controls and desktop
+safety. [Build 23](https://github.com/wilfreddenijs/certmon/actions/runs/37218527033)
+and its [full test run](https://github.com/wilfreddenijs/certmon/actions/runs/37218519929)
+(288 passed; one optional external ACME staging case deselected) are the acceptance
+reference. New builds from main receive their own run/build numbers.
+
+Phase 05 direct Extron upload via SFTP/SIS is planned next; it is not included in
+this accepted release. Existing Toolbelt functionality remains until its verified
+replacement is available.
 
 ### GitHub Actions build
 

@@ -2,34 +2,42 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 02
-current_phase_name: shared-server-mode
-status: awaiting_feedback
-stopped_at: Plan 02-07 automated validation complete; human UAT 5 pending
-last_updated: "2026-10-02T22:05:14Z"
-last_activity: 2026-10-03
-last_activity_desc: 13 browser, 94 focused and 286 full-suite tests passed; human UAT pending
+current_phase: 05
+current_phase_name: direct-extron-certificate-upload
+status: ready_to_plan
+stopped_at: Phase 02 accepted; Phase 05 ready for planning
+last_updated: "2026-10-04"
+last_activity: 2026-10-04
+last_activity_desc: Build 23 human UAT accepted; Phase 02 closed and main merge authorized
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 4
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # CertMon Planning State
 
-Current phase: 02
+Current phase: 05
 
 ## Current Position
 
-Phase: 02 (shared-server-mode) - human verification checkpoint
-Plan: 02-05 and 02-06 complete; 02-07 tasks 07-01 and 07-02 complete, task 07-03 pending
-Status: Automated validation passed; human UAT 5 remains open
-Last activity: 2026-10-03 - Regression evidence commit abb0791: 13 browser, 94 focused and 286 full-suite tests passed; one ACME staging test deselected
+Phase: 05 (direct Extron certificate upload) - ready for planning
+Plan: Phase 02 complete; 7/7 plans summarized and 10/10 UAT cases passed
+Status: Human build-23 UAT accepted on 2026-10-04
+Last activity: 2026-10-04 - Full CI 37218519929: 288 passed, one external ACME staging test deselected in 83.07s
 
-Next action: Obtain fresh human UAT 5 observations; publication/build requires separate authorization. Preserve passed UAT 4 and 9. No plan 02-07 summary or phase completion until its human gate is satisfied.
+Next action: Finish authorized merge to main, then plan Phase 05 from `docs/specs/extron-direct-upload.md`. No Phase 05 implementation is authorized by Phase 02 closure. Preserve passed UAT 4 and 9.
 
-## Notes
+## Final Acceptance
+
+- Build 23 source: `5da496d1501feafbb6d881d89e82aab587c4d5e8`; successful build run 37218527033, artifact 11309680161.
+- Human final six-item retest passed: Renewals restrictions, Enable/Disable, role table, password reset, additive roles and expired sessions. Earlier public-download, Audit revocation, account and desktop observations also passed.
+- G-02-2 is resolved. No pending Phase 02 human gate remains.
+- Build-22 CI had a SQLite file-layout comparison failure in a backup test; unchanged backup code passed in build-23 CI. Retain as test-stability risk, not a product-code fix.
+- Local untracked `.gsd/` and `data/` are preserved and excluded from commits.
+
+## Historical Notes (Superseded By Final Acceptance)
 
 - Tracer feedback in `.planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md` authorized test strengthening then regressions. Coverage was extended in 0edc25f and 91f8a74. The browser matrix retrieves all listed public downloads, exercises populated views, verifies restricted loaders from permission unions and observes 15 seconds of controlled browser timers before next-request revocation cleanup. Regression task 07-02 passed: 13 browser tests in 113.58s, 94 focused tests in 147.27s, 286 full-suite tests in 232.45s (one external ACME staging case deselected, no skips/xfails). Final human acceptance is separate.
 
@@ -51,6 +59,6 @@ Next action: Obtain fresh human UAT 5 observations; publication/build requires s
 
 ## Session
 
-**Last session:** 2026-10-03
-**Stopped at:** Plan 02-07 human UAT 5 checkpoint
-**Resume file:** .planning/phases/02-shared-server-mode/02-07-CHECKPOINT.md
+**Last session:** 2026-10-04
+**Stopped at:** Phase 02 accepted; main merge authorized
+**Resume file:** .planning/phases/02-shared-server-mode/02-07-SUMMARY.md
