@@ -4,11 +4,11 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: direct-extron-certificate-upload
-status: ready_to_execute
-stopped_at: Phase 05 plans independently verified; execution not started
-last_updated: "2026-10-05T17:05:04.389Z"
+status: executing
+stopped_at: Paramiko 5.0.0 approved; resuming Task 05-01-02
+last_updated: "2026-10-05T17:24:36.895Z"
 last_activity: 2026-10-05
-last_activity_desc: Four Phase 05 plans passed independent review and decision coverage
+last_activity_desc: Human approved Paramiko 5.0.0; direct upload tracer execution started
 progress:
   total_phases: 5
   completed_phases: 4
@@ -22,12 +22,12 @@ Current phase: 05
 
 ## Current Position
 
-Phase: 05 (direct Extron certificate upload) - ready to execute
-Plan: 0/4 executed; four sequential waves independently verified
-Status: Ready to execute; package approval and physical acceptance checkpoints remain mandatory
-Last activity: 2026-10-05 - Static plan review passed; 9/9 decisions covered; no implementation tests or hardware acceptance claimed
+Phase: 05 (direct-extron-certificate-upload) — EXECUTING
+Plan: 1 of 4
+Status: Executing Task 05-01-02; dependency approval received
+Last activity: 2026-10-05 — Phase 05 execution started
 
-Next action: `$gsd-execute-phase 05 --text`. Begin with the official dependency approval gate, then the direct LAN A/LAN B tracer, blocking hardware acceptance, batch hardening, and UI/packaging/regressions. No build or push was authorized during planning. Preserve Phase 02 acceptance and deferred Phase 01 Cloudflare DNS UAT.
+Next action: Execute Task 05-01-02 using the approved Paramiko 5.0.0 dependency and fake endpoints. Later physical acceptance remains mandatory; preserve Phase 02 acceptance and deferred Phase 01 Cloudflare DNS UAT. No push or build performed.
 
 ## Final Acceptance
 
@@ -60,5 +60,5 @@ Next action: `$gsd-execute-phase 05 --text`. Begin with the official dependency 
 ## Session
 
 **Last session:** 2026-10-05
-**Stopped at:** Phase 05 planning complete; execution awaits user invocation
-**Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-01-PLAN.md
+**Stopped at:** Paramiko 5.0.0 approved; direct upload tracer resumed
+**Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-01-CHECKPOINT.md
