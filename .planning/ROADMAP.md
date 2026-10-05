@@ -6,7 +6,7 @@
 - [x] Phase 02: Shared Server Mode and Team Local CA (accepted 2026-10-04)
 - [x] Phase 03: Toolbelt auto-upload UI with device progress and cancellation
 - [x] Phase 04: Extron workflow/UI simplification
-- [ ] Phase 05: Direct Extron certificate upload (not planned)
+- [ ] Phase 05: Direct Extron certificate upload (4 plans drafted; independent checker pending)
 
 ## Phase Details
 
@@ -104,9 +104,39 @@ Plans:
 
 ### Phase 05: Direct Extron certificate upload
 
-**Status:** Workflow decisions captured; not yet planned or implemented.
+**Status:** Planned and independently verified on 2026-10-05; ready to execute. Not implemented.
 **Goal:** Replace Toolbelt automation with combined-PEM transfer over SFTP (22022), SIS import over SSH (22023), and HTTPS certificate verification while preserving upload-list and credential workflows.
 **Canonical refs:** `docs/specs/extron-direct-upload.md`
 **Depends on:** Phase 04 upload workflow; preserve Phase 02 authorization boundaries.
 **Decisions:** LAN A by default, optional LAN B per device; no normal reboot. Retire Toolbelt only after the direct replacement is verified.
-**Plans:** 0 plans
+**Plans:** 4 plans
+
+Plans:
+
+- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-01-PLAN.md` - Package gate plus LAN A/LAN B tracer, fresh-channel SIS, deterministic credentials, and durable cleanup
+- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-02-PLAN.md` - Blocking one-LAN and two-LAN physical acceptance
+- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-03-PLAN.md` - Protocol hardening, exact-selected batch, persistence, and guarded APIs
+- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-04-PLAN.md` - Complete Upload UI, packaging, docs, and regressions
+
+**Wave 1 - 05-01**
+
+- Official package approval followed by the production-quality direct tracer.
+
+**Wave 2 - 05-02** *(blocked on Wave 1)*
+
+- Human physical acceptance before implementation expansion.
+
+**Wave 3 - 05-03** *(blocked on Wave 2)*
+
+- Robust transport, batch state, endpoint trust, guarded cleanup/recovery, API authorization, CSRF, and audit.
+
+**Wave 4 - 05-04** *(blocked on Wave 3)*
+
+- User workflow, Windows packaging, documentation, and complete regression evidence.
+
+Cross-cutting constraints:
+
+- D-05/D-07: private material stays server-side and endpoint-specific trust blocks before authentication under existing deploy_certificate, CSRF, and audit controls.
+- D-04/D-09: LAN A is the default; LAN B requires and verifies a separate per-device HTTPS host/port.
+- D-06/D-08: Toolbelt and its automatic serial fallback remain available until a separate explicit retirement acceptance.
+- SIS/cleanup: fresh channels reject stale ACKs; ambiguous sends are never replayed, and every staged basename has persisted actionable remediation.

@@ -18,6 +18,14 @@ The direct replacement should be a server-side transport layer that preserves th
 - `py -m pip index versions paramiko` reports 5.0.0; PyPI reports it released 2026-05-09. [VERIFIED: PyPI registry command, 2026-10-04] [CITED: https://pypi.org/project/paramiko/]
 - Package legitimacy returned `SUS` solely because downloads were unavailable; source repo is `github.com/paramiko/paramiko`. [VERIFIED: package-legitimacy check, 2026-10-04]
 
+## Package Legitimacy Audit
+
+| Package | Registry | Official upstream | Candidate | Status | Required before install |
+|---------|----------|-------------------|-----------|--------|-------------------------|
+| `paramiko` | PyPI `paramiko` | `github.com/paramiko/paramiko`; `docs.paramiko.org` | `5.0.0` from 2026-10-04 research, provisional | `SUS` | Plan 05-01 Task 05-01-01 must re-read official metadata, release files/hashes and Python compatibility, then obtain blocking human approval of the exact version before requirements or installation changes. |
+
+`SUS` records an incomplete download/packaging verification, not an allegation about the project. The plan must not convert the provisional candidate into a blind pin.
+
 ### Architecture
 
 ```text

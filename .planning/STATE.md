@@ -4,15 +4,15 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: direct-extron-certificate-upload
-status: ready_to_plan
-stopped_at: Phase 02 merged to main; Phase 05 ready for planning
-last_updated: "2026-10-04"
-last_activity: 2026-10-04
-last_activity_desc: Phase 02 merged as 3fae74b; planning structure normalized for Phase 05
+status: ready_to_execute
+stopped_at: Phase 05 plans independently verified; execution not started
+last_updated: "2026-10-05T17:05:04.389Z"
+last_activity: 2026-10-05
+last_activity_desc: Four Phase 05 plans passed independent review and decision coverage
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 10
+  total_plans: 14
   completed_plans: 10
 ---
 
@@ -22,12 +22,12 @@ Current phase: 05
 
 ## Current Position
 
-Phase: 05 (direct Extron certificate upload) - ready for planning
-Plan: Phase 02 complete; 7/7 plans summarized and 10/10 UAT cases passed
-Status: Human build-23 UAT accepted on 2026-10-04
-Last activity: 2026-10-04 - Full CI 37218519929: 288 passed, one external ACME staging test deselected in 83.07s
+Phase: 05 (direct Extron certificate upload) - ready to execute
+Plan: 0/4 executed; four sequential waves independently verified
+Status: Ready to execute; package approval and physical acceptance checkpoints remain mandatory
+Last activity: 2026-10-05 - Static plan review passed; 9/9 decisions covered; no implementation tests or hardware acceptance claimed
 
-Next action: Plan Phase 05 from `docs/specs/extron-direct-upload.md` and the captured Phase 05 context. Main is merged and build 24 passed (288 tests). No Phase 05 implementation is authorized by administrative cleanup. Preserve passed UAT 4 and 9.
+Next action: `$gsd-execute-phase 05 --text`. Begin with the official dependency approval gate, then the direct LAN A/LAN B tracer, blocking hardware acceptance, batch hardening, and UI/packaging/regressions. No build or push was authorized during planning. Preserve Phase 02 acceptance and deferred Phase 01 Cloudflare DNS UAT.
 
 ## Final Acceptance
 
@@ -59,6 +59,6 @@ Next action: Plan Phase 05 from `docs/specs/extron-direct-upload.md` and the cap
 
 ## Session
 
-**Last session:** 2026-10-04
-**Stopped at:** Phase 02 merged; planning administration normalized
-**Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-CONTEXT.md
+**Last session:** 2026-10-05
+**Stopped at:** Phase 05 planning complete; execution awaits user invocation
+**Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-01-PLAN.md
