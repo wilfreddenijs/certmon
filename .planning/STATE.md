@@ -4,11 +4,11 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: direct-extron-certificate-upload
-status: executing
-stopped_at: Paramiko 5.0.0 approved; resuming Task 05-01-02
+status: awaiting_checkpoint
+stopped_at: Direct tracer implemented and checked inline; awaiting human UI feedback
 last_updated: "2026-10-05T17:24:36.895Z"
 last_activity: 2026-10-05
-last_activity_desc: Human approved Paramiko 5.0.0; direct upload tracer execution started
+last_activity_desc: Inline takeover reviewed late executor commits and passed 86 focused/browser/regression tests
 progress:
   total_phases: 5
   completed_phases: 4
@@ -24,10 +24,10 @@ Current phase: 05
 
 Phase: 05 (direct-extron-certificate-upload) — EXECUTING
 Plan: 1 of 4
-Status: Executing Task 05-01-02; dependency approval received
+Status: Awaiting tracer UI feedback; implementation tests pass, physical acceptance not started
 Last activity: 2026-10-05 — Phase 05 execution started
 
-Next action: Execute Task 05-01-02 using the approved Paramiko 5.0.0 dependency and fake endpoints. Later physical acceptance remains mandatory; preserve Phase 02 acceptance and deferred Phase 01 Cloudflare DNS UAT. No push or build performed.
+Next action: Await `tracer verified` or interface feedback at http://127.0.0.1:5051/ (isolated preview data). User chose inline takeover; prior executor completed late and was closed, not duplicated. Commits 9d23402/b397995 contain the tracer; fafa0b8 corrects SIS bytes, independent trust/probe, bounded I/O, cleanup endpoint preservation and activation gating. After human tracer approval write 05-01-SUMMARY.md and enter 05-02 physical checkpoint. No physical operation, push or build performed.
 
 ## Final Acceptance
 
@@ -60,5 +60,5 @@ Next action: Execute Task 05-01-02 using the approved Paramiko 5.0.0 dependency 
 ## Session
 
 **Last session:** 2026-10-05
-**Stopped at:** Paramiko 5.0.0 approved; direct upload tracer resumed
+**Stopped at:** Tracer UI feedback after inline verification
 **Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-01-CHECKPOINT.md

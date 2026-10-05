@@ -1,6 +1,6 @@
 # Plan 05-01 Checkpoint: Paramiko Package Identity Approval
 
-**Status:** approved by the user; resume Task 05-01-02
+**Status:** implementation checked; awaiting human tracer UI feedback
 **Task:** 05-01-01 - Approve the official Paramiko package identity before installation
 **Gate:** blocking-human
 **Recorded:** 2026-10-05
@@ -48,3 +48,27 @@ push, or build is implied by this dependency checkpoint.
 Type `approved-paramiko 5.0.0` to authorize Task 05-01-02. Any other version
 or a legitimacy concern keeps the plan blocked; no dependency pin or install
 will occur without a new explicit approval.
+
+## Current Tracer Feedback Checkpoint
+
+The preceding dependency instructions are historical; approval was received.
+The user selected inline takeover after the stall warning. The executor then
+returned late commits and was closed; implementation was reviewed, not repeated.
+
+| Work | Commit | Evidence |
+|---|---|---|
+| Test-first baseline | 9d23402 | Missing module produced RED failure |
+| Direct tracer | b397995 | Initial 13 tests and 68 regressions reported by executor |
+| Inline corrections | fafa0b8 | Exact SIS command test initially failed, then passed; independent port approvals/probe, fresh shell/fragmented ACK, staged endpoint recovery, post-disconnect verification and UI activation gating |
+
+Fresh combined verification: 86 passed in 22.43s. Includes 18 direct tracer
+tests (Chromium UI included) and 68 existing regression tests. Desktop/mobile
+screenshots were inspected; no physical device requests were issued. This is
+not full-suite, packaged-runtime, or hardware acceptance.
+
+Preview: http://127.0.0.1:5051/ using `.tmp/direct-preview-data`, not existing
+user data. Confirm the Direct Extron section, LAN selection/endpoint controls,
+initially disabled activation button, and retained Toolbelt section in Upload.
+Do not start a device action for this UI checkpoint. Respond `tracer verified`
+or describe the interface issue. Plan 05-01 remains unsummarized until feedback;
+physical one-LAN/two-LAN gates in 05-02 remain pending. No push/build performed.
