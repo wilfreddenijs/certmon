@@ -2061,9 +2061,9 @@ def direct_extron_approve_host_key():
     if _direct_extron_unavailable():
         return jsonify({"error": "Direct Extron upload is unavailable"}), 503
     try:
-        body = _direct_extron_body({"selector", "nic", "fingerprint"})
+        body = _direct_extron_body({"selector", "nic", "fingerprint", "connection"})
         result = direct_extron_service.approve_host_key(
-            selector=body.get("selector"), nic=body.get("nic", 1), fingerprint=body.get("fingerprint")
+            selector=body.get("selector"), nic=body.get("nic", 1), fingerprint=body.get("fingerprint"), **({"connection": body["connection"]} if "connection" in body else {})
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400

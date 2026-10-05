@@ -8,6 +8,7 @@ approval for its endpoint identity.
 import hashlib
 import json
 import re
+import socket
 import time
 import uuid
 from dataclasses import dataclass
@@ -69,7 +70,7 @@ class ParamikoDirectTransport:
         self.max_response_bytes = max_response_bytes
 
     def host_key_fingerprint(self, identity):
-        transport = paramiko.Transport((identity.host, identity.port))
+        transport = self._connect(identity)
         try:
             transport.start_client(timeout=self.connect_timeout)
             key = transport.get_remote_server_key()
@@ -86,6 +87,7 @@ class ParamikoDirectTransport:
         try:
             sftp = paramiko.SFTPClient.from_transport(transport)
             try:
+                sftp.get_channel().settimeout(self.read_timeout)
                 sftp.put(str(local_path), remote_name)
             finally:
                 sftp.close()
@@ -98,8 +100,9 @@ class ParamikoDirectTransport:
             channel = transport.open_session(timeout=self.connect_timeout)
             try:
                 channel.settimeout(self.read_timeout)
+                channel.invoke_shell()
                 preloaded = self._drain(channel)
-                if preloaded:
+                if b"CertI" in preloaded:
                     return SISExchange(preloaded=preloaded, received=b"", write_confirmed=False)
                 channel.sendall(command)
                 received = self._read_response(channel)
@@ -114,6 +117,7 @@ class ParamikoDirectTransport:
         try:
             sftp = paramiko.SFTPClient.from_transport(transport)
             try:
+                sftp.get_channel().settimeout(self.read_timeout)
                 sftp.remove(remote_name)
             finally:
                 sftp.close()
@@ -121,7 +125,7 @@ class ParamikoDirectTransport:
             transport.close()
 
     def _authenticated_transport(self, identity, credentials, expected_fingerprint):
-        transport = paramiko.Transport((identity.host, identity.port))
+        transport = self._connect(identity)
         try:
             transport.start_client(timeout=self.connect_timeout)
             if self._fingerprint(transport.get_remote_server_key()) != expected_fingerprint:
@@ -134,6 +138,17 @@ class ParamikoDirectTransport:
             transport.close()
             raise
 
+    def _connect(self, identity):
+        connection = socket.create_connection((identity.host, identity.port), timeout=self.connect_timeout)
+        try:
+            transport = paramiko.Transport(connection)
+            transport.auth_timeout = self.connect_timeout
+            transport.banner_timeout = self.connect_timeout
+            return transport
+        except Exception:
+            connection.close()
+            raise
+
     @staticmethod
     def _fingerprint(key):
         import base64
@@ -144,8 +159,16 @@ class ParamikoDirectTransport:
     def _drain(self, channel):
         data = bytearray()
         deadline = time.monotonic() + 0.2
-        while channel.recv_ready() and time.monotonic() < deadline and len(data) < self.max_response_bytes:
-            data.extend(channel.recv(min(128, self.max_response_bytes - len(data))))
+        while time.monotonic() < deadline:
+            if not channel.recv_ready():
+                time.sleep(0.01)
+                continue
+            chunk = channel.recv(min(128, self.max_response_bytes - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) >= self.max_response_bytes:
+                raise OSError("Pre-send response exceeded limit")
         return bytes(data)
 
     def _read_response(self, channel):
@@ -213,26 +236,32 @@ class DirectExtronService:
             return trust
         credentials = self._credentials(target.sftp.selector)
         try:
-            self.transport.probe_credentials(target.sftp, credentials, expected_fingerprint=self._approved_fingerprint(target.sftp))
+            for identity in (target.sftp, target.sis):
+                self.transport.probe_credentials(identity, credentials, expected_fingerprint=self._approved_fingerprint(identity))
         except HostKeyChangedError:
             return {"status": "host_key_changed", "identity": self._identity_dict(target.sftp)}
         except (paramiko.AuthenticationException, PermissionError):
             return {"status": "authentication_failed"}
-        except OSError:
+        except (OSError, paramiko.SSHException):
             return {"status": "connection_failed"}
         return {"status": "ready", "target": self._public_target(target)}
 
-    def approve_host_key(self, *, selector, nic=1, fingerprint):
+    def approve_host_key(self, *, selector, nic=1, fingerprint, connection=None):
         target = self.target_for(selector, nic)
         observed = self._observed_keys(target)
         supplied = str(fingerprint or "")
-        if any(value[1] != supplied for value in observed.values()):
-            raise ValueError("Host-key fingerprint changed before approval")
         approvals = dict(self.database.get_setting(self.HOST_KEYS_KEY, {}))
         for identity, (algorithm, current) in observed.items():
+            if connection is not None and identity.connection != connection:
+                continue
+            if connection is None and approvals.get(identity.key(), {}).get("fingerprint") == current:
+                continue
+            if current != supplied:
+                raise ValueError("Host-key fingerprint changed before approval")
             approvals[identity.key()] = {"algorithm": algorithm, "fingerprint": current, "identity": self._identity_dict(identity)}
-        self.database.put_setting(self.HOST_KEYS_KEY, approvals)
-        return {"status": "approved", "fingerprint": supplied}
+            self.database.put_setting(self.HOST_KEYS_KEY, approvals)
+            return {"status": "approved", "fingerprint": supplied, "identity": self._identity_dict(identity)}
+        raise ValueError("No matching host-key endpoint to approve")
 
     def activate_one(self, *, selector, certificate_id, nic=1):
         target = self.target_for(selector, nic)
@@ -252,8 +281,9 @@ class DirectExtronService:
             return self._set_staged(staged_name, "cleanup_pending", response="host_key_changed")
         except (paramiko.AuthenticationException, PermissionError):
             return self._set_staged(staged_name, "cleanup_pending", response="authentication_failed", result_status="authentication_failed")
-        except OSError:
-            return self._set_staged(staged_name, "cleanup_pending")
+        except (OSError, paramiko.SSHException):
+            verification = self._verify(target.https, certificate_id)
+            return self._set_staged(staged_name, "cleanup_pending", verification=verification.status)
         if exchange.preloaded or not exchange.write_confirmed or not self._exact_ack(exchange.received, target.sis.nic):
             verification = self._verify(target.https, certificate_id)
             return self._set_staged(staged_name, "cleanup_pending", response="ack_rejected", verification=verification.status)
@@ -265,7 +295,7 @@ class DirectExtronService:
             self.transport.delete(target.sftp, credentials, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
         except (paramiko.AuthenticationException, PermissionError):
             return self._set_staged(staged_name, "delete_failed", verification="verified", known_completion=True)
-        except OSError:
+        except (OSError, paramiko.SSHException):
             return self._set_staged(staged_name, "delete_failed", verification="verified", known_completion=True)
         return self._set_staged(staged_name, "deleted", verification="verified", result_status="verified", known_completion=True)
 
@@ -282,7 +312,12 @@ class DirectExtronService:
             return {"status": "cleanup_pending", "staged_name": staged_name}
         if not record.get("known_completion") and time.time() < record["grace_deadline"]:
             return {"status": "cleanup_pending", "staged_name": staged_name}
-        target = self.target_for(record["selector"], record["nic"])
+        original = record["target"]
+        target = DirectTarget(
+            EndpointIdentity(record["selector"], record["nic"], "sftp", original["host"], 22022),
+            EndpointIdentity(record["selector"], record["nic"], "sis", original["host"], 22023),
+            EndpointIdentity(record["selector"], record["nic"], "https", original["host"], original["https_port"]),
+        )
         trust = self._check_trust(target)
         if trust is not None:
             return trust
@@ -290,7 +325,7 @@ class DirectExtronService:
             self.transport.delete(target.sftp, self._credentials(target.sftp.selector), staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
         except HostKeyChangedError:
             return {"status": "host_key_changed", "identity": self._identity_dict(target.sftp)}
-        except (paramiko.AuthenticationException, PermissionError, OSError):
+        except (paramiko.SSHException, PermissionError, OSError):
             return self._set_staged(staged_name, "delete_failed")
         return self._set_staged(staged_name, "deleted", result_status="deleted")
 
@@ -304,7 +339,7 @@ class DirectExtronService:
             if approved is None:
                 return {"status": "approval_required", "fingerprint": fingerprint, "identity": self._identity_dict(identity)}
             if approved.get("algorithm") != algorithm or approved.get("fingerprint") != fingerprint:
-                return {"status": "host_key_changed", "identity": self._identity_dict(identity)}
+                return {"status": "host_key_changed", "fingerprint": fingerprint, "identity": self._identity_dict(identity)}
         return None
 
     def _observed_keys(self, target):
@@ -385,7 +420,7 @@ class DirectExtronService:
 
     @staticmethod
     def _sis_command(nic, staged_name):
-        return b"\x1b" + str(nic).encode("ascii") + b",*" + staged_name.encode("ascii") + b" CERT\r"
+        return b"\x1bI" + str(nic).encode("ascii") + b"*" + staged_name.encode("ascii") + b" CERT\r"
 
     @staticmethod
     def _public_target(target):

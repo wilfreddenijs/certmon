@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from certmon.deployment import VerificationResult
-from certmon.direct_extron import DirectExtronService, EndpointIdentity, SISExchange
+from certmon.direct_extron import DirectExtronService, EndpointIdentity, SISExchange, ParamikoDirectTransport
 from tests.test_auth_api import load_app as load_server_app
 
 
@@ -150,11 +150,12 @@ def make_service(tmp_path, *, transport=None, verifier=None):
 
 
 def approve(service, selector="10.0.0.10", nic=1):
-    probe = service.probe_one(selector=selector, nic=nic)
-    assert probe["status"] == "approval_required"
-    return service.approve_host_key(
-        selector=selector, nic=nic, fingerprint=probe["fingerprint"]
-    )
+    for _ in range(2):
+        probe = service.probe_one(selector=selector, nic=nic)
+        if probe["status"] == "ready":
+            return
+        assert probe["status"] == "approval_required"
+        service.approve_host_key(selector=selector, nic=nic, fingerprint=probe["fingerprint"])
 
 
 def test_endpoint_identity_is_exact_and_lan_b_requires_a_distinct_endpoint(tmp_path):
@@ -198,6 +199,90 @@ def test_probe_never_materializes_or_mutates_transport(tmp_path):
     assert artifacts.materializations == 0
     assert transport.sftp_writes == []
     assert transport.sis_commands == []
+    assert [identity.connection for identity, _ in transport.auth_attempts] == ["sftp", "sis"]
+
+
+def test_each_port_requires_its_own_host_key_approval(tmp_path):
+    class DifferentKeys(FakeTransport):
+        def host_key_fingerprint(self, identity):
+            return ("ssh-ed25519", "SHA256:" + identity.connection)
+
+    service, database, _, transport = make_service(tmp_path, transport=DifferentKeys())
+    for connection in ("sftp", "sis"):
+        result = service.probe_one(selector="10.0.0.10")
+        assert result["identity"]["connection"] == connection
+        assert transport.auth_attempts == []
+        service.approve_host_key(selector="10.0.0.10", connection=connection, fingerprint=result["fingerprint"])
+    assert len(database.get_setting(service.HOST_KEYS_KEY)) == 2
+    assert service.probe_one(selector="10.0.0.10")["status"] == "ready"
+
+
+def test_cleanup_uses_staged_endpoint_even_after_lan_b_target_changes(tmp_path):
+    service, _, _, transport = make_service(tmp_path, transport=FakeTransport(delete_error=True, ack=b"CertI2\r"))
+    service.save_lan_b_target("10.0.0.10", host="10.0.1.10", port=8443)
+    approve(service, nic=2)
+    result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1", nic=2)
+    service.save_lan_b_target("10.0.0.10", host="10.0.2.10", port=443)
+    transport.delete_error = False
+    assert service.cleanup_one(staged_name=result["staged_name"], confirm_finished=True)["status"] == "deleted"
+    assert transport.deleted[-1][0].host == "10.0.1.10"
+
+
+def test_disconnect_after_send_verifies_without_retrying(tmp_path):
+    class Disconnect(FakeTransport):
+        def ingest(self, *args, **kwargs):
+            super().ingest(*args, **kwargs)
+            raise OSError("disconnected")
+
+    observations = []
+    service, _, _, transport = make_service(tmp_path, transport=Disconnect(), verifier=lambda endpoint, material: (observations.append(endpoint) or VerificationResult("verified", "a", "a")))
+    approve(service)
+    result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1")
+    assert result["status"] == "cleanup_pending"
+    assert result["verification"] == "verified"
+    assert len(observations) == len(transport.sis_commands) == 1
+    assert not transport.deleted
+
+
+def test_transport_opens_shell_and_collects_fragmented_ack(monkeypatch):
+    class Channel:
+        def __init__(self):
+            self.shell = False
+            self.sent = False
+            self.chunks = [b"Cert", b"I1\r"]
+
+        def settimeout(self, value):
+            pass
+
+        def invoke_shell(self):
+            self.shell = True
+
+        def recv_ready(self):
+            return self.sent and bool(self.chunks)
+
+        def recv(self, size):
+            return self.chunks.pop(0)
+
+        def sendall(self, command):
+            assert self.shell
+            assert command == b"\x1bI1*certmon-test.pem CERT\r"
+            self.sent = True
+
+        def close(self):
+            pass
+
+    class Connection:
+        def open_session(self, timeout):
+            return channel
+
+        def close(self):
+            pass
+
+    channel = Channel()
+    transport = ParamikoDirectTransport()
+    monkeypatch.setattr(transport, "_authenticated_transport", lambda *args: Connection())
+    result = transport.ingest(EndpointIdentity("10.0.0.10", 1, "sis", "10.0.0.10", 22023), {}, b"\x1bI1*certmon-test.pem CERT\r", expected_fingerprint="SHA256:known")
+    assert result.write_confirmed and result.received == b"CertI1\r"
 
 
 def test_activation_uses_selected_lan_b_and_fragmented_exact_ack_then_https(tmp_path):
@@ -216,7 +301,7 @@ def test_activation_uses_selected_lan_b_and_fragmented_exact_ack_then_https(tmp_
 
     assert result["status"] == "verified"
     assert transport.sftp_writes[0][0].nic == 2
-    assert b"\x1b2,*" in transport.sis_commands[0][1]
+    assert transport.sis_commands[0][1] == b"\x1bI2*" + transport.sftp_writes[0][1].encode("ascii") + b" CERT\r"
     assert verified[0]["host"] == "10.0.1.10"
     assert verified[0]["port"] == 8443
     assert transport.deleted
@@ -362,3 +447,24 @@ def test_direct_activation_uses_existing_server_auth_and_csrf_guards(
     )
     assert response.status_code == 200
     assert [name for name, _ in service.calls] == ["activate"]
+
+
+def test_direct_upload_browser_starts_without_network_or_activation(page, live_certmon):
+    from playwright.sync_api import expect
+
+    certmon = live_certmon(server_mode=False)
+    requests = []
+    page.on("request", lambda request: requests.append(request.url))
+    page.goto(certmon.base_url)
+    page.wait_for_function("typeof switchTab === 'function'")
+    page.evaluate("switchTab('upload')")
+    expect(page.locator('#direct-extron-upload')).to_be_visible()
+    expect(page.locator('#toolbelt-batch')).to_be_visible()
+    expect(page.locator('#direct-extron-activate')).to_be_disabled()
+    assert not any('/api/direct-extron/probe' in url or '/api/direct-extron/activate' in url for url in requests)
+    page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'direct-upload-desktop.png'), full_page=True)
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator('#direct-extron-upload')).to_be_visible()
+    bounds = page.locator('#direct-extron-upload').bounding_box()
+    assert bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= 390
+    page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'direct-upload-mobile.png'), full_page=True)

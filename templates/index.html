@@ -352,6 +352,16 @@
     .admin-actions { justify-content: flex-start; }
   }
 
+  @media (max-width: 600px) {
+    header { flex-wrap: wrap; gap: 12px; padding: 16px; }
+    .header-stats { flex-wrap: wrap; gap: 8px; }
+    .main { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .sidebar { order: 2; border-right: 0; }
+    .content { min-width: 0; padding: 12px; }
+    .tabs { overflow-x: auto; }
+    #direct-extron-upload input, #direct-extron-upload select { min-width: 0; max-width: 100%; }
+  }
+
   .device-filter-bar {
     display: flex;
     align-items: center;
@@ -1044,7 +1054,7 @@
           <button class="btn btn-ghost" type="button" onclick="saveDirectExtronCredentials()">Device Credentials</button>
           <button class="btn" type="button" onclick="probeDirectExtron()">Test direct connection</button>
           <button class="btn" id="direct-extron-approve" type="button" onclick="approveDirectExtronHostKey()" disabled>Approve displayed host key</button>
-          <button class="btn btn-scan" id="direct-extron-activate" type="button" onclick="activateDirectExtron()">Activate certificate</button>
+          <button class="btn btn-scan" id="direct-extron-activate" type="button" onclick="activateDirectExtron()" disabled>Activate certificate</button>
         </div>
         <div id="direct-extron-status" class="help-text" role="status" style="min-height:20px;margin-top:10px"></div>
         <div id="direct-extron-cleanup" style="margin-top:8px"></div>
@@ -3138,6 +3148,18 @@
     applyPendingDeployment();
   }
 
+  let directExtronReady = null;
+
+  function invalidateDirectExtronProbe() {
+    directExtronReady = null;
+    document.getElementById('direct-extron-activate').disabled = true;
+    document.getElementById('direct-extron-approve').disabled = true;
+  }
+
+  for (const id of ['direct-extron-selector', 'direct-extron-certificate', 'direct-extron-nic', 'direct-extron-lan-b-host', 'direct-extron-lan-b-port']) {
+    document.getElementById(id).addEventListener('input', invalidateDirectExtronProbe);
+  }
+
   function directExtronFields() {
     return {
       selector: document.getElementById('direct-extron-selector').value.trim(),
@@ -3170,6 +3192,7 @@
   }
 
   async function saveDirectExtronLanBTarget() {
+    invalidateDirectExtronProbe();
     const { selector } = directExtronFields();
     const host = document.getElementById('direct-extron-lan-b-host').value.trim();
     const port = Number(document.getElementById('direct-extron-lan-b-port').value);
@@ -3184,6 +3207,7 @@
   }
 
   async function saveDirectExtronCredentials() {
+    invalidateDirectExtronProbe();
     const { selector } = directExtronFields();
     const username = prompt(`Username for ${selector}`, 'admin');
     if (!username) return;
@@ -3201,12 +3225,18 @@
 
   async function probeDirectExtron() {
     const fields = directExtronFields();
+    invalidateDirectExtronProbe();
     try {
       const result = await directExtronJson('/api/direct-extron/probe', { selector: fields.selector, nic: fields.nic });
       const approve = document.getElementById('direct-extron-approve');
-      approve.disabled = result.status !== 'approval_required';
+      approve.disabled = !['approval_required', 'host_key_changed'].includes(result.status);
       approve.dataset.fingerprint = result.fingerprint || '';
-      setDirectExtronStatus(result.status === 'approval_required' ? `Host-key approval required: ${result.fingerprint}` : result.status, result.status !== 'ready');
+      approve.dataset.connection = result.identity ? result.identity.connection : '';
+      if (result.status === 'ready' && JSON.stringify(fields) === JSON.stringify(directExtronFields())) {
+        directExtronReady = JSON.stringify(fields);
+        document.getElementById('direct-extron-activate').disabled = !fields.certificate_id;
+      }
+      setDirectExtronStatus(result.fingerprint ? `${result.status}: ${result.identity.connection} ${result.identity.host}:${result.identity.port} ${result.fingerprint}` : result.status, result.status !== 'ready');
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }
 
@@ -3214,7 +3244,7 @@
     const fields = directExtronFields();
     const approve = document.getElementById('direct-extron-approve');
     try {
-      const result = await directExtronJson('/api/direct-extron/host-keys/approve', { selector: fields.selector, nic: fields.nic, fingerprint: approve.dataset.fingerprint });
+      const result = await directExtronJson('/api/direct-extron/host-keys/approve', { selector: fields.selector, nic: fields.nic, connection: approve.dataset.connection, fingerprint: approve.dataset.fingerprint });
       approve.disabled = true;
       setDirectExtronStatus(`Host key approved: ${result.fingerprint}`);
     } catch (error) { setDirectExtronStatus(error.message, true); }
@@ -3222,6 +3252,12 @@
 
   async function activateDirectExtron() {
     const fields = directExtronFields();
+    if (directExtronReady !== JSON.stringify(fields)) {
+      setDirectExtronStatus('Test the selected endpoint before activation.', true);
+      return;
+    }
+    if (!confirm(`Activate certificate ${fields.certificate_id} on ${fields.selector}, LAN ${fields.nic === 1 ? 'A' : 'B'}?`)) return;
+    invalidateDirectExtronProbe();
     try {
       const result = await directExtronJson('/api/direct-extron/activate', fields);
       setDirectExtronStatus(`Direct activation: ${result.status}`, result.status !== 'verified');
