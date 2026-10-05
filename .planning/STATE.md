@@ -27,7 +27,7 @@ Plan: 1 of 4
 Status: Awaiting tracer UI feedback; implementation tests pass, physical acceptance not started
 Last activity: 2026-10-05 — Phase 05 execution started
 
-Next action: Await `tracer verified` or interface feedback at http://127.0.0.1:5051/ (isolated preview data). User chose inline takeover; prior executor completed late and was closed, not duplicated. Commits 9d23402/b397995 contain the tracer; fafa0b8 corrects SIS bytes, independent trust/probe, bounded I/O, cleanup endpoint preservation and activation gating. After human tracer approval write 05-01-SUMMARY.md and enter 05-02 physical checkpoint. No physical operation, push or build performed.
+Next action: Await latest interface feedback at http://127.0.0.1:5052/ (isolated preview data). Initial UI visually accepted; e6ac3ec adds Devices-to-direct-upload selection and automatic IP/certificate filling, with 50 direct/UI tests passed. After human tracer approval write 05-01-SUMMARY.md and enter 05-02 physical checkpoint. No physical operation, push or build performed.
 
 ## Final Acceptance
 

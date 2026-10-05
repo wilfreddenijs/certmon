@@ -66,9 +66,16 @@ tests (Chromium UI included) and 68 existing regression tests. Desktop/mobile
 screenshots were inspected; no physical device requests were issued. This is
 not full-suite, packaged-runtime, or hardware acceptance.
 
-Preview: http://127.0.0.1:5051/ using `.tmp/direct-preview-data`, not existing
+Preview: http://127.0.0.1:5052/ using `.tmp/direct-preview-data`, not existing
 user data. Confirm the Direct Extron section, LAN selection/endpoint controls,
 initially disabled activation button, and retained Toolbelt section in Upload.
 Do not start a device action for this UI checkpoint. Respond `tracer verified`
 or describe the interface issue. Plan 05-01 remains unsummarized until feedback;
 physical one-LAN/two-LAN gates in 05-02 remain pending. No push/build performed.
+
+User visually accepted the initial interface but requested prepared-device
+selection rather than typed addresses. Commit e6ac3ec connects Devices > Open
+Upload to the same prepared-device list, automatically filling IP/certificate;
+creation's upload-options action and each prepared row follow the same path.
+The browser regression proves no automatic probe/activation. Direct/UI suites:
+50 passed in 28.90s. Latest interface feedback and hardware gates remain pending.
