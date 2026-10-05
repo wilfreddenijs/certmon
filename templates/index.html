@@ -1050,11 +1050,11 @@
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-lan-b-port">LAN B HTTPS port</label><input id="direct-extron-lan-b-port" type="number" value="443" min="1" max="65535"></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          <button class="btn btn-ghost" type="button" onclick="saveDirectExtronLanBTarget()">Save LAN B endpoint</button>
           <button class="btn btn-ghost" type="button" onclick="saveDirectExtronCredentials()">Device Credentials</button>
           <button class="btn" type="button" onclick="probeDirectExtron()">Test direct connection</button>
           <button class="btn" id="direct-extron-approve" type="button" onclick="approveDirectExtronHostKey()" disabled>Approve displayed host key</button>
-          <button class="btn btn-scan" id="direct-extron-activate" type="button" onclick="activateDirectExtron()" disabled>Activate certificate</button>
+          <button class="btn btn-scan" id="direct-extron-activate" type="button" onclick="activateDirectExtron()" disabled>Upload certificate</button>
+          <button class="btn btn-ghost" type="button" onclick="saveDirectExtronLanBTarget()" style="margin-left:auto">Save LAN B endpoint</button>
         </div>
         <div id="direct-extron-status" class="help-text" role="status" style="min-height:20px;margin-top:10px"></div>
         <div id="direct-extron-cleanup" style="margin-top:8px"></div>
