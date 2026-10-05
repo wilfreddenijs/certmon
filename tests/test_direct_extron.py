@@ -468,3 +468,25 @@ def test_direct_upload_browser_starts_without_network_or_activation(page, live_c
     bounds = page.locator('#direct-extron-upload').bounding_box()
     assert bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= 390
     page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'direct-upload-mobile.png'), full_page=True)
+
+
+def test_device_dialog_selects_direct_upload_without_typing_or_network(page, live_certmon):
+    from playwright.sync_api import expect
+
+    certmon = live_certmon(server_mode=False)
+    certificate = {"certificate_id": "prepared-cert", "issuer_type": "local_ca", "profile": "extron-rsa", "identifiers": ["192.168.0.112"]}
+    device = {"selector": "192.168.0.112", "certificate_id": "prepared-cert", "label": "DMP 128", "extron_ready": True, "selected": True}
+    page.route('**/api/certificates/public', lambda route: route.fulfill(json=[certificate]))
+    page.route('**/api/toolbelt/devices', lambda route: route.fulfill(json={"devices": [device]}))
+    page.route('**/api/toolbelt/reset-upload-tab', lambda route: route.fulfill(json={"devices": [device]}))
+    requests = []
+    page.on('request', lambda request: requests.append(request.url))
+    page.goto(certmon.base_url)
+    page.wait_for_function("typeof openDeviceLocalCAModal === 'function'")
+    page.evaluate("async () => { await loadAvailableCertificates(); openDeviceLocalCAModal('192.168.0.112', 'DMP 128', 'prepared-cert'); }")
+    page.locator('#device-ca-use-existing').click()
+    expect(page.locator('#direct-extron-selector')).to_have_value('192.168.0.112')
+    expect(page.locator('#direct-extron-certificate')).to_have_value('prepared-cert')
+    expect(page.locator('#direct-extron-certificate')).to_have_attribute('readonly', '')
+    expect(page.locator('#direct-extron-activate')).to_be_disabled()
+    assert not any('/api/direct-extron/probe' in url or '/api/direct-extron/activate' in url for url in requests)

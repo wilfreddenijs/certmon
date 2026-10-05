@@ -1043,8 +1043,8 @@
         <div class="section-title" style="margin-bottom:8px">Direct Extron certificate upload</div>
         <div class="help-text choice-help" style="margin-bottom:12px">Explicit one-device path. Test and approve the exact SSH host key before activating a selected certificate.</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end">
-          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-selector">Device selector</label><input id="direct-extron-selector" type="text" autocomplete="off"></div>
-          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-certificate">Certificate ID</label><input id="direct-extron-certificate" type="text" autocomplete="off"></div>
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-selector">Prepared device</label><select id="direct-extron-selector" onchange="selectPreparedDirectDevice(this.value)"><option value="">Select a device</option></select></div>
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-certificate">Certificate ID</label><input id="direct-extron-certificate" type="text" readonly></div>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-nic">Network interface</label><select id="direct-extron-nic" onchange="toggleDirectExtronLanB()"><option value="1">LAN A</option><option value="2">LAN B</option></select></div>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-lan-b-host">LAN B HTTPS host</label><input id="direct-extron-lan-b-host" type="text" autocomplete="off"></div>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-lan-b-port">LAN B HTTPS port</label><input id="direct-extron-lan-b-port" type="number" value="443" min="1" max="65535"></div>
@@ -3078,8 +3078,7 @@
       useExisting.onclick = () => {
         overlay.remove();
         if (certificate.profile === 'extron-rsa') {
-          switchTab('upload');
-          loadToolbeltDevices(false);
+          openManualOrToolbeltUploadForCertificate(certificate.certificate_id);
         } else {
           openManualUploadForCertificate(certificate.certificate_id);
         }
@@ -3127,7 +3126,7 @@
   async function sendToUpload(host, port, cn) {
     const matchingCertificate = findLocalCaCertificate({ host, cn, sans: [] });
     if (matchingCertificate) {
-      await openManualUploadForCertificate(matchingCertificate.certificate_id);
+      await openManualOrToolbeltUploadForCertificate(matchingCertificate.certificate_id);
       return;
     }
     openDeviceLocalCAModal(host, cn);
@@ -3149,6 +3148,25 @@
   }
 
   let directExtronReady = null;
+
+  function renderPreparedDirectDevices() {
+    const select = document.getElementById('direct-extron-selector');
+    const previous = select.value;
+    select.replaceChildren(new Option('Select a device', ''));
+    for (const device of toolbeltDevices.filter(device => device.extron_ready)) {
+      select.add(new Option(`${device.label} (${device.selector})`, device.selector));
+    }
+    select.value = previous;
+    selectPreparedDirectDevice(select.value);
+  }
+
+  function selectPreparedDirectDevice(selector) {
+    const device = toolbeltDevices.find(device => device.extron_ready && device.selector === selector);
+    const certificate = document.getElementById('direct-extron-certificate');
+    if (certificate.value !== (device ? device.certificate_id : '')) invalidateDirectExtronProbe();
+    document.getElementById('direct-extron-selector').value = device ? device.selector : '';
+    certificate.value = device ? device.certificate_id : '';
+  }
 
   function invalidateDirectExtronProbe() {
     directExtronReady = null;
@@ -3329,6 +3347,7 @@
   }
 
   function renderToolbeltDevices() {
+    renderPreparedDirectDevices();
     const list = document.getElementById('toolbelt-device-list');
     const uploadBtn = document.getElementById('toolbelt-upload-btn');
     if (!toolbeltDevices.length) {
@@ -3363,6 +3382,7 @@
             <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
           </div>
           <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Device Credentials</button>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();selectPreparedDirectDevice('${escAttr(d.selector)}');document.getElementById('direct-extron-upload').scrollIntoView({block:'start'})">Direct upload</button>
           <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Remove from Upload and delete the associated Local CA device certificate" onclick="event.preventDefault();removePreparedToolbeltDevice('${escAttr(d.certificate_id)}','${escAttr(d.label)}')">Remove</button>
         </label>
       </div>
@@ -3593,6 +3613,8 @@
     if (certificate && certificate.profile === 'extron-rsa') {
       switchTab('upload');
       await loadToolbeltDevices(false);
+      const device = toolbeltDevices.find(device => device.certificate_id === certificateId);
+      if (device) selectPreparedDirectDevice(device.selector);
       return;
     }
     openManualUploadForCertificate(certificateId);
