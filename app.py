@@ -46,6 +46,7 @@ from certmon.acme_service import (
     NativeACMEOrderClient,
 )
 from certmon.deployment import DeploymentService, ExtronDeploymentAdapter
+from certmon.direct_extron import DirectExtronService
 from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
 from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
@@ -194,6 +195,7 @@ def bootstrap_services(
         ),
     )
     toolbelt_service = ToolbeltBatchService(database, artifact_store, vault)
+    direct_extron_service = DirectExtronService(database, artifact_store, vault)
     return {
         "vault": vault,
         "artifact_store": artifact_store,
@@ -207,6 +209,7 @@ def bootstrap_services(
         "acme_orchestrator": acme_orchestrator,
         "deployment_service": deployment_service,
         "toolbelt_service": toolbelt_service,
+        "direct_extron_service": direct_extron_service,
     }
 
 
@@ -222,6 +225,7 @@ acme_order_service = None
 acme_orchestrator = None
 deployment_service = None
 toolbelt_service = None
+direct_extron_service = None
 _services = bootstrap_services(database, data_dir())
 globals().update(_services)
 if migration_source is not None and vault is not None:
@@ -1972,6 +1976,139 @@ def download_private_artifact(certificate_id, artifact_name):
 
 def _toolbelt_unavailable():
     return toolbelt_service is None or artifact_store is None or vault is None
+
+
+def _direct_extron_unavailable():
+    return direct_extron_service is None or artifact_store is None or vault is None
+
+
+def _direct_extron_body(allowed):
+    body = request.get_json(silent=True) or {}
+    private_fields = {"private_key_pem", "combined_pem", "pem", "passphrase"}
+    if private_fields.intersection(body):
+        raise ValueError("Private certificate material must stay server-side")
+    unsupported = sorted(set(body) - set(allowed))
+    if unsupported:
+        raise ValueError(f"Unsupported fields: {unsupported}")
+    return body
+
+
+@app.route("/api/direct-extron/target", methods=["GET"])
+def direct_extron_target():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        target = direct_extron_service.target_for(
+            request.args.get("selector"), request.args.get("nic", 1)
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"target": direct_extron_service._public_target(target)})
+
+
+@app.route("/api/direct-extron/targets/<path:selector>/lan-b", methods=["PATCH"])
+def direct_extron_lan_b_target(selector):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        body = _direct_extron_body({"host", "port"})
+        target = direct_extron_service.save_lan_b_target(
+            selector, host=body.get("host"), port=body.get("port", 443)
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_lan_b_target_saved", target=selector)
+    return jsonify({"ok": True, "target": direct_extron_service._public_target(target)})
+
+
+@app.route("/api/direct-extron/devices/<path:selector>/credentials", methods=["PATCH"])
+def direct_extron_credentials(selector):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        body = _direct_extron_body({"username", "password"})
+        direct_extron_service.save_credentials(
+            selector, username=(body.get("username") or "admin").strip(), password=body.get("password")
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_credentials_saved", target=selector, details={"username": body.get("username") or "admin"})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/direct-extron/probe", methods=["POST"])
+def direct_extron_probe():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        body = _direct_extron_body({"selector", "nic"})
+        result = direct_extron_service.probe_one(
+            selector=body.get("selector"), nic=body.get("nic", 1)
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_probe", target=body.get("selector"), success=result.get("status") == "ready")
+    return jsonify(result)
+
+
+@app.route("/api/direct-extron/host-keys/approve", methods=["POST"])
+def direct_extron_approve_host_key():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        body = _direct_extron_body({"selector", "nic", "fingerprint"})
+        result = direct_extron_service.approve_host_key(
+            selector=body.get("selector"), nic=body.get("nic", 1), fingerprint=body.get("fingerprint")
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_host_key_approved", target=body.get("selector"))
+    return jsonify(result)
+
+
+@app.route("/api/direct-extron/activate", methods=["POST"])
+def direct_extron_activate():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        body = _direct_extron_body({"selector", "nic", "certificate_id"})
+        result = direct_extron_service.activate_one(
+            selector=body.get("selector"), nic=body.get("nic", 1), certificate_id=body.get("certificate_id")
+        )
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_activation", target=body.get("selector"), success=result.get("status") == "verified", details={"status": result.get("status")})
+    return jsonify(result)
+
+
+@app.route("/api/direct-extron/status", methods=["GET"])
+def direct_extron_status():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    return jsonify({"staged": direct_extron_service.recover_staged()})
+
+
+@app.route("/api/direct-extron/cleanup", methods=["POST"])
+def direct_extron_cleanup():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    try:
+        body = _direct_extron_body({"staged_name", "confirm_finished"})
+        result = direct_extron_service.cleanup_one(
+            staged_name=body.get("staged_name"), confirm_finished=body.get("confirm_finished") is True
+        )
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_cleanup", target=body.get("staged_name"), success=result.get("status") == "deleted", details={"status": result.get("status")})
+    return jsonify(result)
 
 
 @app.route("/api/toolbelt/devices", methods=["GET"])

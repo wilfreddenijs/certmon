@@ -12,3 +12,4 @@ pytest>=8.2.0
 pytest-mock>=3.14.0
 pywinauto>=0.6.8
 comtypes>=1.4.0
+paramiko==5.0.0

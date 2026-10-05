@@ -1029,6 +1029,26 @@
 
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
+      <div id="direct-extron-upload" data-required-permission="deploy_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+        <div class="section-title" style="margin-bottom:8px">Direct Extron certificate upload</div>
+        <div class="help-text choice-help" style="margin-bottom:12px">Explicit one-device path. Test and approve the exact SSH host key before activating a selected certificate.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end">
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-selector">Device selector</label><input id="direct-extron-selector" type="text" autocomplete="off"></div>
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-certificate">Certificate ID</label><input id="direct-extron-certificate" type="text" autocomplete="off"></div>
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-nic">Network interface</label><select id="direct-extron-nic" onchange="toggleDirectExtronLanB()"><option value="1">LAN A</option><option value="2">LAN B</option></select></div>
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-lan-b-host">LAN B HTTPS host</label><input id="direct-extron-lan-b-host" type="text" autocomplete="off"></div>
+          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-lan-b-port">LAN B HTTPS port</label><input id="direct-extron-lan-b-port" type="number" value="443" min="1" max="65535"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn btn-ghost" type="button" onclick="saveDirectExtronLanBTarget()">Save LAN B endpoint</button>
+          <button class="btn btn-ghost" type="button" onclick="saveDirectExtronCredentials()">Device Credentials</button>
+          <button class="btn" type="button" onclick="probeDirectExtron()">Test direct connection</button>
+          <button class="btn" id="direct-extron-approve" type="button" onclick="approveDirectExtronHostKey()" disabled>Approve displayed host key</button>
+          <button class="btn btn-scan" id="direct-extron-activate" type="button" onclick="activateDirectExtron()">Activate certificate</button>
+        </div>
+        <div id="direct-extron-status" class="help-text" role="status" style="min-height:20px;margin-top:10px"></div>
+        <div id="direct-extron-cleanup" style="margin-top:8px"></div>
+      </div>
       <div id="toolbelt-batch" data-required-permission="deploy_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
           <div>
@@ -3116,6 +3136,110 @@
     renderCertificateSelect();
     applyPermissionVisibility();
     applyPendingDeployment();
+  }
+
+  function directExtronFields() {
+    return {
+      selector: document.getElementById('direct-extron-selector').value.trim(),
+      certificate_id: document.getElementById('direct-extron-certificate').value.trim(),
+      nic: Number(document.getElementById('direct-extron-nic').value),
+    };
+  }
+
+  function setDirectExtronStatus(message, warning) {
+    const status = document.getElementById('direct-extron-status');
+    status.textContent = message;
+    status.style.color = warning ? 'var(--warning)' : 'var(--muted)';
+  }
+
+  function toggleDirectExtronLanB() {
+    const lanB = document.getElementById('direct-extron-nic').value === '2';
+    document.getElementById('direct-extron-lan-b-host').disabled = !lanB;
+    document.getElementById('direct-extron-lan-b-port').disabled = !lanB;
+  }
+
+  async function directExtronJson(url, body) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Direct Extron request failed');
+    return data;
+  }
+
+  async function saveDirectExtronLanBTarget() {
+    const { selector } = directExtronFields();
+    const host = document.getElementById('direct-extron-lan-b-host').value.trim();
+    const port = Number(document.getElementById('direct-extron-lan-b-port').value);
+    try {
+      const res = await fetch(`/api/direct-extron/targets/${encodeURIComponent(selector)}/lan-b`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, port })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save LAN B endpoint');
+      setDirectExtronStatus(`LAN B endpoint saved: ${data.target.host}:${data.target.https_port}`);
+    } catch (error) { setDirectExtronStatus(error.message, true); }
+  }
+
+  async function saveDirectExtronCredentials() {
+    const { selector } = directExtronFields();
+    const username = prompt(`Username for ${selector}`, 'admin');
+    if (!username) return;
+    const password = prompt(`Password for ${selector}. CertMon stores it encrypted.`);
+    if (password === null) return;
+    try {
+      const res = await fetch(`/api/direct-extron/devices/${encodeURIComponent(selector)}/credentials`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save credentials');
+      setDirectExtronStatus('Encrypted device credentials saved. Test the connection before activation.');
+    } catch (error) { setDirectExtronStatus(error.message, true); }
+  }
+
+  async function probeDirectExtron() {
+    const fields = directExtronFields();
+    try {
+      const result = await directExtronJson('/api/direct-extron/probe', { selector: fields.selector, nic: fields.nic });
+      const approve = document.getElementById('direct-extron-approve');
+      approve.disabled = result.status !== 'approval_required';
+      approve.dataset.fingerprint = result.fingerprint || '';
+      setDirectExtronStatus(result.status === 'approval_required' ? `Host-key approval required: ${result.fingerprint}` : result.status, result.status !== 'ready');
+    } catch (error) { setDirectExtronStatus(error.message, true); }
+  }
+
+  async function approveDirectExtronHostKey() {
+    const fields = directExtronFields();
+    const approve = document.getElementById('direct-extron-approve');
+    try {
+      const result = await directExtronJson('/api/direct-extron/host-keys/approve', { selector: fields.selector, nic: fields.nic, fingerprint: approve.dataset.fingerprint });
+      approve.disabled = true;
+      setDirectExtronStatus(`Host key approved: ${result.fingerprint}`);
+    } catch (error) { setDirectExtronStatus(error.message, true); }
+  }
+
+  async function activateDirectExtron() {
+    const fields = directExtronFields();
+    try {
+      const result = await directExtronJson('/api/direct-extron/activate', fields);
+      setDirectExtronStatus(`Direct activation: ${result.status}`, result.status !== 'verified');
+      if (result.staged_name && result.status !== 'verified') renderDirectExtronCleanup(result.staged_name);
+    } catch (error) { setDirectExtronStatus(error.message, true); }
+  }
+
+  function renderDirectExtronCleanup(stagedName) {
+    const holder = document.getElementById('direct-extron-cleanup');
+    holder.innerHTML = `<button class="btn btn-danger" type="button" onclick="cleanupDirectExtron('${escAttr(stagedName)}')">Confirm processing finished and retry cleanup</button>`;
+  }
+
+  async function cleanupDirectExtron(stagedName) {
+    try {
+      const result = await directExtronJson('/api/direct-extron/cleanup', { staged_name: stagedName, confirm_finished: true });
+      setDirectExtronStatus(`Staged PEM cleanup: ${result.status}`, result.status !== 'deleted');
+      if (result.status === 'deleted') document.getElementById('direct-extron-cleanup').innerHTML = '';
+    } catch (error) { setDirectExtronStatus(error.message, true); }
   }
 
   async function refreshCertificateWorkflow() {

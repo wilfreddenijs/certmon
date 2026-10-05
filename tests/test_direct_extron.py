@@ -1,10 +1,12 @@
 from contextlib import contextmanager
+import importlib
 from pathlib import Path
 
 import pytest
 
 from certmon.deployment import VerificationResult
-from certmon.direct_extron import DirectExtronService, EndpointIdentity
+from certmon.direct_extron import DirectExtronService, EndpointIdentity, SISExchange
+from tests.test_auth_api import load_app as load_server_app
 
 
 class FakeDatabase:
@@ -78,28 +80,57 @@ class FakeTransport:
         self.sis_commands = []
         self.deleted = []
         self.probes = []
+        self.expected_fingerprints = []
 
     def host_key_fingerprint(self, identity):
         self.probes.append(identity)
         return self.key
 
-    def probe_credentials(self, identity, credentials):
+    def probe_credentials(self, identity, credentials, **kwargs):
         self.auth_attempts.append((identity, credentials))
+        self.expected_fingerprints.append(kwargs.get("expected_fingerprint"))
 
-    def stage(self, identity, credentials, local_path, remote_name):
+    def stage(self, identity, credentials, local_path, remote_name, **kwargs):
         self.auth_attempts.append((identity, credentials))
+        self.expected_fingerprints.append(kwargs.get("expected_fingerprint"))
         self.sftp_writes.append((identity, remote_name))
 
-    def ingest(self, identity, credentials, command):
+    def ingest(self, identity, credentials, command, **kwargs):
         self.auth_attempts.append((identity, credentials))
+        self.expected_fingerprints.append(kwargs.get("expected_fingerprint"))
         self.sis_commands.append((identity, command))
         return self.ack
 
-    def delete(self, identity, credentials, remote_name):
+    def delete(self, identity, credentials, remote_name, **kwargs):
         self.auth_attempts.append((identity, credentials))
+        self.expected_fingerprints.append(kwargs.get("expected_fingerprint"))
         if self.delete_error:
             raise OSError("delete failed")
         self.deleted.append((identity, remote_name))
+
+
+class FakeRouteService:
+    def __init__(self):
+        self.calls = []
+
+    def probe_one(self, **kwargs):
+        self.calls.append(("probe", kwargs))
+        return {"status": "ready", "target": {"host": "10.0.0.10"}}
+
+    def approve_host_key(self, **kwargs):
+        self.calls.append(("approve", kwargs))
+        return {"status": "approved", "fingerprint": kwargs["fingerprint"]}
+
+    def activate_one(self, **kwargs):
+        self.calls.append(("activate", kwargs))
+        return {"status": "verified", "staged_name": "certmon-safe.pem"}
+
+    def cleanup_one(self, **kwargs):
+        self.calls.append(("cleanup", kwargs))
+        return {"status": "deleted", "staged_name": kwargs["staged_name"]}
+
+    def recover_staged(self):
+        return []
 
 
 def make_service(tmp_path, *, transport=None, verifier=None):
@@ -189,9 +220,10 @@ def test_activation_uses_selected_lan_b_and_fragmented_exact_ack_then_https(tmp_
     assert verified[0]["host"] == "10.0.1.10"
     assert verified[0]["port"] == 8443
     assert transport.deleted
+    assert transport.expected_fingerprints == ["SHA256:known"] * 3
 
 
-@pytest.mark.parametrize("ack", [b"CertI1\r", b"CertI2", b"noise CertI2\r more"])
+@pytest.mark.parametrize("ack", [b"CertI2\r", b"CertI1", b"noise CertI2\r more"])
 def test_wrong_or_ambiguous_ack_never_replays_sis(tmp_path, ack):
     transport = FakeTransport(ack=ack)
     service, _, _, transport = make_service(tmp_path, transport=transport)
@@ -203,10 +235,32 @@ def test_wrong_or_ambiguous_ack_never_replays_sis(tmp_path, ack):
     assert len(transport.sis_commands) == 1
 
 
+def test_preloaded_ack_verifies_first_and_survives_restart_for_guarded_cleanup(tmp_path):
+    class PreloadedTransport(FakeTransport):
+        def ingest(self, identity, credentials, command, **kwargs):
+            super().ingest(identity, credentials, command, **kwargs)
+            return SISExchange(preloaded=b"CertI1\r", received=b"", write_confirmed=False)
+
+    transport = PreloadedTransport()
+    service, database, artifacts, transport = make_service(tmp_path, transport=transport)
+    approve(service)
+
+    result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1", nic=1)
+
+    assert result["status"] == "cleanup_pending"
+    assert result["verification"] == "verified"
+    assert transport.deleted == []
+    restarted = DirectExtronService(database, artifacts, FakeVault(), transport=transport)
+    pending = restarted.recover_staged()
+    assert pending[0]["staged_name"] == result["staged_name"]
+    assert restarted.cleanup_one(staged_name=result["staged_name"], confirm_finished=True)["status"] == "cleanup_pending"
+    assert len(transport.sis_commands) == 1
+
+
 def test_per_device_credentials_never_fall_back_after_authentication_failure(tmp_path):
     class RejectingTransport(FakeTransport):
-        def probe_credentials(self, identity, credentials):
-            super().probe_credentials(identity, credentials)
+        def probe_credentials(self, identity, credentials, **kwargs):
+            super().probe_credentials(identity, credentials, **kwargs)
             raise PermissionError("bad password")
 
     transport = RejectingTransport()
@@ -243,10 +297,68 @@ def test_delete_failure_is_durable_and_cleanup_never_reingests(tmp_path):
 def test_routes_and_ui_expose_only_server_side_direct_actions():
     html = Path(__file__).parents[1].joinpath("templates", "index.html").read_text(encoding="utf-8")
     app_source = Path(__file__).parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    direct_panel = html.split('id="direct-extron-upload"', 1)[1].split('id="toolbelt-batch"', 1)[0]
 
     for endpoint in ("probe", "host-keys/approve", "activate", "cleanup"):
         assert f"/api/direct-extron/{endpoint}" in html
         assert f"/api/direct-extron/{endpoint}" in app_source
-    assert "LAN B HTTPS host" in html
-    assert "combined_pem" not in html
-    assert "private_key" not in html
+    assert "LAN B HTTPS host" in direct_panel
+    assert "combined_pem" not in direct_panel
+    assert "private_key" not in direct_panel
+
+
+def test_direct_routes_use_injected_service_and_reject_private_browser_fields(
+    tmp_data_dir, monkeypatch
+):
+    import app
+
+    module = importlib.reload(app)
+    service = FakeRouteService()
+    module.direct_extron_service = service
+    module.artifact_store = object()
+    module.vault = object()
+    authorized = []
+    monkeypatch.setattr(module, "authorize", lambda permission: authorized.append(permission))
+    client = module.app.test_client()
+
+    rejected = client.post(
+        "/api/direct-extron/activate",
+        json={"selector": "10.0.0.10", "certificate_id": "cert-1", "combined_pem": "secret"},
+    )
+    assert rejected.status_code == 400
+    assert service.calls == []
+
+    assert client.post("/api/direct-extron/probe", json={"selector": "10.0.0.10", "nic": 1}).get_json()["status"] == "ready"
+    assert client.post("/api/direct-extron/host-keys/approve", json={"selector": "10.0.0.10", "nic": 1, "fingerprint": "SHA256:known"}).get_json()["status"] == "approved"
+    activated = client.post("/api/direct-extron/activate", json={"selector": "10.0.0.10", "nic": 1, "certificate_id": "cert-1"})
+    assert activated.status_code == 200
+    assert "secret" not in activated.get_data(as_text=True)
+    assert client.post("/api/direct-extron/cleanup", json={"staged_name": "certmon-safe.pem", "confirm_finished": True}).get_json()["status"] == "deleted"
+    assert [name for name, _ in service.calls] == ["probe", "approve", "activate", "cleanup"]
+    assert len(authorized) == 5
+
+
+def test_direct_activation_uses_existing_server_auth_and_csrf_guards(
+    tmp_data_dir, monkeypatch
+):
+    module = load_server_app(tmp_data_dir, monkeypatch)
+    service = FakeRouteService()
+    module.direct_extron_service = service
+    module.artifact_store = object()
+    module.vault = object()
+    client = module.app.test_client()
+
+    assert client.post("/api/direct-extron/activate", json={}).status_code == 401
+    client.post(
+        "/api/auth/setup-first-admin",
+        json={"username": "admin", "password": "correct horse", "password_confirmation": "correct horse"},
+    )
+    assert client.post("/api/direct-extron/activate", json={}).status_code == 403
+    status = client.get("/api/auth/status").get_json()
+    response = client.post(
+        "/api/direct-extron/activate",
+        json={"selector": "10.0.0.10", "nic": 1, "certificate_id": "cert-1"},
+        headers={status["csrf_header"]: status["csrf_token"]},
+    )
+    assert response.status_code == 200
+    assert [name for name, _ in service.calls] == ["activate"]
