@@ -79,3 +79,16 @@ Upload to the same prepared-device list, automatically filling IP/certificate;
 creation's upload-options action and each prepared row follow the same path.
 The browser regression proves no automatic probe/activation. Direct/UI suites:
 50 passed in 28.90s. Latest interface feedback and hardware gates remain pending.
+
+## Test Build Requested
+
+On 2026-10-05 the user approved the prepared-device interface and button layout,
+then requested a Windows build for testing at work. Commit 75178df labels the
+combined transfer/activation action `Upload certificate` and places the LAN B
+endpoint save action last. This authorizes build delivery, not device activation.
+
+Full local suite: 306 passed, 1 skipped, 1 failed in 442.96s. The failure was a
+TimeoutError in the browser fixture's initial HTTP readiness request, before
+role assertions. Both parameterized role-union cases passed on retry (2 passed
+in 33.50s). The 19 direct-upload tests passed. Physical one-LAN/two-LAN upload
+acceptance and packaged-runtime verification remain pending.
