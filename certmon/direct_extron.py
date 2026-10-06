@@ -6,6 +6,7 @@ approval for its endpoint identity.
 """
 
 import hashlib
+import errno
 import json
 import re
 import socket
@@ -129,7 +130,11 @@ class ParamikoDirectTransport:
             sftp = paramiko.SFTPClient.from_transport(transport)
             try:
                 sftp.get_channel().settimeout(self.read_timeout)
-                sftp.remove(remote_name)
+                try:
+                    sftp.remove(remote_name)
+                except OSError as error:
+                    if error.errno != errno.ENOENT:
+                        raise
             finally:
                 sftp.close()
         finally:
@@ -457,13 +462,16 @@ class DirectExtronService:
     @staticmethod
     def _exact_ack(value, nic, command=None):
         expected = f"CertI{nic}".encode("ascii")
-        lines = value.replace(b"\r\n", b"\r").split(b"\r")
-        if lines == [expected, b""]:
+        if not value.endswith((b"\r", b"\n")):
+            return False
+        # A PTY may translate the device's CRLF into CRCRLF.
+        lines = value.rstrip(b"\r\n").replace(b"\r\r\n", b"\r\n").replace(b"\r\n", b"\r").split(b"\r")
+        if lines == [expected]:
             return True
         if command is None:
             return False
         echoes = {command.rstrip(b"\r"), command.rstrip(b"\r").replace(b"\x1b", b"^[")}
-        return len(lines) == 3 and lines[0] in echoes and lines[1:] == [expected, b""]
+        return len(lines) == 2 and lines[0] in echoes and lines[1] == expected
 
     @staticmethod
     def _sis_command(nic, staged_name):

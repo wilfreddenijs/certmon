@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import importlib
+import errno
 from pathlib import Path
 
 import pytest
@@ -402,6 +403,46 @@ def test_exact_command_echo_then_ack_and_https_complete_upload(tmp_path, echo):
 ])
 def test_echo_without_exact_unambiguous_ack_never_counts_as_success(response):
     assert not DirectExtronService._exact_ack(response, 1, b"\x1bI1*certmon.pemCERT\r")
+
+
+def test_sw4_recorded_terminal_reply_is_valid():
+    command = b"\x1bI1*certmon-a04907d3bd3f498387185e9a0bd405bd.pemCERT\r"
+    reply = b"^[I1*certmon-a04907d3bd3f498387185e9a0bd405bd.pemCERT\r\nCertI1\r\r\n"
+    assert DirectExtronService._exact_ack(reply, 1, command)
+
+
+@pytest.mark.parametrize("error_code", [errno.ENOENT, errno.EACCES, errno.EIO])
+def test_cleanup_accepts_only_already_absent_file(tmp_path, monkeypatch, error_code):
+    from types import SimpleNamespace
+
+    closed = []
+    class SFTP:
+        def get_channel(self):
+            return SimpleNamespace(settimeout=lambda timeout: None)
+        def remove(self, name):
+            raise OSError(error_code, "test SFTP error")
+        def close(self):
+            closed.append("sftp")
+    transport = ParamikoDirectTransport()
+    monkeypatch.setattr(transport, "_authenticated_transport", lambda *args: SimpleNamespace(close=lambda: closed.append("transport")))
+    monkeypatch.setattr(paramiko.SFTPClient, "from_transport", lambda connection: SFTP())
+    identity = EndpointIdentity("10.0.0.10", 1, "sftp", "10.0.0.10", 22022)
+    if error_code == errno.ENOENT:
+        transport.delete(identity, {}, "certmon.pem", expected_fingerprint="SHA256:known")
+    else:
+        with pytest.raises(OSError) as failure:
+            transport.delete(identity, {}, "certmon.pem", expected_fingerprint="SHA256:known")
+        assert failure.value.errno == error_code
+    assert closed == ["sftp", "transport"]
+
+
+@pytest.mark.parametrize("ending", [b"\r\r\n", b"\r\r"])
+def test_terminal_ack_preserves_exact_nic_and_single_response(ending):
+    command = b"\x1bI1*certmon.pemCERT\r"
+    echo = b"^[I1*certmon.pemCERT\r\n"
+    assert DirectExtronService._exact_ack(echo + b"CertI1" + ending, 1, command)
+    assert not DirectExtronService._exact_ack(echo + b"CertI2" + ending, 1, command)
+    assert not DirectExtronService._exact_ack(echo + b"CertI1\r\nCertI1" + ending, 1, command)
 
 
 @pytest.mark.parametrize("remote_size", [8, 9])

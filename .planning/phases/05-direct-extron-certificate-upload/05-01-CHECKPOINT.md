@@ -130,3 +130,16 @@ ACK, or an exact ACK alone. Echo-only, wrong NIC, unrelated output and duplicate
 ACKs remain rejected. SFTP checks remote file size before SIS and persists that
 evidence. Disappearance from FileZilla after import is not yet proven to be
 device-side consumption. No automatic replay of pending imports is added.
+
+## Recorded SW4 Reply After Build 29
+
+The user supplied the exact persisted response:
+`^[I1*certmon-a04907d3bd3f498387185e9a0bd405bd.pemCERT\r\nCertI1\r\r\n`.
+SFTP confirmed 3428 bytes and HTTPS verification was `verified`. The parser
+incorrectly rejected the trailing PTY CRCRLF conversion. A test using this
+exact reply failed before correction and passes after normalizing terminal
+line endings, while wrong NICs, duplicate ACKs and unrelated echoes remain
+rejected. Cleanup now treats only SFTP ENOENT as already cleaned; permission
+and other I/O failures still surface. Existing historical jobs are not replayed
+or automatically marked complete. Targeted regression suites: 99 passed in
+41.71s. Final automatic success/cleanup confirmation on hardware remains open.
