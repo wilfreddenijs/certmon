@@ -13,6 +13,13 @@ The user successfully tested the following replacement for Toolbelt upload:
 
 The command reference is the screenshot `docs/SIS command for Cert Ingest.png` on the repository's main branch. Retrieve that reference into the implementation branch before finalizing the protocol implementation. It documents the import command, success response, passphrase variant, and NIC values. ESC and carriage return must be encoded as control bytes, not literal text.
 
+On 2026-10-06 the user confirmed import on SW4 USB Pro V1.02 via PuTTY.
+The exact no-passphrase wire command is `\x1bI1*certmon.pemCERT\r`, with response
+`CertI1`. There is no space between the filename and `CERT`; spaces in the
+reference screenshot separate notation, not literal command bytes. The earlier
+implementation inserted a space there and received no acknowledgement.
+This confirms the manual import, not the corrected automated SSH path or LAN B.
+
 ## Locked Product Decisions
 
 - Replace and ultimately retire the Toolbelt-based automatic certificate-upload workflow.

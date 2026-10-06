@@ -312,7 +312,7 @@ def test_transport_opens_shell_and_collects_fragmented_ack(monkeypatch):
 
         def sendall(self, command):
             assert self.shell
-            assert command == b"\x1bI1*certmon-test.pem CERT\r"
+            assert command == b"\x1bI1*certmon-test.pemCERT\r"
             self.sent = True
 
         def close(self):
@@ -328,7 +328,7 @@ def test_transport_opens_shell_and_collects_fragmented_ack(monkeypatch):
     channel = Channel()
     transport = ParamikoDirectTransport()
     monkeypatch.setattr(transport, "_authenticated_transport", lambda *args: Connection())
-    result = transport.ingest(EndpointIdentity("10.0.0.10", 1, "sis", "10.0.0.10", 22023), {}, b"\x1bI1*certmon-test.pem CERT\r", expected_fingerprint="SHA256:known")
+    result = transport.ingest(EndpointIdentity("10.0.0.10", 1, "sis", "10.0.0.10", 22023), {}, b"\x1bI1*certmon-test.pemCERT\r", expected_fingerprint="SHA256:known")
     assert result.write_confirmed and result.received == b"CertI1\r"
 
 
@@ -348,11 +348,16 @@ def test_activation_uses_selected_lan_b_and_fragmented_exact_ack_then_https(tmp_
 
     assert result["status"] == "verified"
     assert transport.sftp_writes[0][0].nic == 2
-    assert transport.sis_commands[0][1] == b"\x1bI2*" + transport.sftp_writes[0][1].encode("ascii") + b" CERT\r"
+    assert transport.sis_commands[0][1] == b"\x1bI2*" + transport.sftp_writes[0][1].encode("ascii") + b"CERT\r"
     assert verified[0]["host"] == "10.0.1.10"
     assert verified[0]["port"] == 8443
     assert transport.deleted
     assert transport.expected_fingerprints == ["SHA256:known"] * 3
+
+
+@pytest.mark.parametrize("nic", [1, 2])
+def test_sis_import_matches_confirmed_putty_command_without_spaces(nic):
+    assert DirectExtronService._sis_command(nic, "certmon.pem") == f"\x1bI{nic}*certmon.pemCERT\r".encode("ascii")
 
 
 @pytest.mark.parametrize("ack", [b"CertI2\r", b"CertI1", b"noise CertI2\r more"])

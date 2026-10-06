@@ -450,7 +450,7 @@ class DirectExtronService:
 
     @staticmethod
     def _sis_command(nic, staged_name):
-        return b"\x1bI" + str(nic).encode("ascii") + b"*" + staged_name.encode("ascii") + b" CERT\r"
+        return b"\x1bI" + str(nic).encode("ascii") + b"*" + staged_name.encode("ascii") + b"CERT\r"
 
     @staticmethod
     def _public_target(target):
