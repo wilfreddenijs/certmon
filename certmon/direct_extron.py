@@ -95,7 +95,10 @@ class ParamikoDirectTransport:
             sftp = paramiko.SFTPClient.from_transport(transport)
             try:
                 sftp.get_channel().settimeout(self.read_timeout)
-                sftp.put(str(local_path), remote_name)
+                attributes = sftp.put(str(local_path), remote_name, confirm=True)
+                if attributes.st_size != Path(local_path).stat().st_size:
+                    raise OSError("Staged PEM size did not match the local file")
+                return {"transfer_verified": True, "remote_size": attributes.st_size}
             finally:
                 sftp.close()
         finally:
@@ -187,7 +190,7 @@ class ParamikoDirectTransport:
                 time.sleep(0.02)
                 continue
             data.extend(channel.recv(min(128, self.max_response_bytes - len(data))))
-            if b"\r" in data:
+            if re.search(rb"(?:^|[\r\n])CertI[12]\r", data):
                 break
         return bytes(data)
 
@@ -283,7 +286,11 @@ class DirectExtronService:
         record = self._record_staged(staged_name, target, certificate_id)
         try:
             with self.artifacts.materialize_private(certificate_id, "combined.pem") as pem_path:
-                self.transport.stage(target.sftp, credentials, pem_path, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
+                staged = self.transport.stage(target.sftp, credentials, pem_path, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
+                if isinstance(staged, dict) and staged.get("transfer_verified") is True:
+                    records = dict(self.database.get_setting(self.STAGED_KEY, {}))
+                    records[staged_name] = dict(records[staged_name], sftp_diagnostics={"transfer_verified": True, "remote_size": staged["remote_size"]})
+                    self.database.put_setting(self.STAGED_KEY, records)
                 exchange = self._exchange(self.transport.ingest(target.sis, credentials, self._sis_command(target.sis.nic, staged_name), expected_fingerprint=self._approved_fingerprint(target.sis)))
         except HostKeyChangedError:
             return self._set_staged(staged_name, "cleanup_pending", response="host_key_changed")
@@ -299,7 +306,7 @@ class DirectExtronService:
             "preloaded": repr(exchange.preloaded[:512]),
         })
         self.database.put_setting(self.STAGED_KEY, records)
-        if exchange.preloaded or not exchange.write_confirmed or not self._exact_ack(exchange.received, target.sis.nic):
+        if exchange.preloaded or not exchange.write_confirmed or not self._exact_ack(exchange.received, target.sis.nic, self._sis_command(target.sis.nic, staged_name)):
             verification = self._verify(target.https, certificate_id)
             return self._set_staged(staged_name, "cleanup_pending", response="ack_rejected", verification=verification.status)
         self._set_staged(staged_name, "staged", known_completion=True)
@@ -425,6 +432,8 @@ class DirectExtronService:
         payload = {"status": result_status or status, "staged_name": name}
         if record.get("sis_diagnostics"):
             payload["sis_diagnostics"] = record["sis_diagnostics"]
+        if record.get("sftp_diagnostics"):
+            payload["sftp_diagnostics"] = record["sftp_diagnostics"]
         if response:
             payload["response"] = response
         if verification:
@@ -446,9 +455,15 @@ class DirectExtronService:
         return value if isinstance(value, SISExchange) else SISExchange(b"", bytes(value), True)
 
     @staticmethod
-    def _exact_ack(value, nic):
+    def _exact_ack(value, nic, command=None):
         expected = f"CertI{nic}".encode("ascii")
-        return value in {expected + b"\r", expected + b"\r\n"}
+        lines = value.replace(b"\r\n", b"\r").split(b"\r")
+        if lines == [expected, b""]:
+            return True
+        if command is None:
+            return False
+        echoes = {command.rstrip(b"\r"), command.rstrip(b"\r").replace(b"\x1b", b"^[")}
+        return len(lines) == 3 and lines[0] in echoes and lines[1:] == [expected, b""]
 
     @staticmethod
     def _sis_command(nic, staged_name):

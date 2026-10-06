@@ -95,6 +95,7 @@ class FakeTransport:
         self.auth_attempts.append((identity, credentials))
         self.expected_fingerprints.append(kwargs.get("expected_fingerprint"))
         self.sftp_writes.append((identity, remote_name))
+        return {"transfer_verified": True, "remote_size": Path(local_path).stat().st_size}
 
     def ingest(self, identity, credentials, command, **kwargs):
         self.auth_attempts.append((identity, credentials))
@@ -361,6 +362,73 @@ def test_sis_missing_reply_has_bounded_wait(monkeypatch):
             return False
     assert ParamikoDirectTransport()._read_response(SilentChannel()) == b""
     assert 30 <= elapsed[0] < 31
+
+
+def test_sis_reader_continues_past_command_echo(monkeypatch):
+    elapsed = [0.0]
+    monkeypatch.setattr("certmon.direct_extron.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("certmon.direct_extron.time.sleep", lambda duration: elapsed.__setitem__(0, elapsed[0] + duration))
+    class EchoChannel:
+        chunks = [b"^[I1*certmon.pemCERT\r\n", b"Cert", b"I1\r\n"]
+        def recv_ready(self):
+            return bool(self.chunks)
+        def recv(self, size):
+            return self.chunks.pop(0)
+    result = ParamikoDirectTransport()._read_response(EchoChannel())
+    assert result == b"^[I1*certmon.pemCERT\r\nCertI1\r\n"
+
+
+@pytest.mark.parametrize("echo", [b"\x1b", b"^["])
+def test_exact_command_echo_then_ack_and_https_complete_upload(tmp_path, echo):
+    class EchoTransport(FakeTransport):
+        def ingest(self, identity, credentials, command, **kwargs):
+            super().ingest(identity, credentials, command, **kwargs)
+            return command[:-1].replace(b"\x1b", echo) + b"\r\nCertI1\r\n"
+    service, _, _, transport = make_service(tmp_path, transport=EchoTransport())
+    approve(service)
+    result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1")
+    assert result["status"] == "verified"
+    assert len(transport.sis_commands) == 1
+    assert len(transport.deleted) == 1
+    assert result["sftp_diagnostics"]["transfer_verified"] is True
+
+
+@pytest.mark.parametrize("response", [
+    b"^[I1*certmon.pemCERT\r\n",
+    b"^[I1*other.pemCERT\r\nCertI1\r\n",
+    b"^[I1*certmon.pemCERT\r\nCertI2\r\n",
+    b"noise\r\nCertI1\r\n",
+    b"^[I1*certmon.pemCERT\r\nCertI1\r\nCertI1\r\n",
+])
+def test_echo_without_exact_unambiguous_ack_never_counts_as_success(response):
+    assert not DirectExtronService._exact_ack(response, 1, b"\x1bI1*certmon.pemCERT\r")
+
+
+@pytest.mark.parametrize("remote_size", [8, 9])
+def test_sftp_stage_confirms_remote_file_size_before_import(tmp_path, monkeypatch, remote_size):
+    from types import SimpleNamespace
+
+    pem = tmp_path / "combined.pem"
+    pem.write_bytes(b"test PEM")
+    calls = []
+    class SFTP:
+        def get_channel(self):
+            return SimpleNamespace(settimeout=lambda timeout: None)
+        def put(self, local, remote, confirm):
+            calls.append((local, remote, confirm))
+            return SimpleNamespace(st_size=remote_size)
+        def close(self):
+            pass
+    transport = ParamikoDirectTransport()
+    monkeypatch.setattr(transport, "_authenticated_transport", lambda *args: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(paramiko.SFTPClient, "from_transport", lambda connection: SFTP())
+    if remote_size == 8:
+        result = transport.stage(EndpointIdentity("10.0.0.10", 1, "sftp", "10.0.0.10", 22022), {}, pem, "certmon.pem", expected_fingerprint="SHA256:known")
+        assert result == {"transfer_verified": True, "remote_size": 8}
+    else:
+        with pytest.raises(OSError, match="size did not match"):
+            transport.stage(EndpointIdentity("10.0.0.10", 1, "sftp", "10.0.0.10", 22022), {}, pem, "certmon.pem", expected_fingerprint="SHA256:known")
+    assert calls == [(str(pem), "certmon.pem", True)]
 
 
 def test_activation_uses_selected_lan_b_and_fragmented_exact_ack_then_https(tmp_path):

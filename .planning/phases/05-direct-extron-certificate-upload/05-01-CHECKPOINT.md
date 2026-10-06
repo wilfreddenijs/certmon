@@ -109,3 +109,24 @@ windowed executable, and bounded escaped SIS reply/pre-send diagnostics in the
 result and persistent staged record. Existing pending jobs are not replayed.
 Targeted direct upload, launcher, UI, CSRF and role suites: 79 passed in 38.69s.
 Physical activation remains an open checkpoint; no Toolbelt retirement.
+
+## Command Framing and Terminal Feedback
+
+The user demonstrated manual SW4 import in PuTTY using
+`ESC I1*certmon.pemCERT CR` with response `CertI1`. Build 27 removed the
+incorrect space before `CERT`. Subsequent UCS SW 313 feedback showed HTTPS
+verification succeeded but no SIS acknowledgement was read. Build 28 requested
+a VT100 PTY and increased the bounded SIS reply wait to 30 seconds.
+
+Build 28 screenshots for SW4 USB Pro and UCS SW 313 now show the command echo
+as the entire captured response and HTTPS verification `verified`. The reader
+stopped at the echo's first carriage return, before a subsequent ACK could be
+read. The user reports both certificates appear to work; this does not establish
+causality or complete the strict automatic activation acceptance gate.
+
+The follow-up reads beyond the echo and accepts only the exact transmitted
+command echo (raw ESC or terminal `^[` notation) followed by the expected NIC
+ACK, or an exact ACK alone. Echo-only, wrong NIC, unrelated output and duplicate
+ACKs remain rejected. SFTP checks remote file size before SIS and persists that
+evidence. Disappearance from FileZilla after import is not yet proven to be
+device-side consumption. No automatic replay of pending imports is added.
