@@ -1,9 +1,38 @@
 import sys
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 import launcher
+
+
+def test_windowed_request_errors_are_logged_once(monkeypatch, tmp_path):
+    path = tmp_path / "certmon_error.log"
+    monkeypatch.setattr(launcher, "log_path", str(path))
+    root = logging.getLogger()
+    original_handlers = list(root.handlers)
+    try:
+        launcher.configure_error_logging()
+        launcher.configure_error_logging()
+        added = [handler for handler in root.handlers if handler not in original_handlers]
+        assert len(added) == 1
+        monkeypatch.setattr(sys, "stderr", None)
+        logger = logging.getLogger("certmon.request.test")
+        logger.info("ordinary request")
+        try:
+            raise ConnectionRefusedError("test endpoint unavailable")
+        except ConnectionRefusedError:
+            logger.exception("Direct Extron host-key probe failed")
+        text = path.read_text(encoding="utf-8")
+        assert text.count("Direct Extron host-key probe failed") == 1
+        assert "ConnectionRefusedError: test endpoint unavailable" in text
+        assert "ordinary request" not in text
+    finally:
+        for handler in list(root.handlers):
+            if handler not in original_handlers:
+                root.removeHandler(handler)
+                handler.close()
 
 
 def test_initialize_application_recovers_jobs_before_returning(monkeypatch, tmp_path):

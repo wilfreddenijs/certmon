@@ -3198,15 +3198,24 @@
     document.getElementById('direct-extron-lan-b-port').disabled = !lanB;
   }
 
+  async function readDirectExtronResponse(res) {
+    const raw = await res.text();
+    let data;
+    try { data = JSON.parse(raw); }
+    catch (_) {
+      throw new Error(`Direct Extron request returned an unexpected response (HTTP ${res.status}). Check the CertMon log for details.`);
+    }
+    if (!res.ok) throw new Error(data.error || `Direct Extron request failed (HTTP ${res.status})`);
+    return data;
+  }
+
   async function directExtronJson(url, body) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Direct Extron request failed');
-    return data;
+    return readDirectExtronResponse(res);
   }
 
   async function saveDirectExtronLanBTarget() {
@@ -3218,8 +3227,7 @@
       const res = await fetch(`/api/direct-extron/targets/${encodeURIComponent(selector)}/lan-b`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, port })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not save LAN B endpoint');
+      const data = await readDirectExtronResponse(res);
       setDirectExtronStatus(`LAN B endpoint saved: ${data.target.host}:${data.target.https_port}`);
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }
@@ -3235,8 +3243,7 @@
       const res = await fetch(`/api/direct-extron/devices/${encodeURIComponent(selector)}/credentials`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not save credentials');
+      const data = await readDirectExtronResponse(res);
       setDirectExtronStatus('Encrypted device credentials saved. Test the connection before activation.');
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }
@@ -3244,8 +3251,10 @@
   async function probeDirectExtron() {
     const fields = directExtronFields();
     invalidateDirectExtronProbe();
+    setDirectExtronStatus('Checking SFTP (22022) and SSH/SIS (22023)...');
     try {
       const result = await directExtronJson('/api/direct-extron/probe', { selector: fields.selector, nic: fields.nic });
+      if (JSON.stringify(fields) !== JSON.stringify(directExtronFields())) return;
       const approve = document.getElementById('direct-extron-approve');
       approve.disabled = !['approval_required', 'host_key_changed'].includes(result.status);
       approve.dataset.fingerprint = result.fingerprint || '';
@@ -3254,7 +3263,18 @@
         directExtronReady = JSON.stringify(fields);
         document.getElementById('direct-extron-activate').disabled = !fields.certificate_id;
       }
-      setDirectExtronStatus(result.fingerprint ? `${result.status}: ${result.identity.connection} ${result.identity.host}:${result.identity.port} ${result.fingerprint}` : result.status, result.status !== 'ready');
+      const endpoint = result.identity ? `${result.identity.connection.toUpperCase()} ${result.identity.host}:${result.identity.port}` : 'device';
+      let message = result.status;
+      if (['approval_required', 'host_key_changed'].includes(result.status)) {
+        message = `${endpoint}: ${result.fingerprint || 'host key changed'}. Approve this key; testing continues automatically. Both ports require approval.`;
+      } else if (result.status === 'authentication_failed') {
+        message = `Sign-in rejected on ${endpoint}. Check Device Credentials. Direct upload uses saved device credentials, otherwise shared credentials; no automatic default or serial-number fallback.`;
+      } else if (result.status === 'connection_failed') {
+        message = `Connection failed on ${endpoint}. Check the device service, network and firewall.`;
+      } else if (result.status === 'ready') {
+        message = 'SFTP and SSH/SIS sign-in successful. Ready to upload certificate.';
+      }
+      setDirectExtronStatus(message, result.status !== 'ready');
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }
 
@@ -3264,7 +3284,9 @@
     try {
       const result = await directExtronJson('/api/direct-extron/host-keys/approve', { selector: fields.selector, nic: fields.nic, connection: approve.dataset.connection, fingerprint: approve.dataset.fingerprint });
       approve.disabled = true;
-      setDirectExtronStatus(`Host key approved: ${result.fingerprint}`);
+      if (JSON.stringify(fields) === JSON.stringify(directExtronFields())) {
+        await probeDirectExtron();
+      }
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }
 
@@ -3278,7 +3300,10 @@
     invalidateDirectExtronProbe();
     try {
       const result = await directExtronJson('/api/direct-extron/activate', fields);
-      setDirectExtronStatus(`Direct activation: ${result.status}`, result.status !== 'verified');
+      const details = [result.response ? `Processing: ${result.response}` : '', result.verification ? `HTTPS verification: ${result.verification}` : ''].filter(Boolean).join('. ');
+      const sisDetails = result.sis_diagnostics ? ` SIS sent: ${result.sis_diagnostics.write_confirmed}. SIS response: ${result.sis_diagnostics.received}. Pre-send: ${result.sis_diagnostics.preloaded}.` : '';
+      const pending = result.status === 'cleanup_pending' ? ' Upload is not confirmed. Do not repeat the upload or clean up while the device may still be processing.' : '';
+      setDirectExtronStatus(`Direct activation: ${result.status}. ${details}${sisDetails}${pending}`, result.status !== 'verified');
       if (result.staged_name && result.status !== 'verified') renderDirectExtronCleanup(result.staged_name);
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }

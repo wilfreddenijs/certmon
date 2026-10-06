@@ -12,6 +12,7 @@ import time
 import webbrowser
 import socket
 import traceback
+import logging
 from pathlib import Path
 
 # When frozen by PyInstaller, add the bundle dir to sys.path
@@ -30,6 +31,23 @@ def log(msg):
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
     except Exception:
         pass
+
+
+def configure_error_logging():
+    """Keep request and SSH errors available in windowed executable builds."""
+    root = logging.getLogger()
+    destination = os.path.abspath(log_path)
+    for handler in root.handlers:
+        if isinstance(handler, logging.FileHandler) and handler.baseFilename == destination:
+            return
+    try:
+        handler = logging.FileHandler(destination, encoding="utf-8")
+    except OSError:
+        log("Could not configure request error logging")
+        return
+    handler.setLevel(logging.ERROR)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    root.addHandler(handler)
 
 # Suppress Werkzeug reloader
 
@@ -65,6 +83,7 @@ def wait_for_server(host, port, timeout=20):
 
 def start_flask(runtime):
     try:
+        configure_error_logging()
         log(f"Starting Flask on {runtime.bind_host}:{runtime.port}")
         log(f"sys.path: {sys.path}")
         log(f"frozen: {getattr(sys, 'frozen', False)}")
@@ -72,7 +91,6 @@ def start_flask(runtime):
             log(f"_MEIPASS: {sys._MEIPASS}")
             log(f"_MEIPASS contents: {os.listdir(sys._MEIPASS)}")
 
-        import logging
         log_wz = logging.getLogger("werkzeug")
         log_wz.setLevel(logging.ERROR)
 

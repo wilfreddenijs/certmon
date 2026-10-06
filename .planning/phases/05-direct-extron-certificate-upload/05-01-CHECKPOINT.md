@@ -92,3 +92,20 @@ TimeoutError in the browser fixture's initial HTTP readiness request, before
 role assertions. Both parameterized role-union cases passed on retry (2 passed
 in 33.50s). The 19 direct-upload tests passed. Physical one-LAN/two-LAN upload
 acceptance and packaged-runtime verification remain pending.
+
+## Build 25 Physical Feedback / Diagnostic Follow-up
+
+On 2026-10-06 the user reported SFTP TCP 22022 reachable but TCP 22023
+unavailable on the tested IPL device. The SW4 USB Pro supports both ports.
+Host-key approval required unexplained repeated test clicks. A later SW4
+activation produced two pending records for selector 10.10.116.187 with
+`verification=different_certificate` and `known_completion=false`.
+No successful activation or hardware acceptance is claimed.
+
+User approved a diagnostic follow-up build. It adds endpoint-specific network
+and authentication messages, automatic re-probe after explicit key approval
+(never automatic key approval or activation), request error logging in the
+windowed executable, and bounded escaped SIS reply/pre-send diagnostics in the
+result and persistent staged record. Existing pending jobs are not replayed.
+Targeted direct upload, launcher, UI, CSRF and role suites: 79 passed in 38.69s.
+Physical activation remains an open checkpoint; no Toolbelt retirement.

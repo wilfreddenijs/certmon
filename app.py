@@ -46,7 +46,7 @@ from certmon.acme_service import (
     NativeACMEOrderClient,
 )
 from certmon.deployment import DeploymentService, ExtronDeploymentAdapter
-from certmon.direct_extron import DirectExtronService
+from certmon.direct_extron import DirectConnectionError, DirectExtronService
 from certmon.dns.cloudflare import CloudflareDNSProvider, CloudflareError
 from certmon.dns.manual import ManualDNSProvider
 from certmon.external_ca import ExternalCAService
@@ -2049,6 +2049,10 @@ def direct_extron_probe():
         result = direct_extron_service.probe_one(
             selector=body.get("selector"), nic=body.get("nic", 1)
         )
+    except DirectConnectionError as error:
+        app.logger.exception("Direct Extron host-key probe failed")
+        audit("direct_extron_probe", target=body.get("selector"), success=False)
+        return jsonify({"error": str(error), "status": "connection_failed"}), 502
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     audit("direct_extron_probe", target=body.get("selector"), success=result.get("status") == "ready")
@@ -2065,6 +2069,10 @@ def direct_extron_approve_host_key():
         result = direct_extron_service.approve_host_key(
             selector=body.get("selector"), nic=body.get("nic", 1), fingerprint=body.get("fingerprint"), **({"connection": body["connection"]} if "connection" in body else {})
         )
+    except DirectConnectionError as error:
+        app.logger.exception("Direct Extron host-key approval failed")
+        audit("direct_extron_host_key_approved", target=body.get("selector"), success=False)
+        return jsonify({"error": str(error), "status": "connection_failed"}), 502
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     audit("direct_extron_host_key_approved", target=body.get("selector"))
@@ -2081,6 +2089,10 @@ def direct_extron_activate():
         result = direct_extron_service.activate_one(
             selector=body.get("selector"), nic=body.get("nic", 1), certificate_id=body.get("certificate_id")
         )
+    except DirectConnectionError as error:
+        app.logger.exception("Direct Extron pre-upload host-key check failed")
+        audit("direct_extron_activation", target=body.get("selector"), success=False)
+        return jsonify({"error": str(error), "status": "connection_failed"}), 502
     except (KeyError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
     audit("direct_extron_activation", target=body.get("selector"), success=result.get("status") == "verified", details={"status": result.get("status")})

@@ -3,9 +3,10 @@ import importlib
 from pathlib import Path
 
 import pytest
+import paramiko
 
 from certmon.deployment import VerificationResult
-from certmon.direct_extron import DirectExtronService, EndpointIdentity, SISExchange, ParamikoDirectTransport
+from certmon.direct_extron import DirectConnectionError, DirectExtronService, EndpointIdentity, SISExchange, ParamikoDirectTransport
 from tests.test_auth_api import load_app as load_server_app
 
 
@@ -131,6 +132,52 @@ class FakeRouteService:
 
     def recover_staged(self):
         return []
+
+
+@pytest.mark.parametrize("port", [22022, 22023])
+@pytest.mark.parametrize("error,reason", [
+    (TimeoutError("sensitive diagnostic"), "timed out"),
+    (ConnectionRefusedError("sensitive diagnostic"), "refused"),
+    (paramiko.SSHException("sensitive diagnostic"), "SSH negotiation failed"),
+])
+def test_host_key_network_failure_is_safe_and_prevents_authentication(tmp_path, port, error, reason):
+    class UnreachableTransport(FakeTransport):
+        def host_key_fingerprint(self, identity):
+            if identity.port == port:
+                raise error
+            return super().host_key_fingerprint(identity)
+
+    service, database, artifacts, transport = make_service(tmp_path, transport=UnreachableTransport())
+    with pytest.raises(DirectConnectionError) as failure:
+        service.probe_one(selector="10.0.0.10")
+    assert f"10.0.0.10:{port}" in str(failure.value)
+    assert reason in str(failure.value)
+    assert "sensitive diagnostic" not in str(failure.value)
+    assert transport.auth_attempts == []
+    assert artifacts.materializations == 0
+    assert database.settings == {}
+
+
+@pytest.mark.parametrize("endpoint,method", [
+    ("probe", "probe_one"), ("host-keys/approve", "approve_host_key"), ("activate", "activate_one"),
+])
+def test_host_key_network_failure_routes_return_json(tmp_data_dir, monkeypatch, endpoint, method):
+    import app
+
+    module = importlib.reload(app)
+    service = FakeRouteService()
+    def fail(**kwargs):
+        raise DirectConnectionError(EndpointIdentity("10.0.0.10", 1, "sis", "10.0.0.10", 22023), "connection refused")
+    monkeypatch.setattr(service, method, fail)
+    module.direct_extron_service = service
+    module.artifact_store = object()
+    module.vault = object()
+    monkeypatch.setattr(module, "authorize", lambda permission: None)
+    response = module.app.test_client().post(f"/api/direct-extron/{endpoint}", json={"selector": "10.0.0.10"})
+    assert response.status_code == 502
+    assert response.is_json
+    assert response.get_json()["status"] == "connection_failed"
+    assert "10.0.0.10:22023" in response.get_json()["error"]
 
 
 def make_service(tmp_path, *, transport=None, verifier=None):
@@ -318,6 +365,12 @@ def test_wrong_or_ambiguous_ack_never_replays_sis(tmp_path, ack):
 
     assert result["status"] in {"ack_rejected", "cleanup_pending"}
     assert len(transport.sis_commands) == 1
+    assert result["response"] == "ack_rejected"
+    assert service.recover_staged()[0]["response"] == "ack_rejected"
+    assert service.recover_staged()[0]["verification"] == result["verification"]
+    assert result["sis_diagnostics"]["received"] == repr(ack)
+    assert result["sis_diagnostics"]["write_confirmed"] is True
+    assert service.recover_staged()[0]["sis_diagnostics"] == result["sis_diagnostics"]
 
 
 def test_preloaded_ack_verifies_first_and_survives_restart_for_guarded_cleanup(tmp_path):
@@ -355,7 +408,8 @@ def test_per_device_credentials_never_fall_back_after_authentication_failure(tmp
 
     result = service.probe_one(selector="10.0.0.10", nic=1)
 
-    assert result == {"status": "authentication_failed"}
+    assert result["status"] == "authentication_failed"
+    assert result["identity"]["port"] == 22022
     assert len(transport.auth_attempts) == 1
     assert transport.auth_attempts[0][1]["username"] == "operator"
     assert "secret" not in repr(result)
@@ -493,3 +547,66 @@ def test_device_dialog_selects_direct_upload_without_typing_or_network(page, liv
     expect(page.locator('#direct-extron-certificate')).to_have_attribute('readonly', '')
     expect(page.locator('#direct-extron-activate')).to_be_disabled()
     assert not any('/api/direct-extron/probe' in url or '/api/direct-extron/activate' in url for url in requests)
+
+
+def test_direct_probe_html_error_has_actionable_message_and_no_upload(page, live_certmon):
+    from playwright.sync_api import expect
+
+    certmon = live_certmon(server_mode=False)
+    page.route('**/api/direct-extron/probe', lambda route: route.fulfill(status=500, content_type='text/html', body='<!doctype html><title>Server error</title>'))
+    page.goto(certmon.base_url)
+    page.wait_for_function("typeof switchTab === 'function'")
+    page.evaluate("switchTab('upload')")
+    page.locator('button[onclick="probeDirectExtron()"]').click()
+    expect(page.locator('#direct-extron-status')).to_contain_text('HTTP 500')
+    expect(page.locator('#direct-extron-status')).to_contain_text('Check the CertMon log')
+    expect(page.locator('#direct-extron-activate')).to_be_disabled()
+    expect(page.locator('#direct-extron-approve')).to_be_disabled()
+
+
+def test_host_key_approval_continues_test_without_extra_test_clicks(page, live_certmon):
+    from playwright.sync_api import expect
+
+    certmon = live_certmon(server_mode=False)
+    probes = []
+    approvals = []
+    def probe(route):
+        probes.append(route.request.post_data_json)
+        if len(probes) <= 2:
+            connection, port = ('sftp', 22022) if len(probes) == 1 else ('sis', 22023)
+            route.fulfill(json={"status": "approval_required", "fingerprint": f"SHA256:{connection}", "identity": {"connection": connection, "host": "10.0.0.10", "port": port}})
+        else:
+            route.fulfill(json={"status": "ready"})
+    def approve_key(route):
+        approvals.append(route.request.post_data_json)
+        route.fulfill(json={"status": "approved", "fingerprint": approvals[-1]["fingerprint"]})
+    page.route('**/api/direct-extron/probe', probe)
+    page.route('**/api/direct-extron/host-keys/approve', approve_key)
+    page.goto(certmon.base_url)
+    page.wait_for_function("typeof switchTab === 'function'")
+    page.evaluate("switchTab('upload')")
+    page.locator('button[onclick="probeDirectExtron()"]').click()
+    expect(page.locator('#direct-extron-status')).to_contain_text('SFTP 10.0.0.10:22022')
+    expect(page.locator('#direct-extron-status')).to_contain_text('testing continues automatically')
+    page.locator('#direct-extron-approve').click()
+    expect(page.locator('#direct-extron-status')).to_contain_text('SIS 10.0.0.10:22023')
+    assert len(approvals) == 1
+    page.locator('#direct-extron-approve').click()
+    expect(page.locator('#direct-extron-status')).to_contain_text('sign-in successful')
+    assert len(probes) == 3
+    assert [item['connection'] for item in approvals] == ['sftp', 'sis']
+
+
+def test_sis_authentication_failure_reports_the_correct_port(tmp_path):
+    class RejectingSISTransport(FakeTransport):
+        def probe_credentials(self, identity, credentials, **kwargs):
+            super().probe_credentials(identity, credentials, **kwargs)
+            if identity.connection == "sis":
+                raise PermissionError("bad password")
+    service, _, _, transport = make_service(tmp_path, transport=RejectingSISTransport())
+    approve(service)
+    result = service.probe_one(selector="10.0.0.10")
+    assert result["status"] == "authentication_failed"
+    assert result["identity"]["connection"] == "sis"
+    assert result["identity"]["port"] == 22023
+    assert len(transport.auth_attempts) == 2

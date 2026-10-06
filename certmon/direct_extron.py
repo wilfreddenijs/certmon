@@ -61,6 +61,12 @@ class HostKeyChangedError(RuntimeError):
     pass
 
 
+class DirectConnectionError(ValueError):
+    def __init__(self, identity, reason):
+        self.identity = identity
+        super().__init__(f"{identity.connection.upper()} connection to {identity.host}:{identity.port} failed: {reason}")
+
+
 class ParamikoDirectTransport:
     """One fresh Paramiko transport per direct connection, with bounded I/O."""
 
@@ -239,11 +245,11 @@ class DirectExtronService:
             for identity in (target.sftp, target.sis):
                 self.transport.probe_credentials(identity, credentials, expected_fingerprint=self._approved_fingerprint(identity))
         except HostKeyChangedError:
-            return {"status": "host_key_changed", "identity": self._identity_dict(target.sftp)}
+            return {"status": "host_key_changed", "identity": self._identity_dict(identity)}
         except (paramiko.AuthenticationException, PermissionError):
-            return {"status": "authentication_failed"}
+            return {"status": "authentication_failed", "identity": self._identity_dict(identity)}
         except (OSError, paramiko.SSHException):
-            return {"status": "connection_failed"}
+            return {"status": "connection_failed", "identity": self._identity_dict(identity)}
         return {"status": "ready", "target": self._public_target(target)}
 
     def approve_host_key(self, *, selector, nic=1, fingerprint, connection=None):
@@ -283,7 +289,14 @@ class DirectExtronService:
             return self._set_staged(staged_name, "cleanup_pending", response="authentication_failed", result_status="authentication_failed")
         except (OSError, paramiko.SSHException):
             verification = self._verify(target.https, certificate_id)
-            return self._set_staged(staged_name, "cleanup_pending", verification=verification.status)
+            return self._set_staged(staged_name, "cleanup_pending", response="transport_interrupted", verification=verification.status)
+        records = dict(self.database.get_setting(self.STAGED_KEY, {}))
+        records[staged_name] = dict(records[staged_name], sis_diagnostics={
+            "write_confirmed": exchange.write_confirmed,
+            "received": repr(exchange.received[:512]),
+            "preloaded": repr(exchange.preloaded[:512]),
+        })
+        self.database.put_setting(self.STAGED_KEY, records)
         if exchange.preloaded or not exchange.write_confirmed or not self._exact_ack(exchange.received, target.sis.nic):
             verification = self._verify(target.https, certificate_id)
             return self._set_staged(staged_name, "cleanup_pending", response="ack_rejected", verification=verification.status)
@@ -345,7 +358,20 @@ class DirectExtronService:
     def _observed_keys(self, target):
         result = {}
         for identity in (target.sftp, target.sis):
-            observed = self.transport.host_key_fingerprint(identity)
+            try:
+                observed = self.transport.host_key_fingerprint(identity)
+            except (OSError, paramiko.SSHException) as error:
+                if isinstance(error, TimeoutError):
+                    reason = "connection timed out; check device reachability and firewall rules"
+                elif isinstance(error, ConnectionRefusedError):
+                    reason = "connection refused; check that the device service is enabled"
+                elif isinstance(error, socket.gaierror):
+                    reason = "host address could not be resolved"
+                elif isinstance(error, paramiko.SSHException):
+                    reason = "SSH negotiation failed; check the device SSH service and firmware"
+                else:
+                    reason = "network connection failed; check device reachability and firewall rules"
+                raise DirectConnectionError(identity, reason) from error
             result[identity] = observed if isinstance(observed, tuple) else ("ssh", observed)
         return result
 
@@ -388,11 +414,15 @@ class DirectExtronService:
         record["status"] = status
         if verification:
             record["verification"] = verification
+        if response:
+            record["response"] = response
         if known_completion is not None:
             record["known_completion"] = known_completion
         records[name] = record
         self.database.put_setting(self.STAGED_KEY, records)
         payload = {"status": result_status or status, "staged_name": name}
+        if record.get("sis_diagnostics"):
+            payload["sis_diagnostics"] = record["sis_diagnostics"]
         if response:
             payload["response"] = response
         if verification:
