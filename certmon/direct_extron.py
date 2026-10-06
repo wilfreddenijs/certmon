@@ -207,12 +207,13 @@ class DirectExtronService:
     HOST_KEYS_KEY = HOST_KEYS_KEY
     STAGED_KEY = STAGED_KEY
 
-    def __init__(self, database, artifacts, vault, *, transport=None, verifier=None):
+    def __init__(self, database, artifacts, vault, *, transport=None, verifier=None, verification_timeout=30):
         self.database = database
         self.artifacts = artifacts
         self.vault = vault
         self.transport = transport or ParamikoDirectTransport()
         self.verifier = verifier or verify_device_certificate
+        self.verification_timeout = verification_timeout
 
     def target_for(self, selector, nic=1):
         selector = self._selector(selector)
@@ -315,7 +316,7 @@ class DirectExtronService:
             verification = self._verify(target.https, certificate_id)
             return self._set_staged(staged_name, "cleanup_pending", response="ack_rejected", verification=verification.status)
         self._set_staged(staged_name, "staged", known_completion=True)
-        verification = self._verify(target.https, certificate_id)
+        verification = self._verify(target.https, certificate_id, wait_for_activation=True)
         if verification.status != "verified":
             return self._set_staged(staged_name, "cleanup_pending", verification=verification.status, known_completion=True)
         try:
@@ -445,7 +446,7 @@ class DirectExtronService:
             payload["verification"] = verification
         return payload
 
-    def _verify(self, endpoint, certificate_id):
+    def _verify(self, endpoint, certificate_id, *, wait_for_activation=False):
         try:
             certificate_pem = self.artifacts.read_public(certificate_id, "certificate.pem")
             certificate = x509.load_pem_x509_certificate(certificate_pem)
@@ -453,7 +454,13 @@ class DirectExtronService:
             material = DeploymentMaterial(certificate_id, certificate_pem, fingerprint, self.artifacts)
         except AttributeError:
             material = SimpleNamespace(expected_fingerprint="")
-        return self.verifier(endpoint.device(), material)
+        deadline = time.monotonic() + (self.verification_timeout if wait_for_activation else 0)
+        while True:
+            result = self.verifier(endpoint.device(), material)
+            remaining = deadline - time.monotonic()
+            if result.status == "verified" or remaining <= 0:
+                return result
+            time.sleep(min(1, remaining))
 
     @staticmethod
     def _exchange(value):

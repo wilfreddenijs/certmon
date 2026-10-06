@@ -445,6 +445,40 @@ def test_terminal_ack_preserves_exact_nic_and_single_response(ending):
     assert not DirectExtronService._exact_ack(echo + b"CertI1\r\nCertI1" + ending, 1, command)
 
 
+def test_confirmed_import_waits_for_https_switch_without_reupload(tmp_path, monkeypatch):
+    elapsed = [0.0]
+    monkeypatch.setattr("certmon.direct_extron.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("certmon.direct_extron.time.sleep", lambda duration: elapsed.__setitem__(0, elapsed[0] + duration))
+    observations = []
+    def verifier(endpoint, material):
+        observations.append(endpoint)
+        status = ["different_certificate", "unreachable", "verified"][len(observations) - 1]
+        return VerificationResult(status, "expected", "expected" if status == "verified" else "old")
+    service, _, _, transport = make_service(tmp_path, verifier=verifier)
+    approve(service)
+    result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1")
+    assert result["status"] == "verified"
+    assert elapsed[0] == 2
+    assert len(observations) == 3
+    assert len(transport.sftp_writes) == len(transport.sis_commands) == len(transport.deleted) == 1
+
+
+def test_https_switch_timeout_is_not_success_and_never_replays_import(tmp_path, monkeypatch):
+    elapsed = [0.0]
+    monkeypatch.setattr("certmon.direct_extron.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("certmon.direct_extron.time.sleep", lambda duration: elapsed.__setitem__(0, elapsed[0] + duration))
+    service, _, _, transport = make_service(tmp_path, verifier=lambda *args: VerificationResult("different_certificate", "expected", "old"))
+    service.verification_timeout = 3
+    approve(service)
+    result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1")
+    assert result["status"] == "cleanup_pending"
+    assert result["verification"] == "different_certificate"
+    assert service.recover_staged()[0]["known_completion"] is True
+    assert elapsed[0] == 3
+    assert len(transport.sftp_writes) == len(transport.sis_commands) == 1
+    assert not transport.deleted
+
+
 @pytest.mark.parametrize("remote_size", [8, 9])
 def test_sftp_stage_confirms_remote_file_size_before_import(tmp_path, monkeypatch, remote_size):
     from types import SimpleNamespace

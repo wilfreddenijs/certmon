@@ -3298,6 +3298,7 @@
     }
     if (!confirm(`Activate certificate ${fields.certificate_id} on ${fields.selector}, LAN ${fields.nic === 1 ? 'A' : 'B'}?`)) return;
     invalidateDirectExtronProbe();
+    setDirectExtronStatus('Uploading certificate and waiting for SIS and HTTPS confirmation...');
     try {
       const result = await directExtronJson('/api/direct-extron/activate', fields);
       const details = [result.response ? `Processing: ${result.response}` : '', result.verification ? `HTTPS verification: ${result.verification}` : ''].filter(Boolean).join('. ');

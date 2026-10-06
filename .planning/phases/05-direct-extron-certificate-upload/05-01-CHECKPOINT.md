@@ -143,3 +143,19 @@ rejected. Cleanup now treats only SFTP ENOENT as already cleaned; permission
 and other I/O failures still surface. Existing historical jobs are not replayed
 or automatically marked complete. Targeted regression suites: 99 passed in
 41.71s. Final automatic success/cleanup confirmation on hardware remains open.
+
+## Build 31 Device Feedback
+
+The user confirmed SW4 USB Pro automatic upload completed without an error
+and the certificate works; screenshot shows `verified`, SFTP size confirmation,
+the SIS echo and `CertI1` acknowledgement. UCS SW 313 also acknowledged import,
+but the immediate HTTPS observation returned `different_certificate`; the user
+subsequently confirmed its certificate works. This suggests HTTPS activation
+propagation, not a missing SIS acknowledgement.
+
+After a confirmed SIS import, the follow-up retries only read-only HTTPS
+fingerprint verification for a bounded 30-second window, exits early on a match,
+and never replays SFTP or SIS. Persistent mismatch remains pending. Regression
+tests cover delayed success, temporary unreachability and timeout without replay.
+Targeted suites: 94 passed in 46.16s. UCS final automated verification and LAN B
+hardware acceptance remain open; Toolbelt retirement is not approved.
