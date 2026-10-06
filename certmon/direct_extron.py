@@ -70,9 +70,10 @@ class DirectConnectionError(ValueError):
 class ParamikoDirectTransport:
     """One fresh Paramiko transport per direct connection, with bounded I/O."""
 
-    def __init__(self, *, connect_timeout=8, read_timeout=5, max_response_bytes=512):
+    def __init__(self, *, connect_timeout=8, read_timeout=5, sis_response_timeout=30, max_response_bytes=512):
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
+        self.sis_response_timeout = sis_response_timeout
         self.max_response_bytes = max_response_bytes
 
     def host_key_fingerprint(self, identity):
@@ -106,6 +107,7 @@ class ParamikoDirectTransport:
             channel = transport.open_session(timeout=self.connect_timeout)
             try:
                 channel.settimeout(self.read_timeout)
+                channel.get_pty(term="vt100")
                 channel.invoke_shell()
                 preloaded = self._drain(channel)
                 if b"CertI" in preloaded:
@@ -179,7 +181,7 @@ class ParamikoDirectTransport:
 
     def _read_response(self, channel):
         data = bytearray()
-        deadline = time.monotonic() + self.read_timeout
+        deadline = time.monotonic() + self.sis_response_timeout
         while time.monotonic() < deadline and len(data) < self.max_response_bytes:
             if not channel.recv_ready():
                 time.sleep(0.02)

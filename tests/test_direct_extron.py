@@ -295,6 +295,7 @@ def test_transport_opens_shell_and_collects_fragmented_ack(monkeypatch):
     class Channel:
         def __init__(self):
             self.shell = False
+            self.terminal = False
             self.sent = False
             self.chunks = [b"Cert", b"I1\r"]
 
@@ -302,7 +303,12 @@ def test_transport_opens_shell_and_collects_fragmented_ack(monkeypatch):
             pass
 
         def invoke_shell(self):
+            assert self.terminal
             self.shell = True
+
+        def get_pty(self, term):
+            assert term == "vt100"
+            self.terminal = True
 
         def recv_ready(self):
             return self.sent and bool(self.chunks)
@@ -330,6 +336,31 @@ def test_transport_opens_shell_and_collects_fragmented_ack(monkeypatch):
     monkeypatch.setattr(transport, "_authenticated_transport", lambda *args: Connection())
     result = transport.ingest(EndpointIdentity("10.0.0.10", 1, "sis", "10.0.0.10", 22023), {}, b"\x1bI1*certmon-test.pemCERT\r", expected_fingerprint="SHA256:known")
     assert result.write_confirmed and result.received == b"CertI1\r"
+
+
+def test_sis_reply_after_five_seconds_is_collected_without_resending(monkeypatch):
+    elapsed = [0.0]
+    monkeypatch.setattr("certmon.direct_extron.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("certmon.direct_extron.time.sleep", lambda duration: elapsed.__setitem__(0, elapsed[0] + duration))
+    class LateChannel:
+        def recv_ready(self):
+            return elapsed[0] >= 6
+        def recv(self, size):
+            return b"CertI1\r"
+    transport = ParamikoDirectTransport()
+    assert transport._read_response(LateChannel()) == b"CertI1\r"
+    assert 6 <= elapsed[0] < 7
+
+
+def test_sis_missing_reply_has_bounded_wait(monkeypatch):
+    elapsed = [0.0]
+    monkeypatch.setattr("certmon.direct_extron.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("certmon.direct_extron.time.sleep", lambda duration: elapsed.__setitem__(0, elapsed[0] + duration))
+    class SilentChannel:
+        def recv_ready(self):
+            return False
+    assert ParamikoDirectTransport()._read_response(SilentChannel()) == b""
+    assert 30 <= elapsed[0] < 31
 
 
 def test_activation_uses_selected_lan_b_and_fragmented_exact_ack_then_https(tmp_path):

@@ -3302,7 +3302,7 @@
       const result = await directExtronJson('/api/direct-extron/activate', fields);
       const details = [result.response ? `Processing: ${result.response}` : '', result.verification ? `HTTPS verification: ${result.verification}` : ''].filter(Boolean).join('. ');
       const sisDetails = result.sis_diagnostics ? ` SIS sent: ${result.sis_diagnostics.write_confirmed}. SIS response: ${result.sis_diagnostics.received}. Pre-send: ${result.sis_diagnostics.preloaded}.` : '';
-      const pending = result.status === 'cleanup_pending' ? ' Upload is not confirmed. Do not repeat the upload or clean up while the device may still be processing.' : '';
+      const pending = result.status === 'cleanup_pending' ? (result.verification === 'verified' ? ' The selected HTTPS certificate is active, but SIS completion is unconfirmed. Do not repeat the upload or clean up while processing may continue.' : ' Upload is not confirmed. Do not repeat the upload or clean up while the device may still be processing.') : '';
       setDirectExtronStatus(`Direct activation: ${result.status}. ${details}${sisDetails}${pending}`, result.status !== 'verified');
       if (result.staged_name && result.status !== 'verified') renderDirectExtronCleanup(result.staged_name);
     } catch (error) { setDirectExtronStatus(error.message, true); }
