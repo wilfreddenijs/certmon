@@ -2,6 +2,12 @@
 
 CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certificates, and deploys stored certificates to supported devices such as Extron products.
 
+This guide describes the application through **v1.0 build 48** (2026-10-08),
+source `61e6b94b729c232d5f6fefe73c84dabe349a80c6`.
+[Build 48](https://github.com/wilfreddenijs/certmon/actions/runs/37696698593)
+contains the Windows executable. Download the `CertMon-Windows` artifact while
+it is retained by GitHub Actions.
+
 ## Security Status
 
 CertMon starts in desktop mode by default and binds to `127.0.0.1`. LAN binding is refused unless explicit server mode is enabled.
@@ -95,17 +101,107 @@ For team trust distribution, use **Local CA** > **Trust bundle**. The bundle con
 
 For Cloudflare automation, create an API token limited to `Zone:DNS:Edit` and `Zone:Zone:Read` for only the zones CertMon manages. Do not use the Global API Key.
 
-## Extron Toolbelt Batch Upload
+## Devices And Certificate Preparation
 
-The Upload tab contains a **Toolbelt batch upload** section for Extron devices. It is separate from the generic/manual upload flow.
+The **Devices** tab shows scanned TLS endpoints and their current certificates.
+The filter and selection toolbar stays visible while scrolling.
 
-- The device list comes from CertMon's Local CA Extron mapping, the same data exported as `devices.txt`.
+- Filter by certificate validity and whether a Local CA certificate has been created.
+- The **Certificate issuer** filter lists the issuers found in the inventory,
+  including self-signed certificates. Enable **Exclude** to hide the selected issuer.
+- **Product / device name** matches part of the displayed device name, for example
+  `TLP`, `IPLP`, or `ShareLink`; it is a text filter, not a model-discovery guarantee.
+- Select devices and choose **Create certificates** to prepare their Local CA certificates.
+- **Refresh all devices** rereads every known endpoint, including devices hidden
+  by filters. Up to four checks run concurrently; progress and failed checks are shown.
+  Individual device refresh remains available. Unreachable endpoints are not reported
+  as successfully refreshed and may retain their previous certificate data.
+
+The prepared Upload list has one row per device address. Creating another certificate
+for a device already in the list asks whether to cancel or replace its upload
+certificate. Replacing the selection does not erase the older stored certificate.
+
+The **Local CA** tab manages the root CA, trust installation/distribution, encrypted
+CA backups and certificate issuance. Individual certificate downloads are centralized
+under **Upload** > **Certificate downloads**, not duplicated in Local CA.
+
+## Upload Workspace
+
+The **Upload** tab uses one prepared-device list. Choose **Direct** or **Toolbelt**
+as the upload method for each device, then select the devices for that method's
+batch controls. **Device Credentials** configures one device; **Shared Device
+Credentials** configures the shared credentials. Passwords are stored encrypted.
+
+For Direct devices, select **LAN A** or **LAN B** per device, not for the whole batch.
+LAN B also requires its reachable HTTPS host and port. A connection test is not
+an upload and does not activate a certificate.
+
+After an actual Direct or Toolbelt batch finishes, CertMon's browser workspace
+automatically rereads the involved monitored devices and updates the Devices view.
+Dry-runs and connection tests do not trigger this refresh. A device that is still
+restarting or unreachable may need a later refresh.
+
+### Successful Upload Cleanup And Audit
+
+The **Remove successful uploads from this list after batch completion** checkbox
+is off by default and its setting is saved. When enabled, a finished upload batch
+removes only successful entries from the prepared list; failed or unconfirmed
+uploads remain for review. Tests do not clear the list. Stopped or failed batches
+retain their entries. A verified individual Direct upload can also remove its entry
+when the option is enabled.
+
+This cleanup hides upload-list entries; it does **not** delete stored certificates,
+private keys, device credentials or scanned devices. Downloads remain available,
+and issuing a new certificate for the same device makes it available for upload again.
+
+Before entries are hidden, **Audit** records each successful and unsuccessful upload
+with the device address, certificate ID, upload method, run ID, result and interface
+where available. These records remain after cleanup. If results cannot be saved to
+Audit, automatic list cleanup is not performed. Upload result records do not contain
+passwords, private keys or PEM contents.
+
+### Direct Extron Upload (SFTP + SIS)
+
+1. Prepare an Extron-compatible Local CA certificate and select **Direct** beside the device.
+2. Save the device or shared credentials and review its LAN interface/HTTPS endpoint.
+3. Select **Test selected Direct devices**. Batch testing stores previously unseen
+   SSH host keys automatically on first use; a changed saved key blocks the device
+   for review. First-use acceptance is not an independent identity check, so use a
+   trusted network and the intended device addresses.
+4. Select **Upload selected Direct devices** and confirm the batch. Devices are
+   processed sequentially; **Stop after current device** stops before the next device.
+
+Direct upload stages the combined certificate/private-key PEM over SFTP on TCP
+22022 and sends the SIS import command over SSH on TCP 22023. Success requires
+the import acknowledgement and verification that the selected HTTPS endpoint
+presents the expected certificate. SFTP transfer alone is not upload success.
+Normal Direct import does not request a reboot.
+
+Confirmed imports clean up the temporary staged PEM. An unconfirmed import or
+cleanup failure remains visible for review; do not repeatedly upload or delete
+staged files while the device may still be processing. Use the offered cleanup
+confirmation only after confirming that processing has finished.
+
+**Open upload** provides individual connection, host-key approval, upload and
+certificate-removal controls. Removing the device certificate targets the chosen
+LAN interface and keeps the certificate stored in CertMon.
+
+Direct upload has been exercised on SW4 USB Pro, UCS SW 313 and UCS 303 devices.
+This is not a compatibility guarantee for every Extron model, firmware or LAN B setup.
+
+### Extron Toolbelt Batch Upload
+
+Toolbelt uses the same prepared-device list as Direct upload. It requires Extron
+Toolbelt on the Windows computer running CertMon.
+
+- The device list comes from stored Extron-compatible Local CA certificates.
 - Select **Test Toolbelt upload** to run a dry-run first. Dry-run prepares Toolbelt targeting and fields, but does not click Apply and does not reboot devices.
-- Each device is entered through Toolbelt's **Add** dialog using its address and saved credentials. CertMon then opens the exact matching IP row and continues through **Manage** > **Utilities**. It does not start Discovery. Existing devices stay in place and are located by address, not row position.
+- Each device is entered through Toolbelt's **Add** dialog using its address and credentials. CertMon opens management by clicking the exact matching IP row once, then continues to the certificate controls in **Utilities**. It does not start Discovery or make a redundant second Manage click. Existing devices stay in place and are located by address, not row position.
 - Real upload requires an explicit **Start Toolbelt upload** click and is enabled only for selected devices whose dry-run is OK.
 - **Stop after current device** requests a safe stop before the next device starts; it does not force-kill an active Toolbelt operation.
 - CertMon materializes the Extron combined PEM only in a temporary server-side run folder and deletes it after the run.
-- Per-device and shared device credentials are stored encrypted. CertMon tries saved per-device credentials first, then the shared device password if configured, then `admin` / `extron`, then `admin` / the serial number read from Toolbelt discovery during dry-run. If the serial number is not visible, choose **Fields** > **Serial Number** in Toolbelt and retry dry-run; if **Fields** is hidden, open the toolbar overflow menu, and if the serial column is off-screen, scroll right or move the splitter.
+- Saved per-device credentials override the shared credential configuration. Without a per-device override, CertMon tries the shared password if configured, then `extron`, then the serial number available from Toolbelt's device list, using the shared username or `admin` by default. If the serial number is not visible, choose **Fields** > **Serial Number** in Toolbelt and retry dry-run; if **Fields** is hidden, open the toolbar overflow menu, and if the serial column is off-screen, scroll right or move the splitter.
+- An explicit **Authentication Failed** response advances to the next credential candidate without waiting for the full connection timeout. **Device Unreachable** ends that device's attempt without password retries and lets the batch continue to the next device.
 
 First-run Toolbelt checklist:
 
@@ -113,6 +209,25 @@ First-run Toolbelt checklist:
 2. Run Toolbelt and CertMon at the same privilege level. If Toolbelt is elevated, CertMon/launcher must also be elevated.
 3. Save the device password in CertMon. Serial-number fallback can use an existing device row; it cannot read the serial number of a device that has not yet been added successfully.
 4. Confirm dry-run status in CertMon before starting a real upload.
+
+### Certificate Downloads And Manual Installation
+
+Expand **Upload** > **Certificate downloads** and choose a certificate/device pair.
+The selected identity and download filenames change with the selection.
+
+- Public certificate and chain downloads are separate from private-key export.
+- Extron-compatible certificates offer a combined PEM containing the certificate
+  and private key. **Download all Extron PEMs (.zip)** exports all stored Extron
+  combined PEMs, including certificates whose successful upload entries were hidden.
+- Generic devices can use the separate certificate, chain and private-key files
+  according to their own import requirements.
+- **Upload Guide** describes Direct, Toolbelt and manual installation. Device-specific
+  manual instructions appear with the selected downloads.
+
+This section downloads files; it does not upload them to a device. Combined PEMs,
+private-key files and ZIP exports contain secrets and require private-export permission.
+Protect them and remove local copies when they are no longer needed. The obsolete
+`devices.txt` download button is no longer part of the UI.
 
 ## Data Directory
 
@@ -153,7 +268,15 @@ python launcher.py
 
 ## Build Windows EXE
 
-### Accepted Phase 02 Build
+### Current Application And Historical Acceptance
+
+Build 48 includes Direct and Toolbelt batches, per-device interface selection,
+device filters, optional successful-upload list cleanup, durable per-device upload
+audit results, and post-upload device refresh. The release implementation and UI
+were checked with 77 regression tests and 14 browser tests. These automated tests
+do not replace live device/firmware testing or an antivirus assessment of an EXE.
+
+The acceptance reference below is historical, not the current feature list.
 
 Shared server mode was accepted on 2026-10-04 using **v1.0 build 23**, source
 `5da496d1501feafbb6d881d89e82aab587c4d5e8`. Human UAT is 10/10 passed, including
@@ -163,9 +286,10 @@ and its [full test run](https://github.com/wilfreddenijs/certmon/actions/runs/37
 (288 passed; one optional external ACME staging case deselected) are the acceptance
 reference. New builds from main receive their own run/build numbers.
 
-Phase 05 direct Extron upload via SFTP/SIS is planned next; it is not included in
-this accepted release. Existing Toolbelt functionality remains until its verified
-replacement is available.
+Direct Extron upload was not included in that build-23 acceptance baseline. It is
+implemented in current builds alongside Toolbelt; Toolbelt has not been retired.
+Documents under `docs/superpowers/` and the original Direct-upload proposal are
+historical design/planning references rather than the current operator guide.
 
 ### GitHub Actions build
 

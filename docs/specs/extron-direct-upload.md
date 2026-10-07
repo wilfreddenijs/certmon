@@ -1,7 +1,22 @@
 # Direct Extron Certificate Upload
 
 Date: 2026-10-02
-Status: User-confirmed workflow; implementation and device coverage pending
+Status: Historical proposal; Direct upload is implemented alongside Toolbelt
+
+## Current Status (2026-10-08)
+
+The original proposal below records the requirements and verification questions
+at the time of design. It is not the current operator guide. See the repository
+[README](../../README.md#upload-workspace) for the implemented workflow through
+build 48: Direct and Toolbelt remain available, with per-device LAN selection,
+batch processing, first-use host-key handling, HTTPS verification, upload-result
+audit records, optional list cleanup and post-upload inventory refresh.
+
+User tests have exercised Direct upload on SW4 USB Pro, UCS SW 313 and UCS 303.
+They do not establish support for every model, firmware or LAN B configuration.
+The original intent to retire Toolbelt has not been carried out; later product
+work retained both upload methods. The implementation also provides staged-PEM
+cleanup and device-certificate removal controls.
 
 ## Confirmed Workflow
 
