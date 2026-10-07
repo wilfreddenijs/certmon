@@ -4,6 +4,74 @@ import pytest
 from playwright.sync_api import expect
 
 
+@pytest.mark.parametrize('mode', ['upload', 'test', 'toolbelt'])
+def test_refresh_all_and_automatic_refresh_after_upload(page, live_certmon, mode):
+    prepare_upload_workspace(page, live_certmon)
+    scanned = {f'192.168.0.{i}:443': {
+        'host': f'192.168.0.{i}', 'port': 443, 'cn': f'Device {i}',
+        'status': 'ok', 'days_remaining': 100, 'cert_type': 'Self-signed', 'self_signed': True,
+    } for i in (1, 2)}
+    calls = []
+    page.route('**/api/data', lambda route: route.fulfill(json={'certificates': scanned}))
+
+    def refresh(route):
+        from urllib.parse import unquote
+        key = unquote(route.request.url.rsplit('/', 1)[-1])
+        calls.append(key)
+        scanned[key].update(cert_type='CA: CertMon', self_signed=False, issuer='CertMon')
+        route.fulfill(json={'ok': True, 'cert': scanned[key]})
+
+    page.route('**/api/refresh/*', refresh)
+    page.evaluate('loadData()')
+    if mode == 'toolbelt':
+        page.route('**/api/toolbelt/runs/refresh-test', lambda route: route.fulfill(json={
+            'mode': 'upload', 'status': 'complete', 'devices': {
+                '192.168.0.1': {'ok': True, 'event': 'upload_ok'},
+                '192.168.0.2': {'ok': False, 'event': 'upload_failed'},
+            }}))
+        page.evaluate("async () => { toolbeltRunId = 'refresh-test'; await pollToolbeltRun(); }")
+    else:
+        page.route('**/api/direct-extron/batches/refresh-test', lambda route: route.fulfill(json={
+            'mode': mode, 'status': 'complete', 'devices': [
+                {'selector': f'192.168.0.{i}', 'certificate_id': f'cert-{i}', 'nic': 1,
+                 'status': 'verified' if mode == 'upload' else 'ready'} for i in (1, 2)]}))
+        page.evaluate("async () => { directBatchRunId = 'refresh-test'; await pollDirectBatch('test'); }")
+    page.evaluate("switchTab('certs')")
+    if mode == 'test':
+        assert calls == []
+        page.locator('#device-name-filter').fill('Device 1')
+        page.locator('#device-refresh-all').click()
+    expect(page.locator('#device-refresh-status')).to_have_text('2 device(s) refreshed.')
+    assert sorted(calls) == ['192.168.0.1:443', '192.168.0.2:443']
+    expect(page.locator('#device-refresh-all')).to_be_enabled()
+    assert page.evaluate("Object.values(currentCertificates).every(c => c.cert_type === 'CA: CertMon')")
+    page.set_viewport_size({'width': 390, 'height': 844})
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    shots = Path('.tmp/refresh-ui')
+    shots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(shots / f'refresh-{mode}-mobile.png'))
+
+
+def test_local_ca_has_no_duplicate_downloads_and_upload_guide_is_in_downloads(page, live_certmon):
+    prepare_upload_workspace(page, live_certmon)
+    page.evaluate("renderCA({exists: false})")
+    expect(page.locator('#ca-content')).not_to_contain_text('Issued Device Certificates')
+    page.evaluate("switchTab('upload')")
+    page.locator('#manual-upload-fallback > summary').click()
+    page.locator('#manual-upload-fallback').get_by_role('button', name='Upload Guide').click()
+    guide = page.get_by_role('dialog', name='Upload Guide')
+    expect(guide).to_be_visible()
+    expect(guide).to_contain_text('Direct (SFTP + SIS)')
+    expect(guide).to_contain_text('ToolBelt')
+    expect(guide).to_contain_text('Manual installation')
+    assert page.get_by_text('Issued Device Certificates', exact=False).count() == 0
+    assert page.get_by_text('devices.txt', exact=False).count() == 0
+    page.set_viewport_size({'width': 390, 'height': 844})
+    shots = Path('.tmp/refresh-ui')
+    shots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(shots / 'guide-mobile.png'))
+
+
 def prepare_upload_workspace(page, live_certmon, count=2):
     certmon = live_certmon(server_mode=False)
     certificates = [{

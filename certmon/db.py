@@ -647,6 +647,20 @@ class Database:
                 (payload,),
             )
 
+    def update_monitored_certificate(self, key, info):
+        # Merge inside the transaction so concurrent refreshes retain each other.
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'legacy_state'"
+            ).fetchone()
+            data = json.loads(row["value"]) if row else _empty_state()
+            if key not in data.get("certificates", {}):
+                return False
+            data["certificates"][key] = info
+            conn.execute("UPDATE settings SET value = ? WHERE key = 'legacy_state'",
+                         (json.dumps(data),))
+        return True
+
     def put_setting(self, key, value):
         with self.transaction() as conn:
             conn.execute(

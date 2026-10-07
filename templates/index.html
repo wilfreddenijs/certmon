@@ -976,6 +976,8 @@
             </label>
           </span>
           <span class="help-text" id="device-filter-count"></span>
+          <button class="btn btn-ghost" id="device-refresh-all" data-required-permission="issue_certificate" onclick="refreshAllDevices()">↻ Refresh all devices</button>
+          <span class="help-text" id="device-refresh-status" role="status" aria-live="polite"></span>
         </div>
         <div class="device-filter-group" data-required-permission="manage_local_ca">
           <label style="display:flex;gap:8px;align-items:center">
@@ -1181,6 +1183,7 @@
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
             <div class="section-title" style="margin-bottom:0">Files for manual installation</div>
+            <button class="btn btn-ghost" onclick="showUploadGuide()">Upload Guide</button>
             <a data-required-permission="download_private_key" href="/api/ca/extron-combined-zip" download="certmon-extron-combined-pems.zip"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--warning);border-color:var(--warning)" title="Download all Extron combined PEM files in one ZIP. These files contain private keys; keep the ZIP secret and delete local copies after upload.">Download all Extron PEMs (.zip)</button></a>
           </div>
 
@@ -2434,8 +2437,61 @@
   }
 
   async function refreshCert(host, port) {
-    await fetch(`/api/refresh/${host}:${port}`, { method: 'POST' });
-    loadData();
+    await refreshDeviceCertificates([{host, port}]);
+  }
+
+  let deviceRefreshPromise = null;
+  const pendingDeviceRefreshes = new Map();
+
+  async function refreshAllDevices() {
+    if (!Object.keys(currentCertificates).length) await loadData();
+    return refreshDeviceCertificates(Object.values(currentCertificates));
+  }
+
+  function refreshUploadedDevices(selectors) {
+    const selected = new Set(selectors);
+    return refreshDeviceCertificates(Object.values(currentCertificates).filter(c => selected.has(c.host)));
+  }
+
+  function refreshDeviceCertificates(devices) {
+    devices.forEach(c => pendingDeviceRefreshes.set(`${c.host}:${c.port}`, c));
+    if (deviceRefreshPromise) return deviceRefreshPromise;
+    if (!pendingDeviceRefreshes.size) return Promise.resolve();
+    const button = document.getElementById('device-refresh-all');
+    const status = document.getElementById('device-refresh-status');
+    button.disabled = true;
+    deviceRefreshPromise = (async () => {
+      let done = 0;
+      let failed = 0;
+      while (pendingDeviceRefreshes.size) {
+        const targets = Array.from(pendingDeviceRefreshes.values());
+        pendingDeviceRefreshes.clear();
+        const total = done + targets.length;
+        let next = 0;
+        status.textContent = `Refreshing devices: ${done}/${total}`;
+        const worker = async () => {
+          while (next < targets.length) {
+            const c = targets[next++];
+            try {
+              const res = await fetch(`/api/refresh/${encodeURIComponent(c.host + ':' + c.port)}`, {method: 'POST'});
+              const result = await res.json();
+              if (!res.ok || !result.ok) failed++;
+            } catch (error) { failed++; }
+            done++;
+            status.textContent = `Refreshing devices: ${done}/${total}`;
+          }
+        };
+        await Promise.all(Array.from({length: Math.min(4, targets.length)}, worker));
+        await loadData();
+      }
+      status.textContent = `${done - failed} device(s) refreshed${failed ? `; ${failed} could not be refreshed` : ''}.`;
+    })().catch(error => {
+      status.textContent = `Refresh failed: ${error.message}`;
+    }).finally(() => {
+      button.disabled = false;
+      deviceRefreshPromise = null;
+    });
+    return deviceRefreshPromise;
   }
 
   async function addRange() {
@@ -2796,11 +2852,10 @@
   async function loadCA() {
     const res = await fetch('/api/ca/status');
     const ca = await res.json();
-    const issued = await (await fetch('/api/ca/issued')).json();
-    renderCA(ca, issued);
+    renderCA(ca);
   }
 
-  function renderCA(ca, issued) {
+  function renderCA(ca) {
     const el = document.getElementById('ca-content');
 
     const caCard = ca.exists ? `
@@ -2866,30 +2921,6 @@
         <div id="issue-result" style="margin-top:14px;font-size:12px"></div>
       </div>` : '';
 
-    const issuedSection = issued.length ? `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <div class="section-title" style="margin-bottom:0">Issued Device Certificates (${issued.length})</div>
-          <a href="/api/ca/devices-txt" download="devices.txt"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" title="Download IPs of all devices with a .pem — feed to toolbelt_uploader.py --list">⬇ devices.txt</button></a>
-        </div>
-        <div class="help-text choice-help" style="margin-bottom:14px">Extron profile certificates show an extra <b>PEM (Extron)</b> download. That file contains both certificate and private key for Extron Toolbelt, so keep it secret. Generic certificates should normally use the separate cert/key files from Upload/manual install.</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          ${issued.map(c => `
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-              <div>
-                <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:600">${c.cn}</div>
-                <div style="color:var(--muted);font-size:11px;margin-top:3px">Expires ${new Date(c.not_after).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${c.days_remaining} days</div>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <a href="/api/ca/download/${c.certificate_id}" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px">⬇ Cert</button></a>
-                ${c.profile === 'extron-rsa' ? `<a data-required-permission="download_private_key" href="/api/certificates/${c.certificate_id}/private/combined.pem" download><button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--warning);border-color:var(--warning)" title="Extron PEM contains certificate and private key. Keep it secret.">⬇ PEM (Extron)</button></a>` : ''}
-                <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--accent2)" onclick="showUploadGuide('${c.cn}')">📋 Upload Guide</button>
-                <button class="btn btn-danger" data-required-permission="manage_local_ca" style="font-size:11px;padding:5px 10px" title="Delete this stored certificate" onclick="deleteIssued('${c.certificate_id}','${c.cn}')">✕</button>
-              </div>
-            </div>`).join('')}
-        </div>
-      </div>` : '';
-
     const deviceHint = ca.exists ? `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
         <div class="section-title" style="margin-bottom:10px">Device certificates moved to Devices</div>
@@ -2897,7 +2928,7 @@
         <button class="btn btn-ghost" onclick="switchTab('certs')">Open Devices</button>
       </div>` : '';
 
-    el.innerHTML = caCard + issueForm + issuedSection + deviceHint;
+    el.innerHTML = caCard + issueForm + deviceHint;
     applyPermissionVisibility(el);
   }
 
@@ -3040,23 +3071,28 @@
     await refreshCertificateWorkflow();
   }
 
-  function showUploadGuide(cn) {
+  function showUploadGuide() {
     const guides = {
-      default: `<b>Extron (Toolbelt) — recommended for ${cn}:</b><br><br>
-        1. Download the <b>⬇ PEM (Extron)</b> file (certificate + key combined)<br>
-        2. Open <b>Extron Toolbelt</b> → <b>Utilities</b> tab<br>
-        3. Load the <b>.pem</b> file onto the controller<br>
-        4. The device reboots / restarts its web server<br><br>
-        This single .pem is the format Extron documents (cert block first, then the
-        unencrypted key) and avoids the passphrase prompt entirely.<br><br>
-        <b>Make sure the CA is installed in Windows</b> (button at the top) so the
-        browser trusts the device — then browse to https://${cn} with no warning.<br><br>
-        <b>Generic web-UI alternative:</b> some devices instead take the <b>.crt</b> as
-        the certificate and <b>.key</b> as the private key in their SSL/TLS settings.`
+      default: `<b>Direct (SFTP + SIS)</b><br>
+        Select Direct beside each prepared device, save its credentials and choose LAN A or LAN B.
+        For LAN B, provide its HTTPS endpoint. Test selected Direct devices, then upload the selected certificates.
+        CertMon checks the active HTTPS certificate after import.<br><br>
+        <b>ToolBelt</b><br>
+        Select Toolbelt beside each device and save device or shared credentials. Open ToolBelt on this Windows PC.
+        Run Test Toolbelt upload first, then Start Toolbelt upload. CertMon adds devices by IP address,
+        opens their management view and imports the corresponding combined PEM.<br><br>
+        <b>Manual installation</b><br>
+        Choose the certificate/device pair here. Download the combined PEM for an Extron import,
+        or the separate certificate, chain and private key when required by another device.
+        In ToolBelt, use Add with the IP address and credentials, open the device, and import the PEM
+        from its certificate settings. Follow the device-specific instructions shown with the downloads.
+        Combined PEMs and private keys contain secrets; protect downloaded files.<br><br>
+        <b>Browser trust</b><br>
+        Install the public Local CA certificate from the Local CA tab in the browser/OS trust store.`
     };
     const overlay = document.createElement('div');
     overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center';
-    overlay.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:500px;max-width:95vw">
+    overlay.innerHTML = `<div role="dialog" aria-label="Upload Guide" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow:auto">
       <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--accent);margin-bottom:16px">📋 Upload Guide</div>
       <div style="font-size:13px;line-height:1.8;color:var(--text)">${guides.default}</div>
       <button class="btn" id="ug-close" style="margin-top:20px">Close</button>
@@ -3183,7 +3219,10 @@
       } else {
         if (run.mode === 'test' && run.status === 'complete') directBatchTestSignature = signature;
         directBatchRunId = null;
-        if (run.mode === 'upload') await loadToolbeltDevices(false);
+        if (run.mode === 'upload') {
+          await loadToolbeltDevices(false);
+          refreshUploadedDevices(run.devices.filter(d => d.status !== 'skipped').map(d => d.selector));
+        }
         else renderToolbeltDevices();
       }
     } catch (error) {
@@ -3649,6 +3688,7 @@
       renderToolbeltDevices();
       if (result.staged_name && result.status !== 'verified') renderDirectExtronCleanup(result.staged_name);
       if (result.status === 'verified') await loadToolbeltDevices(false);
+      refreshUploadedDevices([fields.selector]);
     } catch (error) { setDirectExtronStatus(error.message, true); }
   }
 
@@ -3791,7 +3831,7 @@
     const list = document.getElementById('toolbelt-device-list');
     const uploadBtn = document.getElementById('toolbelt-upload-btn');
     if (!toolbeltDevices.length) {
-      list.innerHTML = '<div class="help-text">No Extron Local CA certificates yet. Generate Extron-compatible Local CA certificates first; they will appear in devices.txt and here.</div>';
+      list.innerHTML = '<div class="help-text">No Extron Local CA certificates yet. Generate Extron-compatible Local CA certificates first.</div>';
       uploadBtn.disabled = true;
       document.getElementById('toolbelt-test-btn').disabled = true;
       document.getElementById('toolbelt-selected-count').textContent = '0 selected';
@@ -4014,6 +4054,7 @@
     toolbeltRunId = null;
     document.getElementById('toolbelt-stop-btn').disabled = true;
     await loadToolbeltDevices(false);
+    if (run.mode === 'upload') refreshUploadedDevices(Object.keys(run.devices || {}));
   }
 
   async function stopToolbeltRun() {

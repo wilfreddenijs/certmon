@@ -846,15 +846,13 @@ def remove_host(host_port):
 
 @app.route("/api/refresh/<path:host_port>", methods=["POST"])
 def refresh_host(host_port):
-    data = load_data()
     parts = host_port.rsplit(":", 1)
     host = parts[0]
     port = int(parts[1]) if len(parts) > 1 else 443
     info = get_cert_info(host, port)
     if info:
-        data["certificates"][f"{host}:{port}"] = info
-        save_data(data)
-    return jsonify({"ok": True, "cert": info})
+        database.update_monitored_certificate(f"{host}:{port}", info)
+    return jsonify({"ok": bool(info and not info.get("error")), "cert": info})
 
 
 @app.route("/api/scan/ranges", methods=["POST"])

@@ -3,6 +3,25 @@ import pytest
 from certmon.db import ConcurrentUpdateError, Database
 
 
+def test_parallel_monitor_refresh_preserves_other_devices_and_settings(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    db = Database(tmp_path / "refresh.db")
+    db.initialize()
+    state = {"certificates": {f"192.0.2.{i}:443": {"serial": "old"} for i in range(20)},
+             "manual_hosts": [{"host": "192.0.2.1", "port": 443}], "upload_devices": []}
+    db.save_legacy_state(state)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda i: db.update_monitored_certificate(
+            f"192.0.2.{i}:443", {"serial": str(i)}), range(20)))
+    assert all(results)
+    saved = db.load_legacy_state()
+    assert saved["manual_hosts"] == state["manual_hosts"]
+    assert all(saved["certificates"][f"192.0.2.{i}:443"]["serial"] == str(i) for i in range(20))
+    assert db.update_monitored_certificate("removed:443", {"serial": "new"}) is False
+    assert "removed:443" not in db.load_legacy_state()["certificates"]
+
+
 def test_database_enables_wal_foreign_keys_and_schema(tmp_path):
     db = Database(tmp_path / "certmon.db")
     db.initialize()

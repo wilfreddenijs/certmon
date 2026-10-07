@@ -368,14 +368,13 @@ def test_deployment_result_offers_private_key_download_without_storing_key_mater
 def test_local_ca_extron_pem_download_uses_private_combined_artifact():
     html = page()
 
-    assert "PEM (Extron)" in html
-    assert "Extron profile certificates show an extra" in html
-    assert "Generic certificates should normally use the separate cert/key files" in html
     assert "Extron certificates are legacy/Toolbelt-friendly RSA certs" in html
-    assert "c.profile === 'extron-rsa'" in html
-    assert "/api/certificates/${c.certificate_id}/private/combined.pem" in html
-    assert "/api/ca/download/${c.certificate_id}" in html
-    assert "Extron PEM contains certificate and private key" in html
+    assert "Combined PEMs and private keys contain secrets" in html
+    assert "combined.pem" in html
+    assert "Issued Device Certificates" not in html
+    assert "devices.txt" not in html
+    downloads = html.split('id="manual-upload-fallback"', 1)[1].split('</details>', 1)[0]
+    assert 'onclick="showUploadGuide()"' in downloads
 
 
 def test_upload_tab_has_toolbelt_batch_upload_flow():
