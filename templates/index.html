@@ -380,6 +380,9 @@
   }
 
   .device-filter-bar {
+    position: sticky;
+    top: var(--device-toolbar-top, 58px);
+    z-index: 40;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -4066,6 +4069,17 @@
       await loadData();
     }
   }
+
+  const navigationTabs = document.querySelector('.tabs');
+  function updateDeviceToolbarPosition() {
+    const stickyTop = parseFloat(getComputedStyle(navigationTabs).top) || 0;
+    document.querySelector('.content').style.setProperty(
+      '--device-toolbar-top', `${navigationTabs.getBoundingClientRect().height + stickyTop}px`
+    );
+  }
+  new ResizeObserver(updateDeviceToolbarPosition).observe(navigationTabs);
+  window.addEventListener('resize', updateDeviceToolbarPosition);
+  updateDeviceToolbarPosition();
 
   // Initial load + auto-refresh every 60s
   startApp();
