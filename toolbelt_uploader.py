@@ -1039,7 +1039,7 @@ def _credentials_modal_text(win):
         texts = []
     for control_type in ("Text", "Edit", "Button"):
         try:
-            controls = win.descendants(control_type=control_type)
+            controls = _add_dialog_controls(win, control_type)
         except Exception as exc:
             log.debug("Toolbelt credentials modal text unavailable while UI is busy: %s", exc)
             continue
@@ -1416,24 +1416,41 @@ def _wait_for_ui(win, ip, label, predicate, timeout=T_MANAGE):
 # ---------------------------------------------------------------------------
 def _find_add_device_dialog(win):
     process_id = win.process_id()
-    candidates = Desktop(backend="uia").windows(process=process_id, title="Add Device")
-    visible = [dialog for dialog in candidates if dialog.is_visible()]
-    if len(visible) > 1:
-        raise RuntimeError("Multiple Toolbelt Add Device dialogs are open")
-    return visible[0] if visible else None
+    # Toolbelt's native modal can be absent from the UIA desktop tree.
+    for backend in ("win32", "uia"):
+        try:
+            candidates = Desktop(backend=backend).windows(
+                process=process_id, title_re=r"(?i)^\s*Add Device\s*$")
+        except Exception:
+            continue
+        visible = [dialog for dialog in candidates if dialog.is_visible()]
+        if len(visible) > 1:
+            raise RuntimeError("Multiple Toolbelt Add Device dialogs are open")
+        if visible:
+            return visible[0]
+    return None
+
+
+def _add_dialog_controls(dialog, control_type):
+    if getattr(getattr(dialog, "backend", None), "name", None) == "win32":
+        friendly_class = "Static" if control_type == "Text" else control_type
+        return [control for control in dialog.descendants()
+                if control.friendly_class_name() == friendly_class]
+    return dialog.descendants(control_type=control_type)
 
 
 def _add_device_edit(dialog, label):
-    labels = [control for control in dialog.descendants(control_type="Text")
+    texts = _add_dialog_controls(dialog, "Text")
+    labels = [control for control in texts
               if (control.window_text() or "").strip().rstrip(":").lower() == label.lower()]
     if len(labels) != 1:
         raise RuntimeError("Toolbelt Add Device field not found: %s" % label)
     anchor = labels[0].rectangle()
-    next_label_top = min((control.rectangle().top for control in dialog.descendants(control_type="Text")
+    next_label_top = min((control.rectangle().top for control in texts
                           if control.rectangle().top > anchor.top), default=float("inf"))
     candidates = []
     for control_type in ("Edit", "ComboBox"):
-        for edit in dialog.descendants(control_type=control_type):
+        for edit in _add_dialog_controls(dialog, control_type):
             rect = edit.rectangle()
             if edit.is_visible() and anchor.bottom - 5 <= rect.top < next_label_top and abs(rect.left - anchor.left) < 30:
                 candidates.append((rect.top - anchor.bottom, control_type != "Edit", edit))
@@ -1533,8 +1550,9 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
         for candidate_password, source in candidates:
             if candidate_password is not None and not _fill_edit(password, dialog, candidate_password):
                 raise RuntimeError("Could not fill Toolbelt Add Device password")
-            buttons = [button for button in dialog.descendants(control_type="Button")
-                       if button.is_visible() and (button.window_text() or "").strip().lower() == "add"]
+            buttons = [button for button in _add_dialog_controls(dialog, "Button")
+                       if button.is_visible() and button.is_enabled()
+                       and (button.window_text() or "").replace("&", "").strip().lower() == "add"]
             if len(buttons) != 1:
                 raise RuntimeError("Toolbelt Add Device submit button not found or ambiguous")
             emit("device_adding", selector=ip, message="Adding device by address in Toolbelt")
@@ -1558,8 +1576,8 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
         try:
             remaining = _find_add_device_dialog(win)
             if remaining is not None:
-                for button in remaining.descendants(control_type="Button"):
-                    if button.is_visible() and (button.window_text() or "").strip().lower() == "cancel":
+                for button in _add_dialog_controls(remaining, "Button"):
+                    if button.is_visible() and (button.window_text() or "").replace("&", "").strip().lower() == "cancel":
                         button.click_input()
                         break
         except Exception:

@@ -83,7 +83,7 @@ def test_select_device_opens_serial_column_only_after_rejected_credentials(uploa
 
 
 @pytest.fixture
-def add_ui(monkeypatch, uploader):
+def add_ui(monkeypatch, uploader, request):
     state = types.SimpleNamespace(open=False, submitted=[], filled=[], cancelled=False, reject=False)
 
     class Control:
@@ -123,7 +123,15 @@ def add_ui(monkeypatch, uploader):
         'ComboBox': [Control('', 125)],
         'Button': [Control('Add', 300, submit), Control('Cancel', 300, cancel)],
     }
-    dialog = types.SimpleNamespace(descendants=lambda control_type: controls.get(control_type, []))
+    if getattr(request, 'param', 'uia') == 'win32':
+        for kind, items in controls.items():
+            for item in items:
+                item.friendly_class_name = lambda kind=kind: 'Static' if kind == 'Text' else kind
+        dialog = types.SimpleNamespace(
+            backend=types.SimpleNamespace(name='win32'),
+            descendants=lambda: [item for items in controls.values() for item in items])
+    else:
+        dialog = types.SimpleNamespace(descendants=lambda control_type: controls.get(control_type, []))
 
     def open_dialog():
         state.open = True
@@ -137,6 +145,7 @@ def add_ui(monkeypatch, uploader):
     return win, state, controls
 
 
+@pytest.mark.parametrize('add_ui', ['uia', 'win32'], indirect=True)
 def test_add_device_fills_address_and_saved_password_without_editing_admin(uploader, add_ui):
     win, state, _ = add_ui
     uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'username': 'admin', 'password': 'secret'}}
@@ -333,7 +342,46 @@ def test_add_dialog_lookup_is_scoped_to_toolbelt_process(monkeypatch, uploader):
 
     monkeypatch.setattr(uploader, 'Desktop', lambda **kwargs: types.SimpleNamespace(windows=windows))
     assert uploader._find_add_device_dialog(types.SimpleNamespace(process_id=lambda: 123)) is dialog
-    assert calls == [{'process': 123, 'title': 'Add Device'}]
+    assert calls == [{'process': 123, 'title_re': r'(?i)^\s*Add Device\s*$'}]
+
+
+@pytest.mark.parametrize('native_state', ['missing', 'error'])
+def test_add_dialog_lookup_falls_back_to_uia(monkeypatch, uploader, native_state):
+    backends = []
+    dialog = types.SimpleNamespace(is_visible=lambda: True)
+
+    def desktop(backend):
+        backends.append(backend)
+
+        def windows(**kwargs):
+            assert kwargs['process'] == 123
+            if backend == 'win32':
+                if native_state == 'error':
+                    raise RuntimeError('native busy')
+                return []
+            return [dialog]
+
+        return types.SimpleNamespace(windows=windows)
+
+    monkeypatch.setattr(uploader, 'Desktop', desktop)
+    assert uploader._find_add_device_dialog(types.SimpleNamespace(process_id=lambda: 123)) is dialog
+    assert backends == ['win32', 'uia']
+
+
+def test_add_dialog_lookup_rejects_multiple_native_modals(monkeypatch, uploader):
+    dialog = types.SimpleNamespace(is_visible=lambda: True)
+    monkeypatch.setattr(uploader, 'Desktop', lambda **kwargs: types.SimpleNamespace(windows=lambda **kwargs: [dialog, dialog]))
+    with pytest.raises(RuntimeError, match='Multiple Toolbelt'):
+        uploader._find_add_device_dialog(types.SimpleNamespace(process_id=lambda: 123))
+
+
+def test_native_add_dialog_controls_use_friendly_classes(uploader):
+    label = types.SimpleNamespace(friendly_class_name=lambda: 'Static', window_text=lambda: 'failed to connect')
+    edit = types.SimpleNamespace(friendly_class_name=lambda: 'Edit', window_text=lambda: '')
+    dialog = types.SimpleNamespace(backend=types.SimpleNamespace(name='win32'), descendants=lambda: [label, edit])
+    assert uploader._add_dialog_controls(dialog, 'Text') == [label]
+    assert uploader._add_dialog_controls(dialog, 'Edit') == [edit]
+    assert uploader._credentials_rejected_present(dialog)
 
 
 def test_add_device_does_not_put_address_in_another_field(uploader, add_ui):
