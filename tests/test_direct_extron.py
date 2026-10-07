@@ -15,6 +15,7 @@ class FakeDatabase:
     def __init__(self):
         self.settings = {}
         self.secrets = {}
+        self.audit_events = []
         self.certificates = [
             {
                 "id": "cert-1",
@@ -28,6 +29,9 @@ class FakeDatabase:
 
     def get_setting(self, key, default=None):
         return self.settings.get(key, default)
+
+    def record_audit_event(self, **event):
+        self.audit_events.append(event)
 
     def put_setting(self, key, value):
         self.settings[key] = value

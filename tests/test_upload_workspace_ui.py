@@ -99,6 +99,58 @@ def test_bulk_create_asks_before_replacing_existing_upload_certificate(page, liv
     assert requests[0]['replace_certificate_id'] == 'cert-1'
 
 
+def test_auto_remove_preference_and_completed_batch_keep_failures_and_audit(page, live_certmon):
+    preferences = {'auto_remove_successful': False}
+    writes = []
+
+    def preference(route):
+        if route.request.method == 'POST':
+            writes.append(route.request.post_data_json)
+            preferences.update(route.request.post_data_json)
+        route.fulfill(json=preferences)
+
+    page.route('**/api/upload/preferences', preference)
+    _, devices = prepare_upload_workspace(page, live_certmon)
+    checkbox = page.locator('#upload-auto-remove-successful')
+    expect(checkbox).not_to_be_checked()
+    checkbox.check()
+    expect(checkbox).to_be_enabled()
+    assert writes == [{'auto_remove_successful': True}]
+    complete = {'value': False}
+    results = [{**device, 'nic': 1, 'status': 'verified' if index == 0 else 'cleanup_pending'}
+               for index, device in enumerate(devices)]
+
+    def batch(route):
+        if complete['value']:
+            devices[:] = [devices[-1]]
+        route.fulfill(json={'id': 'cleanup-run', 'mode': 'upload',
+                            'status': 'needs_attention' if complete['value'] else 'running',
+                            'current_device': None, 'devices': results})
+
+    page.route('**/api/direct-extron/batches/cleanup-run', batch)
+    page.evaluate("() => { directBatchRunId = 'cleanup-run'; pollDirectBatch('signature'); }")
+    expect(checkbox).to_be_disabled()
+    expect(page.locator('.upload-device-row')).to_have_count(2)
+    complete['value'] = True
+    expect(page.locator('.upload-device-row')).to_have_count(1)
+    expect(page.locator('.upload-device-row')).to_contain_text('192.168.0.2')
+    expect(checkbox).to_be_checked()
+    expect(checkbox).to_be_enabled()
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.screenshot(path='.tmp/replacement-ui/upload-cleanup-mobile.png')
+    page.route('**/api/audit?*', lambda route: route.fulfill(json=[
+        {'event_type': 'certificate_upload_succeeded', 'target': '192.168.0.1', 'success': True,
+         'details': {'certificate_id': 'cert-1', 'method': 'direct', 'result': 'verified'}},
+        {'event_type': 'certificate_upload_failed', 'target': '192.168.0.2', 'success': False,
+         'details': {'certificate_id': 'cert-2', 'method': 'direct', 'result': 'cleanup_pending'}},
+    ]))
+    page.evaluate("() => { switchTab('audit'); loadAudit(); }")
+    expect(page.locator('#audit-list')).to_contain_text('Certificate upload succeeded', timeout=10000)
+    expect(page.locator('#audit-list')).to_contain_text('192.168.0.1')
+    expect(page.locator('#audit-list')).to_contain_text('192.168.0.2')
+    page.screenshot(path='.tmp/replacement-ui/upload-audit.png')
+
+
 def test_shared_device_list_opens_direct_and_limits_toolbelt_to_chosen_devices(page, live_certmon):
     prepare_upload_workspace(page, live_certmon)
     mutations = []

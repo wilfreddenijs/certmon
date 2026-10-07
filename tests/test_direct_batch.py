@@ -42,6 +42,40 @@ def test_direct_batch_uploads_sequentially_and_returns_isolated_snapshot(tmp_pat
     assert len(service.get_batch(run['id'])['devices']) == 2
 
 
+def test_direct_batch_cleans_only_confirmed_successes_after_all_results(tmp_path, monkeypatch):
+    from certmon.upload_queue import AUTO_REMOVE_KEY, COMPLETED_KEY
+    from certmon.toolbelt import ToolbeltBatchService
+    service, database, artifacts, _ = make_service(tmp_path)
+    database.certificates.append({**database.certificates[0], 'id': 'cert-2', 'identifiers': ['10.0.0.11']})
+    artifacts.has_certificate = lambda certificate_id: True
+    database.put_setting(AUTO_REMOVE_KEY, True)
+    prepared = ToolbeltBatchService(database, artifacts, service.vault)
+    monkeypatch.setattr(service, 'probe_one', lambda **kwargs: {'status': 'ready'})
+
+    def activate(**target):
+        assert database.get_setting(COMPLETED_KEY, []) == []
+        assert len(prepared.list_devices()) == 2
+        return {'status': 'verified' if target['selector'] == '10.0.0.10' else 'cleanup_pending'}
+
+    monkeypatch.setattr(service, '_activate_one', activate)
+    mixed = targets()
+    mixed[1]['certificate_id'] = 'cert-2'
+    run = wait_run(service, service.start_batch(mode='upload', targets=mixed))
+    assert run['status'] == 'needs_attention'
+    assert database.get_setting(COMPLETED_KEY) == ['cert-1']
+    assert [row['selector'] for row in prepared.list_devices()] == ['10.0.0.11']
+    assert [(event['target'], event['success']) for event in database.audit_events] == [('10.0.0.10', True), ('10.0.0.11', False)]
+
+
+def test_direct_batch_test_does_not_remove_devices_or_record_upload_success(tmp_path):
+    from certmon.upload_queue import AUTO_REMOVE_KEY, COMPLETED_KEY
+    service, database, _, _ = make_service(tmp_path)
+    database.put_setting(AUTO_REMOVE_KEY, True)
+    wait_run(service, service.start_batch(mode='test', targets=targets()))
+    assert database.get_setting(COMPLETED_KEY, []) == []
+    assert database.audit_events == []
+
+
 def test_direct_batch_never_replaces_changed_host_key(tmp_path):
     service, database, artifacts, transport = make_service(tmp_path)
     wait_run(service, service.start_batch(mode='test', targets=targets()))

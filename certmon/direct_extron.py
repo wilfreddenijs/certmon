@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock, RLock, Thread
 from types import SimpleNamespace
+from certmon.upload_queue import UploadQueueService
 
 import paramiko
 from cryptography import x509
@@ -222,6 +223,7 @@ class DirectExtronService:
         self.database = database
         self.artifacts = artifacts
         self.vault = vault
+        self.upload_queue = UploadQueueService(database)
         self.transport = transport or ParamikoDirectTransport()
         self.verifier = verifier or verify_device_certificate
         self.verification_timeout = verification_timeout
@@ -243,6 +245,7 @@ class DirectExtronService:
         if not self._certificate_operation_lock.acquire(blocking=False):
             raise ValueError("A certificate operation is already running")
         run = {"id": uuid.uuid4().hex, "mode": mode, "status": "running",
+               "remove_successful": self.upload_queue.auto_remove(),
                "requested_stop": False, "current_device": None,
                "devices": [dict(target, status="pending") for target in targets]}
         with self._batch_lock:
@@ -269,6 +272,7 @@ class DirectExtronService:
             return copy.deepcopy(run)
 
     def _execute_batch(self, run, targets):
+        final_status = "failed"
         try:
             # Preflight every endpoint before any private PEM is transferred.
             ready = True
@@ -315,14 +319,28 @@ class DirectExtronService:
                 for device in run["devices"]:
                     if device["status"] == "pending" or (run["mode"] == "upload" and device["status"] == "ready"):
                         device["status"] = "skipped"
-                run["status"] = "stopped" if run["requested_stop"] else "complete" if ready else "needs_attention"
+                final_status = "stopped" if run["requested_stop"] else "complete" if ready else "needs_attention"
                 run["current_device"] = None
         except Exception:
             with self._batch_lock:
-                run["status"] = "failed"
+                final_status = "failed"
                 run["current_device"] = None
         finally:
-            self._certificate_operation_lock.release()
+            try:
+                if run["mode"] == "upload":
+                    outcomes = [{"selector": device["selector"], "certificate_id": device["certificate_id"],
+                                 "nic": device["nic"], "ok": device["status"] == "verified",
+                                 "status": device["status"]} for device in run["devices"]]
+                    self.upload_queue.finish(method="direct", run_id=run["id"], outcomes=outcomes,
+                                             remove_successful=run["remove_successful"] and final_status in ("complete", "needs_attention"))
+            except Exception:
+                with self._batch_lock:
+                    final_status = "failed"
+                    run["audit_error"] = "Could not save upload results to Audit. Upload list was not cleared."
+            finally:
+                with self._batch_lock:
+                    run["status"] = final_status
+                self._certificate_operation_lock.release()
 
     def target_for(self, selector, nic=1):
         selector = self._selector(selector)
@@ -408,7 +426,12 @@ class DirectExtronService:
 
     def activate_one(self, *, selector, certificate_id, nic=1):
         with self._certificate_operation():
-            return self._activate_one(selector=selector, certificate_id=certificate_id, nic=nic)
+            result = self._activate_one(selector=selector, certificate_id=certificate_id, nic=nic)
+            self.upload_queue.finish(method="direct", run_id=uuid.uuid4().hex,
+                                     outcomes=[{"selector": selector, "certificate_id": certificate_id,
+                                                "nic": nic, "ok": result["status"] == "verified", "status": result["status"]}],
+                                     remove_successful=self.upload_queue.auto_remove())
+            return result
 
     def _activate_one(self, *, selector, certificate_id, nic=1):
         target = self.target_for(selector, nic)

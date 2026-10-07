@@ -1,5 +1,6 @@
 import json
 import time
+from certmon.upload_queue import AUTO_REMOVE_KEY, COMPLETED_KEY
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -20,6 +21,7 @@ class FakeDatabase:
     def __init__(self):
         self.settings = {}
         self.secrets = {}
+        self.audit_events = []
         self.certificates = [
             {
                 "id": "cert-1",
@@ -33,6 +35,9 @@ class FakeDatabase:
 
     def list_certificates(self):
         return list(self.certificates)
+
+    def record_audit_event(self, **event):
+        self.audit_events.append(event)
 
     def get_setting(self, key, default=None):
         return self.settings.get(key, default)
@@ -155,6 +160,42 @@ def test_upload_list_coalesces_equivalent_ipv6_addresses(tmp_path):
     database.certificates.append({**database.certificates[0], 'id': 'cert-2', 'identifiers': ['2001:0db8:0:0:0:0:0:1']})
     service = ToolbeltBatchService(database, FakeArtifacts(tmp_path), FakeVault())
     assert [(row['selector'], row['certificate_id']) for row in service.list_devices()] == [('2001:db8::1', 'cert-2')]
+
+
+def test_toolbelt_batch_records_results_and_clears_only_after_runner_finishes(tmp_path):
+    database = FakeDatabase()
+    database.certificates.append({**database.certificates[0], 'id': 'cert-2', 'identifiers': ['192.168.0.11']})
+    database.put_setting(AUTO_REMOVE_KEY, True)
+    database.put_setting(STATUS_KEY, {f'192.168.0.{ip}|cert-{index}|dry-run': {'ok': True}
+                                    for index, ip in [(1, 10), (2, 11)]})
+    artifacts = FakeArtifacts(tmp_path)
+    artifacts.has_certificate = lambda certificate_id: True
+
+    def runner(command, on_event):
+        on_event({'event': 'upload_ok', 'selector': '192.168.0.10'})
+        assert database.get_setting(COMPLETED_KEY, []) == []
+        assert len(service.list_devices()) == 2
+        on_event({'event': 'upload_failed', 'selector': '192.168.0.11'})
+        assert database.audit_events == []
+
+    service = ToolbeltBatchService(database, artifacts, FakeVault(), runner=runner)
+    run = service.start(mode='upload')
+    wait_until(lambda: service.get_run(run['id'])['status'] != 'running')
+    assert service.get_run(run['id'])['status'] == 'complete'
+    assert [row['selector'] for row in service.list_devices()] == ['192.168.0.11']
+    assert [(event['target'], event['success']) for event in database.audit_events] == [('192.168.0.10', True), ('192.168.0.11', False)]
+    assert len(database.certificates) == 2
+
+
+def test_dry_run_success_never_clears_upload_list(tmp_path):
+    database = FakeDatabase()
+    database.put_setting(AUTO_REMOVE_KEY, True)
+    service = ToolbeltBatchService(database, FakeArtifacts(tmp_path), FakeVault(),
+                                  runner=lambda command, on_event: on_event({'event': 'dry_run_ok', 'selector': '192.168.0.10'}))
+    run = service.start(mode='dry-run')
+    wait_until(lambda: service.get_run(run['id'])['status'] != 'running')
+    assert len(service.list_devices()) == 1
+    assert database.audit_events == []
 
 
 def test_toolbelt_service_can_delete_device_credentials(tmp_path):

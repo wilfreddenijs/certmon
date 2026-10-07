@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from certmon.upload_queue import UploadQueueService
 
 
 STATUS_KEY = "toolbelt_latest_status"
@@ -40,6 +41,8 @@ class ToolbeltRun:
     error: str | None = None
     stop_file: str | None = None
     temp_dir: str | None = None
+    certificate_ids: dict[str, str] = field(default_factory=dict)
+    remove_successful: bool = False
 
     def to_dict(self):
         return {
@@ -68,6 +71,7 @@ class ToolbeltBatchService:
         self.database = database
         self.artifacts = artifacts
         self.vault = vault
+        self.upload_queue = UploadQueueService(database)
         self.script_path = Path(script_path or Path(__file__).parents[1] / "toolbelt_uploader.py")
         self.runner = runner or self._run_subprocess
         self._lock = threading.RLock()
@@ -82,6 +86,7 @@ class ToolbeltBatchService:
         lan_b_targets = self.database.get_setting(DIRECT_LAN_B_KEY, {})
         rows = []
         seen = set()
+        completed = self.upload_queue.completed()
         # Database order is oldest first; the newest certificate owns each row.
         for cert in reversed(self.database.list_certificates()):
             if cert.get("kind") != "leaf" or cert.get("issuer_type") != "local_ca":
@@ -90,6 +95,8 @@ class ToolbeltBatchService:
             if not selector or selector in seen:
                 continue
             seen.add(selector)
+            if cert["id"] in completed:
+                continue
             profile = cert.get("profile")
             rows.append(
                 {
@@ -184,7 +191,9 @@ class ToolbeltBatchService:
                     + ", ".join(blocked)
                 )
 
-        run = ToolbeltRun(id=str(uuid.uuid4()), mode=mode)
+        run = ToolbeltRun(id=str(uuid.uuid4()), mode=mode,
+                          certificate_ids={row["selector"]: row["certificate_id"] for row in targets},
+                          remove_successful=self.upload_queue.auto_remove())
         with self._lock:
             self._runs[run.id] = run
         thread = threading.Thread(
@@ -277,6 +286,8 @@ class ToolbeltBatchService:
             self._record_event(run, {"event": "run_failed", "message": message})
             failed_event = "upload_failed" if run.mode == "upload" else "dry_run_failed"
             for row in targets:
+                if (run.devices.get(row["selector"]) or {}).get("ok"):
+                    continue
                 self._record_device_event(
                     run,
                     {
@@ -376,7 +387,7 @@ class ToolbeltBatchService:
         selector = event.get("selector") or event.get("device")
         if not selector:
             return
-        certificate_id = event.get("certificate_id") or self._certificate_id_for(selector)
+        certificate_id = run.certificate_ids.get(selector) or event.get("certificate_id") or self._certificate_id_for(selector)
         ok = event.get("event", "").endswith("_ok")
         state = {
             "event": event.get("event"),
@@ -399,6 +410,17 @@ class ToolbeltBatchService:
             self.database.put_setting(STATUS_KEY, latest)
 
     def _finish(self, run, status):
+        if run.mode == "upload":
+            outcomes = [{"selector": selector, "certificate_id": certificate_id,
+                         "ok": (run.devices.get(selector) or {}).get("event") == "upload_ok",
+                         "status": (run.devices.get(selector) or {}).get("event") or "not_attempted"}
+                        for selector, certificate_id in run.certificate_ids.items()]
+            try:
+                self.upload_queue.finish(method="toolbelt", run_id=run.id, outcomes=outcomes,
+                                         remove_successful=run.remove_successful and status == "complete")
+            except Exception:
+                run.error = "Could not save upload results to Audit. Upload list was not cleared."
+                status = "failed"
         with self._lock:
             run.status = status
             run.finished_at = utc_now()

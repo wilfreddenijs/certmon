@@ -34,6 +34,7 @@ from certmon.auth import (
     public_user,
 )
 from certmon.audit import AuditService
+from certmon.upload_queue import AUTO_REMOVE_KEY, UploadQueueService
 from certmon.config import ConfigError, resolve_data_dir, resolve_runtime_config
 from certmon.csrf import CSRFError, CSRF_HEADER, csrf_token_for_session, validate_csrf
 from certmon.ca_migration import migrate_legacy_ca_if_present
@@ -2241,6 +2242,19 @@ def toolbelt_devices():
     if _toolbelt_unavailable():
         return jsonify({"error": "Toolbelt batch upload is unavailable"}), 503
     return jsonify({"devices": toolbelt_service.list_devices()})
+
+
+@app.route("/api/upload/preferences", methods=["GET", "POST"])
+def upload_preferences():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    queue = UploadQueueService(database)
+    if request.method == "POST":
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or set(body) != {"auto_remove_successful"} or type(body["auto_remove_successful"]) is not bool:
+            return jsonify({"error": "auto_remove_successful must be a boolean"}), 400
+        database.put_setting(AUTO_REMOVE_KEY, body["auto_remove_successful"])
+        audit("upload_preferences_updated", details=body)
+    return jsonify({"auto_remove_successful": queue.auto_remove()})
 
 
 @app.route("/api/toolbelt/selection", methods=["PATCH"])
