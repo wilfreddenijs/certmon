@@ -985,10 +985,6 @@
         <div class="section-title" style="margin-bottom:8px">Audit log</div>
         <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
         <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="loadAudit()">Refresh audit</button>
-        <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="testAuditTimer()">Test timer</button>
-        <a href="/api/audit?limit=100" target="_blank" rel="noopener" style="display:inline-block;margin-bottom:12px">
-          <button class="btn btn-ghost" type="button" style="font-size:11px;padding:6px 10px">Open raw audit JSON</button>
-        </a>
         <div id="audit-list" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
     </div>
@@ -1887,27 +1883,7 @@
   function prepareAuditTab() {
     const list = document.getElementById('audit-list');
     if (!list) return;
-    list.innerHTML = '<div class="help-text">Audit tab ready. Click Refresh audit to load events, or Test timer to verify browser timers.</div>';
-  }
-
-  function testAuditTimer() {
-    const list = document.getElementById('audit-list');
-    if (!list) return;
-    const sequence = ++auditLoadSequence;
-    const startedAt = Date.now();
-    const timer = setInterval(() => {
-      if (sequence !== auditLoadSequence) {
-        clearInterval(timer);
-        return;
-      }
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      list.innerHTML = `<div class="help-text">Audit timer test: ${seconds}s</div>`;
-      if (seconds >= 10) {
-        clearInterval(timer);
-        list.innerHTML = '<div class="help-text" style="color:var(--accent)">Audit timer test completed after 10 seconds.</div>';
-      }
-    }, 1000);
-    list.innerHTML = '<div class="help-text">Audit timer test: 0s</div>';
+    list.innerHTML = '<div class="help-text">No audit events loaded.</div>';
   }
 
   function loadAudit() {
