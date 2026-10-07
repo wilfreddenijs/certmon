@@ -123,10 +123,12 @@ def add_ui(monkeypatch, uploader, request):
         'ComboBox': [Control('', 125)],
         'Button': [Control('Add', 300, submit), Control('Cancel', 300, cancel)],
     }
-    if getattr(request, 'param', 'uia') == 'win32':
+    native_kind = getattr(request, 'param', 'uia')
+    if native_kind in {'win32', 'win32_generic_labels'}:
         for kind, items in controls.items():
             for item in items:
-                item.friendly_class_name = lambda kind=kind: 'Static' if kind == 'Text' else kind
+                item.friendly_class_name = lambda kind=kind: (
+                    ('Window' if native_kind == 'win32_generic_labels' else 'Static') if kind == 'Text' else kind)
         dialog = types.SimpleNamespace(
             backend=types.SimpleNamespace(name='win32'),
             descendants=lambda: [item for items in controls.values() for item in items])
@@ -145,7 +147,7 @@ def add_ui(monkeypatch, uploader, request):
     return win, state, controls
 
 
-@pytest.mark.parametrize('add_ui', ['uia', 'win32'], indirect=True)
+@pytest.mark.parametrize('add_ui', ['uia', 'win32', 'win32_generic_labels'], indirect=True)
 def test_add_device_fills_address_and_saved_password_without_editing_admin(uploader, add_ui):
     win, state, _ = add_ui
     uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'username': 'admin', 'password': 'secret'}}
@@ -382,6 +384,61 @@ def test_native_add_dialog_controls_use_friendly_classes(uploader):
     assert uploader._add_dialog_controls(dialog, 'Text') == [label]
     assert uploader._add_dialog_controls(dialog, 'Edit') == [edit]
     assert uploader._credentials_rejected_present(dialog)
+
+
+def test_add_field_falls_back_to_uia_for_same_native_handle(monkeypatch, uploader):
+    rect = lambda top: types.SimpleNamespace(left=70, right=420, top=top, bottom=top + 18)
+    label = types.SimpleNamespace(window_text=lambda: 'IP Address/Hostname', rectangle=lambda: rect(100))
+    address = types.SimpleNamespace(is_visible=lambda: True, rectangle=lambda: rect(125))
+    alternate = types.SimpleNamespace(descendants=lambda control_type: {'Text': [label], 'ComboBox': [address]}.get(control_type, []))
+    calls = []
+
+    def desktop(backend):
+        assert backend == 'uia'
+
+        def window(**kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(wrapper_object=lambda: alternate)
+
+        return types.SimpleNamespace(window=window)
+
+    monkeypatch.setattr(uploader, 'Desktop', desktop)
+    native = types.SimpleNamespace(backend=types.SimpleNamespace(name='win32'), handle=987, descendants=lambda: [])
+    assert uploader._add_device_edit(native, 'IP Address/Hostname') is address
+    assert calls == [{'handle': 987}]
+
+
+def test_add_buttons_fall_back_to_uia_for_same_native_handle(monkeypatch, uploader):
+    button = object()
+    alternate = types.SimpleNamespace(descendants=lambda control_type: [button] if control_type == 'Button' else [])
+    calls = []
+    monkeypatch.setattr(uploader, 'Desktop', lambda backend: types.SimpleNamespace(
+        window=lambda **kwargs: calls.append(kwargs) or types.SimpleNamespace(wrapper_object=lambda: alternate)))
+    native = types.SimpleNamespace(backend=types.SimpleNamespace(name='win32'), handle=987, descendants=lambda: [])
+    assert uploader._add_dialog_controls(native, 'Button') == [button]
+    assert calls == [{'handle': 987}]
+
+
+def test_add_dialog_diagnostics_never_read_control_values(uploader, caplog):
+    control = types.SimpleNamespace(
+        class_name=lambda: 'WindowsForms10.EDIT', friendly_class_name=lambda: 'Edit',
+        rectangle=lambda: types.SimpleNamespace(left=1, right=20, top=3, bottom=10),
+        window_text=lambda: pytest.fail('diagnostics must not read credential values'))
+    uploader._log_add_dialog_structure(types.SimpleNamespace(descendants=lambda: [control]))
+    assert 'WindowsForms10.EDIT' in caplog.text
+
+
+@pytest.mark.parametrize('add_ui', ['win32_generic_labels'], indirect=True)
+def test_generic_native_labels_ignore_container_bounds(uploader, add_ui):
+    win, state, controls = add_ui
+    panel = types.SimpleNamespace(
+        friendly_class_name=lambda: 'Window', window_text=lambda: '',
+        rectangle=lambda: types.SimpleNamespace(left=70, right=420, top=120, bottom=280))
+    controls['Text'].append(panel)
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'password': 'secret'}}
+    uploader.add_device(win, '192.168.0.112')
+    assert state.filled == [(125, '192.168.0.112'), (245, 'secret')]
+    assert len(state.submitted) == 1
 
 
 def test_add_device_does_not_put_address_in_another_field(uploader, add_ui):

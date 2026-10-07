@@ -1433,21 +1433,67 @@ def _find_add_device_dialog(win):
 
 def _add_dialog_controls(dialog, control_type):
     if getattr(getattr(dialog, "backend", None), "name", None) == "win32":
-        friendly_class = "Static" if control_type == "Text" else control_type
-        return [control for control in dialog.descendants()
-                if control.friendly_class_name() == friendly_class]
+        controls = dialog.descendants()
+        if control_type == "Text":
+            # WinForms labels can be generic Window controls, not Static.
+            return [control for control in controls
+                    if control.friendly_class_name() not in {"Edit", "ComboBox", "Button"}]
+        matches = [control for control in controls
+                   if control.friendly_class_name() == control_type]
+        if not matches:
+            alternate = _add_dialog_uia(dialog)
+            if alternate is not None:
+                return alternate.descendants(control_type=control_type)
+        return matches
     return dialog.descendants(control_type=control_type)
 
 
+def _add_dialog_uia(dialog):
+    try:
+        return Desktop(backend="uia").window(handle=dialog.handle).wrapper_object()
+    except Exception:
+        return None
+
+
 def _add_device_edit(dialog, label):
+    try:
+        return _find_add_device_edit(dialog, label)
+    except RuntimeError:
+        if getattr(getattr(dialog, "backend", None), "name", None) == "win32":
+            alternate = _add_dialog_uia(dialog)
+            if alternate is not None:
+                try:
+                    return _find_add_device_edit(alternate, label)
+                except RuntimeError:
+                    pass
+        _log_add_dialog_structure(dialog)
+        raise
+
+
+def _log_add_dialog_structure(dialog):
+    # Never collect Edit text, accessible names, or credential values.
+    structure = []
+    try:
+        for control in dialog.descendants():
+            rect = control.rectangle()
+            structure.append((control.class_name(), control.friendly_class_name(),
+                              (rect.left, rect.top, rect.right, rect.bottom)))
+        log.warning("Toolbelt Add Device controls (classes and bounds only): %s", structure)
+    except Exception:
+        log.warning("Toolbelt Add Device control structure unavailable")
+
+
+def _find_add_device_edit(dialog, label):
     texts = _add_dialog_controls(dialog, "Text")
     labels = [control for control in texts
               if (control.window_text() or "").strip().rstrip(":").lower() == label.lower()]
     if len(labels) != 1:
         raise RuntimeError("Toolbelt Add Device field not found: %s" % label)
     anchor = labels[0].rectangle()
+    field_labels = {"ip address/hostname", "username", "password"}
     next_label_top = min((control.rectangle().top for control in texts
-                          if control.rectangle().top > anchor.top), default=float("inf"))
+                          if (control.window_text() or "").strip().rstrip(":").lower() in field_labels
+                          and control.rectangle().top > anchor.top), default=float("inf"))
     candidates = []
     for control_type in ("Edit", "ComboBox"):
         for edit in _add_dialog_controls(dialog, control_type):
@@ -1554,8 +1600,10 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
                        if button.is_visible() and button.is_enabled()
                        and (button.window_text() or "").replace("&", "").strip().lower() == "add"]
             if len(buttons) != 1:
+                _log_add_dialog_structure(dialog)
                 raise RuntimeError("Toolbelt Add Device submit button not found or ambiguous")
             emit("device_adding", selector=ip, message="Adding device by address in Toolbelt")
+            log.info("[%s] Toolbelt Add fields prepared; submitting Add", ip)
             buttons[0].click_input()
             deadline = time.time() + timeout
             reject_grace = time.time() + 2.5
