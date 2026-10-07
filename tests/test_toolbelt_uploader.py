@@ -74,12 +74,13 @@ def test_credentials_modal_detection_treats_busy_uia_tree_as_not_present(uploade
 def test_select_device_opens_serial_column_only_after_rejected_credentials(uploader):
     source = inspect.getsource(uploader.select_device)
 
-    first_manage = source.index("manage.click_input()")
+    first_open = source.index("ip_cell.click_input()")
     serial_enable = source.rindex("ensure_serial_column_visible")
     serial_read = source.rindex("discover_serial_from_row")
 
     assert "except SerialFallbackNeeded" in source
-    assert first_manage < serial_enable < serial_read
+    assert first_open < serial_enable < serial_read
+    assert 'DeviceDiscoveryUserControl_ManageButton' not in source
 
 
 @pytest.fixture
@@ -285,14 +286,15 @@ def test_main_does_not_start_discovery_for_upload_batches(uploader):
     assert 'ensure_discovery_started' not in inspect.getsource(uploader.main)
 
 
-def test_select_device_adds_first_then_requires_exact_address_without_discovery(monkeypatch, uploader):
+@pytest.mark.parametrize('has_manage_button', [True, False])
+def test_select_device_adds_first_then_requires_exact_address_without_discovery(monkeypatch, uploader, has_manage_button):
     calls = []
     cell = types.SimpleNamespace(rectangle=lambda: types.SimpleNamespace(top=200, bottom=220),
                                  click_input=lambda: calls.append('row'))
     button = types.SimpleNamespace(element_info=types.SimpleNamespace(automation_id='DeviceDiscoveryUserControl_ManageButton'),
-                                   rectangle=cell.rectangle, click_input=lambda: calls.append('manage'))
+                                   rectangle=cell.rectangle, click_input=lambda: pytest.fail('IP link already opens management'))
     tab = types.SimpleNamespace(click_input=lambda: calls.append('utilities'))
-    win = types.SimpleNamespace(descendants=lambda control_type: [button] if control_type == 'Button' else [])
+    win = types.SimpleNamespace(descendants=lambda control_type: [button] if control_type == 'Button' and has_manage_button else [])
     monkeypatch.setattr(uploader, 'add_device', lambda win, ip: calls.append(('add', ip)))
 
     def find(win, ip, start_discovery):
@@ -306,7 +308,7 @@ def test_select_device_adds_first_then_requires_exact_address_without_discovery(
     monkeypatch.setattr(uploader, '_text_visible', lambda *args: True)
     monkeypatch.setattr(uploader.time, 'sleep', lambda seconds: None)
     uploader.select_device(win, '192.168.0.112')
-    assert calls == [('add', '192.168.0.112'), ('find', '192.168.0.112'), 'row', 'manage', 'utilities']
+    assert calls == [('add', '192.168.0.112'), ('find', '192.168.0.112'), 'row', 'utilities']
 
 
 def test_exact_row_matching_does_not_accept_ip_prefix(uploader):

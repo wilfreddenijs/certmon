@@ -1654,7 +1654,7 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
 
 
 def select_device(win, ip, timeout=T_MANAGE):
-    """Find the device row for `ip`, click Manage, then open the Utilities tab."""
+    """Open the exact device IP link, then open the Utilities tab."""
     log.info("[%s] selecting device", ip)
 
     serial = None
@@ -1673,23 +1673,9 @@ def select_device(win, ip, timeout=T_MANAGE):
         raise RuntimeError("device %s not found in Toolbelt after Add" % ip)
 
     row_y = cy(ip_cell.rectangle())
-    # Click the row to select it
+    # The IP link opens device management; a second Manage click is redundant.
     ip_cell.click_input()
     time.sleep(0.5)
-
-    # Manage button on the same row
-    manage = None
-    for b in win.descendants(control_type="Button"):
-        try:
-            aid = b.element_info.automation_id or ""
-        except Exception:
-            aid = ""
-        if aid == "DeviceDiscoveryUserControl_ManageButton" and abs(cy(b.rectangle()) - row_y) < 30:
-            manage = b
-            break
-    if manage is None:
-        raise RuntimeError("Manage button not found for %s" % ip)
-    manage.click_input()
 
     # An unauthenticated device shows a credentials modal that blocks the page —
     # accept it (prefilled admin/extron) before anything else.
@@ -1716,18 +1702,6 @@ def select_device(win, ip, timeout=T_MANAGE):
         log.info("[%s] retrying Toolbelt credentials with serial fallback %s", ip, _masked_secret(serial))
         ip_cell.click_input()
         time.sleep(0.5)
-        manage = None
-        for b in win.descendants(control_type="Button"):
-            try:
-                aid = b.element_info.automation_id or ""
-            except Exception:
-                aid = ""
-            if aid == "DeviceDiscoveryUserControl_ManageButton" and abs(cy(b.rectangle()) - row_y) < 30:
-                manage = b
-                break
-        if manage is None:
-            raise RuntimeError("Manage button not found for %s after serial fallback" % ip)
-        manage.click_input()
         accept_credentials_prompt(win, ip, serial=serial)
 
     # Wait for the Utilities tab to be available, then click it. Slow devices
