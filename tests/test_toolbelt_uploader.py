@@ -171,6 +171,49 @@ def test_add_device_retries_password_candidates_and_cancels_on_rejection(uploade
 
 
 @pytest.mark.parametrize('add_ui', ['uia', 'win32_generic_labels'], indirect=True)
+def test_add_authentication_failed_retries_extron_without_timeout(monkeypatch, uploader, add_ui):
+    win, state, controls = add_ui
+    status = types.SimpleNamespace(
+        window_text=lambda: 'Authentication Failed', is_visible=lambda: state.reject,
+        friendly_class_name=lambda: 'Window',
+        rectangle=lambda: types.SimpleNamespace(left=70, right=420, top=270, bottom=288))
+    controls['Text'].append(status)
+    original_submit = controls['Button'][0].action
+
+    def submit():
+        state.reject = len(state.submitted) == 0
+        original_submit()
+
+    controls['Button'][0].action = submit
+    monkeypatch.setattr(uploader, '_credentials_rejected_present', lambda dialog: uploader._dialog_status_present(dialog, ('authentication failed',)))
+    monkeypatch.setattr(uploader, '_add_dialog_uia', lambda dialog: None)
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'username': 'admin', 'password_candidates': ['wrong-shared', 'extron', '__SERIAL__']}}
+    uploader.add_device(win, '192.168.0.112', timeout=20)
+    assert state.filled == [(125, '192.168.0.112'), (245, 'wrong-shared'), (245, 'extron')]
+    assert len(state.submitted) == 2
+    assert not state.open
+    assert not state.cancelled
+
+
+@pytest.mark.parametrize('visible, text, expected', [
+    (True, 'Authentication Failed', True),
+    (True, 'AUTHENTICATION   FAILED', True),
+    (True, 'Authentication Failure', True),
+    (False, 'Authentication Failed', False),
+])
+def test_authentication_failure_detection_requires_visible_status(uploader, visible, text, expected):
+    status = types.SimpleNamespace(window_text=lambda: text, is_visible=lambda: visible)
+    dialog = types.SimpleNamespace(descendants=lambda control_type: [status] if control_type == 'Text' else [])
+    assert uploader._credentials_rejected_present(dialog) is expected
+
+
+def test_authentication_status_ignores_password_edit_values(uploader):
+    password = types.SimpleNamespace(window_text=lambda: 'authentication failed', is_visible=lambda: True)
+    dialog = types.SimpleNamespace(descendants=lambda control_type: [password] if control_type == 'Edit' else [])
+    assert not uploader._credentials_rejected_present(dialog)
+
+
+@pytest.mark.parametrize('add_ui', ['uia', 'win32_generic_labels'], indirect=True)
 def test_add_device_unreachable_stops_without_password_or_serial_retry(uploader, add_ui):
     win, state, controls = add_ui
     state.reject = True
@@ -455,7 +498,7 @@ def test_add_dialog_lookup_rejects_multiple_native_modals(monkeypatch, uploader)
 
 
 def test_native_add_dialog_controls_use_friendly_classes(uploader):
-    label = types.SimpleNamespace(friendly_class_name=lambda: 'Static', window_text=lambda: 'failed to connect')
+    label = types.SimpleNamespace(friendly_class_name=lambda: 'Static', window_text=lambda: 'failed to connect', is_visible=lambda: True)
     edit = types.SimpleNamespace(friendly_class_name=lambda: 'Edit', window_text=lambda: '')
     dialog = types.SimpleNamespace(backend=types.SimpleNamespace(name='win32'), descendants=lambda: [label, edit])
     assert uploader._add_dialog_controls(dialog, 'Text') == [label]

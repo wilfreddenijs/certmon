@@ -1056,15 +1056,13 @@ def _credentials_modal_text(win):
 
 
 def _credentials_rejected_present(win):
-    joined = _credentials_modal_text(win)
-    return any(
-        marker in joined
-        for marker in (
+    return _dialog_status_present(win, (
             "credentials are incorrect",
             "credentials entered are incorrect",
             "failed to connect",
-        )
-    )
+            "authentication failed",
+            "authentication failure",
+        ))
 
 
 
@@ -1460,17 +1458,25 @@ def _add_dialog_uia(dialog):
 
 
 def _device_unreachable_present(dialog):
-    for control in _add_dialog_controls(dialog, "Text"):
+    return _dialog_status_present(dialog, ("device unreachable",))
+
+
+def _dialog_status_present(dialog, markers):
+    try:
+        controls = _add_dialog_controls(dialog, "Text")
+    except Exception:
+        controls = []
+    for control in controls:
         try:
-            if control.is_visible() and "device unreachable" in " ".join(
-                    (control.window_text() or "").lower().split()):
+            text = " ".join((control.window_text() or "").lower().split())
+            if control.is_visible() and any(marker in text for marker in markers):
                 return True
         except Exception:
             continue
     if getattr(getattr(dialog, "backend", None), "name", None) == "win32":
         alternate = _add_dialog_uia(dialog)
         if alternate is not None:
-            return _device_unreachable_present(alternate)
+            return _dialog_status_present(alternate, markers)
     return False
 
 
@@ -1612,7 +1618,7 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
             if not user.is_enabled() or not _fill_edit(user, dialog, username):
                 raise RuntimeError("Toolbelt Add Device does not accept the configured username")
         password = _add_device_edit(dialog, "Password")
-        for candidate_password, source in candidates:
+        for attempt, (candidate_password, source) in enumerate(candidates):
             if candidate_password is not None and not _fill_edit(password, dialog, candidate_password):
                 raise RuntimeError("Could not fill Toolbelt Add Device password")
             buttons = [button for button in _add_dialog_controls(dialog, "Button")
@@ -1625,7 +1631,8 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
             log.info("[%s] Toolbelt Add fields prepared; submitting Add", ip)
             buttons[0].click_input()
             deadline = time.time() + timeout
-            reject_grace = time.time() + 2.5
+            # Later attempts may briefly retain the preceding failure label.
+            reject_grace = time.time() + (2.5 if attempt else 0)
             while time.time() < deadline:
                 current = _find_add_device_dialog(win)
                 if current is None:
@@ -1634,6 +1641,7 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
                 if _device_unreachable_present(current):
                     raise DeviceUnreachableError("Device unreachable: %s (reported by Toolbelt)" % ip)
                 if time.time() >= reject_grace and _credentials_rejected_present(current):
+                    log.info("[%s] Toolbelt rejected credentials; checking next configured candidate", ip)
                     break
                 time.sleep(POLL)
             else:
