@@ -230,6 +230,99 @@ def test_exact_row_matching_does_not_accept_ip_prefix(uploader):
     assert uploader._visible_device_cell(win, '192.168.0.112') is cell
 
 
+@pytest.mark.parametrize('control_type', ['Button', 'MenuItem', 'Custom', 'Text'])
+def test_add_toolbar_accepts_accessibility_name_and_control_types(uploader, control_type):
+    clicks = []
+    rect = types.SimpleNamespace(left=80, right=140, top=50, bottom=110)
+    control = types.SimpleNamespace(
+        is_visible=lambda: True, is_enabled=lambda: True, window_text=lambda: '',
+        element_info=types.SimpleNamespace(name='Add', automation_id=''),
+        rectangle=lambda: rect, click_input=lambda: clicks.append('add'),
+    )
+    toolbar = types.SimpleNamespace(descendants=lambda control_type: [control] if control_type == kind else [])
+    kind = control_type
+    win = types.SimpleNamespace(descendants=lambda control_type: [toolbar] if control_type == 'ToolBar' else [])
+    uploader._click_add_toolbar(win)
+    assert clicks == ['add']
+
+
+def test_add_toolbar_deduplicates_button_and_label(uploader):
+    clicks = []
+
+    def control(left, right, top, bottom):
+        return types.SimpleNamespace(
+            is_visible=lambda: True, window_text=lambda: 'Add',
+            rectangle=lambda: types.SimpleNamespace(left=left, right=right, top=top, bottom=bottom),
+            click_input=lambda: clicks.append(left),
+        )
+
+    button, text = control(80, 140, 50, 110), control(100, 125, 90, 105)
+    win = types.SimpleNamespace(descendants=lambda control_type: {'Button': [button], 'Text': [text]}.get(control_type, []))
+    uploader._click_add_toolbar(win)
+    assert clicks == [80]
+
+
+def test_add_toolbar_does_not_guess_between_independent_add_controls(uploader):
+    def control(left):
+        return types.SimpleNamespace(
+            is_visible=lambda: True, window_text=lambda: 'Add',
+            rectangle=lambda: types.SimpleNamespace(left=left, right=left + 60, top=50, bottom=110),
+            click_input=lambda: pytest.fail('Ambiguous Add controls must not be clicked'),
+        )
+
+    win = types.SimpleNamespace(descendants=lambda control_type: [control(80), control(200)] if control_type == 'Button' else [])
+    with pytest.raises(RuntimeError, match='ambiguous'):
+        uploader._click_add_toolbar(win)
+
+
+def test_add_toolbar_uses_native_fallback_when_uia_exposes_no_button(monkeypatch, uploader):
+    calls = []
+    monkeypatch.setattr(uploader, '_click_native_add_toolbar', lambda win: calls.append('native') or True)
+    uploader._click_add_toolbar(types.SimpleNamespace(descendants=lambda control_type: []))
+    assert calls == ['native']
+
+
+def test_native_add_toolbar_targets_same_window_and_exact_button(monkeypatch, uploader):
+    calls = []
+    button = types.SimpleNamespace(is_enabled=lambda: True, click_input=lambda: calls.append('click'))
+
+    def find_button(name, exact):
+        assert name == 'Add' and exact is True
+        return button
+
+    toolbar = types.SimpleNamespace(is_visible=lambda: True, button=find_button)
+    native = types.SimpleNamespace(descendants=lambda class_name: [toolbar] if class_name == 'ToolbarWindow32' else [])
+
+    class Application:
+        def __init__(self, backend):
+            assert backend == 'win32'
+
+        def connect(self, handle):
+            calls.append(('connect', handle))
+            return self
+
+        def window(self, handle):
+            calls.append(('window', handle))
+            return native
+
+    monkeypatch.setattr(uploader, 'Application', Application)
+    assert uploader._click_native_add_toolbar(types.SimpleNamespace(handle=123))
+    assert calls == [('connect', 123), ('window', 123), 'click']
+
+
+def test_closed_4503_port_does_not_skip_toolbelt_add(monkeypatch, uploader):
+    calls = []
+    monkeypatch.setattr(uploader, 'reachable', lambda ip: False)
+    monkeypatch.setattr(uploader.os.path, 'exists', lambda path: True)
+    monkeypatch.setattr(uploader, 'bring_to_front', lambda win: None)
+    monkeypatch.setattr(uploader, 'select_device', lambda win, ip: calls.append(ip))
+    monkeypatch.setattr(uploader, 'find_ssl_controls', lambda win: {'dots_btn': None, 'pass_edit': None})
+    monkeypatch.setattr(uploader, 'set_cert_path', lambda *args: None)
+    monkeypatch.setattr(uploader, 'set_passphrase', lambda *args: None)
+    assert uploader.upload_to_device(None, None, '10.10.186.105', 'test.pem', '', False) == (True, 'dry-run (not applied)')
+    assert calls == ['10.10.186.105']
+
+
 def test_add_dialog_lookup_is_scoped_to_toolbelt_process(monkeypatch, uploader):
     calls = []
     dialog = types.SimpleNamespace(is_visible=lambda: True)

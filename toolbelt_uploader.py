@@ -1442,15 +1442,77 @@ def _add_device_edit(dialog, label):
     return min(candidates, key=lambda item: item[:2])[2]
 
 
+def _click_native_add_toolbar(win):
+    targets = []
+    try:
+        native = Application(backend="win32").connect(handle=win.handle).window(handle=win.handle)
+        for toolbar in native.descendants(class_name="ToolbarWindow32"):
+            try:
+                if toolbar.is_visible():
+                    button = toolbar.button("Add", exact=True)
+                    if button.is_enabled():
+                        targets.append(button)
+            except Exception:
+                continue
+    except Exception:
+        return False
+    if len(targets) != 1:
+        return False
+    targets[0].click_input()
+    log.info("Clicked native Toolbelt Add toolbar button")
+    return True
+
+
+def _click_add_toolbar(win):
+    """Toolbar items may expose a Name or Text child instead of a Button."""
+    toolbar_roots = win.descendants(control_type="ToolBar")
+    roots = toolbar_roots or [win]
+    candidates = []
+    diagnostics = []
+    for root in roots:
+        for control_type in ("Button", "MenuItem", "SplitButton", "Custom", "Text", "Hyperlink"):
+            for control in root.descendants(control_type=control_type):
+                try:
+                    if not control.is_visible():
+                        continue
+                    labels = [control.window_text() or ""]
+                    info = getattr(control, "element_info", None)
+                    labels.append(getattr(info, "name", "") or "")
+                    automation_id = (getattr(info, "automation_id", "") or "").lower()
+                    normalized = {" ".join(label.replace("&", "").lower().split()) for label in labels}
+                    if control_type in {"Button", "MenuItem", "SplitButton"}:
+                        diagnostics.append((control_type, labels, getattr(info, "automation_id", "")))
+                    if normalized & {"add", "add device", "add...", "add device..."} or automation_id.endswith(("_add", "_addbutton", "_adddevice")):
+                        if hasattr(control, "is_enabled") and not control.is_enabled():
+                            continue
+                        rect = control.rectangle()
+                        if rect.right > rect.left and rect.bottom > rect.top:
+                            candidates.append((control, rect))
+                except Exception:
+                    continue
+    # Collapse the Text child and its surrounding toolbar button into one
+    # target; independent Add controls remain ambiguous and are never guessed.
+    targets = []
+    for control, rect in candidates:
+        if any(existing.left <= cx(rect) <= existing.right and existing.top <= cy(rect) <= existing.bottom
+               or rect.left <= cx(existing) <= rect.right and rect.top <= cy(existing) <= rect.bottom
+               for _, existing in targets):
+            continue
+        targets.append((control, rect))
+    if len(targets) != 1:
+        if not targets and _click_native_add_toolbar(win):
+            return
+        log.warning("Toolbelt Add toolbar detection: targets=%d; controls=%s", len(targets), diagnostics[:40])
+        raise RuntimeError("Toolbelt Add toolbar control not found or ambiguous; see toolbelt_upload.log")
+    targets[0][0].click_input()
+    log.info("Clicked Toolbelt Add toolbar control")
+
+
 def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
     """Use Toolbelt's Add dialog without starting network discovery."""
     dialog = _find_add_device_dialog(win)
     if dialog is None:
-        buttons = [button for button in win.descendants(control_type="Button")
-                   if button.is_visible() and (button.window_text() or "").strip().lower() == "add"]
-        if len(buttons) != 1:
-            raise RuntimeError("Toolbelt Add toolbar button not found or ambiguous")
-        buttons[0].click_input()
+        _click_add_toolbar(win)
         dialog = _wait_for_ui(win, ip, "Add Device dialog", lambda: _find_add_device_dialog(win), timeout=T_DIALOG)
     credential = _DEVICE_CREDENTIALS.get(ip) or {}
     username = credential.get("username") or "admin"
@@ -1857,7 +1919,7 @@ def already_current(ip, pem_path):
 def upload_to_device(app, win, ip, pem_path, passphrase, commit, force=False):
     """Full per-device flow using Add, exact row selection and Utilities."""
     if not reachable(ip):
-        return False, "unreachable (port 4503 closed — offline or not routable)"
+        log.info("[%s] Port 4503 probe failed; letting Toolbelt Add test connectivity", ip)
     if not os.path.exists(pem_path):
         return False, "no .pem at %s (issue it first or use --issue)" % pem_path
     # Skip devices that already serve this exact cert (avoids needless reboots
