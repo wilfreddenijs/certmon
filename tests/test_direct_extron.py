@@ -128,6 +128,10 @@ class FakeRouteService:
         self.calls.append(("activate", kwargs))
         return {"status": "verified", "staged_name": "certmon-safe.pem"}
 
+    def remove_certificate(self, **kwargs):
+        self.calls.append(("remove", kwargs))
+        return {"status": "removal_acknowledged", "nic": kwargs["nic"]}
+
     def cleanup_one(self, **kwargs):
         self.calls.append(("cleanup", kwargs))
         return {"status": "deleted", "staged_name": kwargs["staged_name"]}
@@ -205,6 +209,126 @@ def approve(service, selector="10.0.0.10", nic=1):
             return
         assert probe["status"] == "approval_required"
         service.approve_host_key(selector=selector, nic=nic, fingerprint=probe["fingerprint"])
+
+
+class CertificateRemovalTransport(FakeTransport):
+    def __init__(self, *, delete_reply=None, view_reply=None):
+        super().__init__()
+        self.delete_reply = delete_reply
+        self.view_reply = view_reply
+
+    def certificate_command(self, identity, credentials, command, **kwargs):
+        self.auth_attempts.append((identity, credentials))
+        self.sis_commands.append((identity, command))
+        if kwargs["response_kind"] == "delete":
+            return self.delete_reply if self.delete_reply is not None else f"CertX{identity.nic}\r\r\n".encode()
+        return self.view_reply if self.view_reply is not None else b'{"C":"test-default"}\r\n'
+
+
+@pytest.mark.parametrize("nic", [1, 2])
+def test_certificate_removal_targets_one_interface_and_preserves_artifacts(tmp_path, nic):
+    service, database, artifacts, transport = make_service(tmp_path, transport=CertificateRemovalTransport())
+    if nic == 2:
+        service.save_lan_b_target("10.0.0.10", host="10.0.1.10")
+    approve(service, nic=nic)
+    result = service.remove_certificate(selector="10.0.0.10", nic=nic, confirm_delete=True)
+    assert result["status"] == "removal_acknowledged"
+    assert result["certificate_information"] == {"C": "test-default"}
+    assert [command for _, command in transport.sis_commands] == [f"\x1bX{nic}CERT\r".encode(), f"\x1bV{nic}CERT\r".encode()]
+    assert all(identity.nic == nic and identity.host == ("10.0.0.10" if nic == 1 else "10.0.1.10") for identity, _ in transport.sis_commands)
+    assert artifacts.has_certificate("cert-1") and artifacts.materializations == 0
+    assert transport.sftp_writes == [] and transport.deleted == []
+    assert database.get_setting(service.STAGED_KEY, {}) == {}
+
+
+@pytest.mark.parametrize("confirmation,nic", [(False, 1), ("true", 1), (True, True), (True, "1"), (True, 3)])
+def test_certificate_removal_requires_strict_confirmation_and_nic(tmp_path, confirmation, nic):
+    service, _, _, transport = make_service(tmp_path, transport=CertificateRemovalTransport())
+    with pytest.raises(ValueError):
+        service.remove_certificate(selector="10.0.0.10", nic=nic, confirm_delete=confirmation)
+    assert transport.sis_commands == [] and transport.probes == []
+
+
+def test_certificate_mutations_cannot_overlap(tmp_path):
+    service, _, _, transport = make_service(tmp_path, transport=CertificateRemovalTransport())
+    with service._certificate_operation():
+        with pytest.raises(ValueError, match='already running'):
+            service.remove_certificate(selector='10.0.0.10', nic=1, confirm_delete=True)
+        with pytest.raises(ValueError, match='already running'):
+            service.activate_one(selector='10.0.0.10', certificate_id='cert-1')
+    assert transport.sis_commands == [] and transport.probes == []
+    with pytest.raises(ValueError):
+        service.remove_certificate(selector='10.0.0.10', nic=1, confirm_delete=False)
+    assert service.remove_certificate(selector='10.0.0.10', nic=1, confirm_delete=True)['status'] == 'approval_required'
+
+
+@pytest.mark.parametrize("reply", [b"", b"CertX2\r\n", b"CertX1\r\nCertX1\r\n", b"E13\r\n"])
+def test_certificate_removal_does_not_replay_or_claim_success_for_invalid_ack(tmp_path, reply):
+    service, _, _, transport = make_service(tmp_path, transport=CertificateRemovalTransport(delete_reply=reply))
+    approve(service)
+    result = service.remove_certificate(selector="10.0.0.10", nic=1, confirm_delete=True)
+    assert result["status"] == "removal_unconfirmed"
+    assert len(transport.sis_commands) == 2
+
+
+@pytest.mark.parametrize("reply", [b"", b"E13\r\n", b'CertV2{"C":"US"}\r\n', b'{}\r\n', b'{"C":"US"}\r\nnoise\r\n'])
+def test_certificate_removal_reports_unrecognized_readback_without_guessing(tmp_path, reply):
+    service, _, _, transport = make_service(tmp_path, transport=CertificateRemovalTransport(view_reply=reply))
+    approve(service)
+    result = service.remove_certificate(selector="10.0.0.10", nic=1, confirm_delete=True)
+    assert result["status"] == "removal_acknowledged"
+    assert "certificate_information" not in result
+    assert len(transport.sis_commands) == 2
+
+
+def test_certificate_removal_blocks_pending_uploads_and_unapproved_keys(tmp_path):
+    service, database, _, transport = make_service(tmp_path, transport=CertificateRemovalTransport())
+    assert service.remove_certificate(selector="10.0.0.10", nic=1, confirm_delete=True)["status"] == "approval_required"
+    assert transport.sis_commands == []
+    approve(service)
+    service._record_staged("certmon-pending.pem", service.target_for("10.0.0.10"), "cert-1")
+    with pytest.raises(ValueError, match="pending"):
+        service.remove_certificate(selector="10.0.0.10", nic=1, confirm_delete=True)
+    assert transport.sis_commands == []
+    database.put_setting(service.STAGED_KEY, {})
+    transport.key = "SHA256:changed"
+    assert service.remove_certificate(selector="10.0.0.10", nic=1, confirm_delete=True)["status"] == "host_key_changed"
+    assert transport.sis_commands == []
+
+
+def test_certificate_readback_accepts_exact_echo_and_verbose_prefix():
+    command = b"\x1bV1CERT\r"
+    exchange = SISExchange(b"", b'^[V1CERT\r\nCertV1{"C":"US"}\r\r\n', True)
+    assert DirectExtronService._certificate_information(exchange, 1, command) == {"C": "US"}
+    assert DirectExtronService._certificate_information(SISExchange(b"CertV1", exchange.received, True), 1, command) is None
+
+
+@pytest.mark.parametrize("kind,chunks,expected", [
+    ("delete", [b'^[X1CERT\r\n', b'CertX1\r\r\n'], b'^[X1CERT\r\nCertX1\r\r\n'),
+    ("view", [b'^[V1CERT\r\n', b'CertV1{"C":', b'"US"}\r\r\n'], b'^[V1CERT\r\nCertV1{"C":"US"}\r\r\n'),
+])
+def test_certificate_command_reader_waits_past_echo_for_complete_reply(kind, chunks, expected):
+    class Channel:
+        def recv_ready(self):
+            return bool(chunks)
+
+        def recv(self, size):
+            return chunks.pop(0)
+    assert ParamikoDirectTransport()._read_response(Channel(), response_kind=kind) == expected
+
+
+def test_certificate_removal_keeps_acknowledgement_after_readback_disconnect(tmp_path):
+    class DisconnectingTransport(CertificateRemovalTransport):
+        def certificate_command(self, identity, credentials, command, **kwargs):
+            if kwargs['response_kind'] == 'view':
+                raise OSError('Disconnected')
+            return super().certificate_command(identity, credentials, command, **kwargs)
+    service, _, _, transport = make_service(tmp_path, transport=DisconnectingTransport())
+    approve(service)
+    result = service.remove_certificate(selector='10.0.0.10', nic=1, confirm_delete=True)
+    assert result['status'] == 'removal_acknowledged'
+    assert result['response'] == 'transport_interrupted'
+    assert len(transport.sis_commands) == 1
 
 
 def test_endpoint_identity_is_exact_and_lan_b_requires_a_distinct_endpoint(tmp_path):
@@ -656,8 +780,12 @@ def test_direct_routes_use_injected_service_and_reject_private_browser_fields(
     assert len(authorized) == 5
 
 
+@pytest.mark.parametrize("endpoint,body,call", [
+    ("activate", {"selector": "10.0.0.10", "nic": 1, "certificate_id": "cert-1"}, "activate"),
+    ("certificate/delete", {"selector": "10.0.0.10", "nic": 1, "confirm_delete": True}, "remove"),
+])
 def test_direct_activation_uses_existing_server_auth_and_csrf_guards(
-    tmp_data_dir, monkeypatch
+    tmp_data_dir, monkeypatch, endpoint, body, call
 ):
     module = load_server_app(tmp_data_dir, monkeypatch)
     service = FakeRouteService()
@@ -666,20 +794,20 @@ def test_direct_activation_uses_existing_server_auth_and_csrf_guards(
     module.vault = object()
     client = module.app.test_client()
 
-    assert client.post("/api/direct-extron/activate", json={}).status_code == 401
+    assert client.post(f"/api/direct-extron/{endpoint}", json={}).status_code == 401
     client.post(
         "/api/auth/setup-first-admin",
         json={"username": "admin", "password": "correct horse", "password_confirmation": "correct horse"},
     )
-    assert client.post("/api/direct-extron/activate", json={}).status_code == 403
+    assert client.post(f"/api/direct-extron/{endpoint}", json={}).status_code == 403
     status = client.get("/api/auth/status").get_json()
     response = client.post(
-        "/api/direct-extron/activate",
-        json={"selector": "10.0.0.10", "nic": 1, "certificate_id": "cert-1"},
+        f"/api/direct-extron/{endpoint}",
+        json=body,
         headers={status["csrf_header"]: status["csrf_token"]},
     )
     assert response.status_code == 200
-    assert [name for name, _ in service.calls] == ["activate"]
+    assert [name for name, _ in service.calls] == [call]
 
 
 def test_direct_upload_browser_starts_without_network_or_activation(page, live_certmon):
@@ -691,8 +819,9 @@ def test_direct_upload_browser_starts_without_network_or_activation(page, live_c
     page.goto(certmon.base_url)
     page.wait_for_function("typeof switchTab === 'function'")
     page.evaluate("switchTab('upload')")
-    expect(page.locator('#direct-extron-upload')).to_be_visible()
+    expect(page.locator('#direct-extron-upload')).not_to_be_visible()
     expect(page.locator('#toolbelt-batch')).to_be_visible()
+    page.evaluate("document.getElementById('direct-extron-upload').showModal()")
     expect(page.locator('#direct-extron-activate')).to_be_disabled()
     expect(page.locator('#direct-extron-activate')).to_have_text('Upload certificate')
     buttons = page.locator('#direct-extron-upload button')
@@ -728,6 +857,108 @@ def test_device_dialog_selects_direct_upload_without_typing_or_network(page, liv
     assert not any('/api/direct-extron/probe' in url or '/api/direct-extron/activate' in url for url in requests)
 
 
+def test_direct_upload_success_has_collapsed_safe_diagnostics(page, live_certmon):
+    from playwright.sync_api import expect
+
+    certmon = live_certmon(server_mode=False)
+    page.route('**/api/direct-extron/activate', lambda route: route.fulfill(json={
+        "status": "verified", "verification": "verified",
+        "sftp_diagnostics": {"remote_size": 3375},
+        "sis_diagnostics": {"write_confirmed": True, "received": "<script>unexpected</script>", "preloaded": "b''"},
+    }))
+    page.on('dialog', lambda dialog: dialog.accept())
+    page.goto(certmon.base_url)
+    page.wait_for_function("typeof switchTab === 'function'")
+    page.evaluate("switchTab('upload'); document.getElementById('direct-extron-upload').showModal()")
+    page.evaluate("async () => { directExtronReady = JSON.stringify(directExtronFields()); await activateDirectExtron(); }")
+    status = page.locator('#direct-extron-status')
+    expect(status).to_contain_text('Certificate uploaded and verified.')
+    expect(status.locator('summary')).to_have_text('Technical details')
+    expect(status.locator('details')).not_to_have_attribute('open', '')
+    expect(status.locator('details div')).not_to_be_visible()
+    expect(status.locator('script')).to_have_count(0)
+    status.locator('summary').click()
+    expect(status.locator('details div')).to_be_visible()
+    expect(status.locator('details div')).to_contain_text('3375 bytes')
+    page.evaluate("setDirectExtronStatus('Checking connection...')")
+    expect(status.locator('details')).to_have_count(0)
+
+
+def test_device_certificate_delete_dialog_requires_confirmation_and_selects_lan_b(page, live_certmon):
+    from playwright.sync_api import expect
+
+    certmon = live_certmon(server_mode=False)
+    removals = []
+    certificate = {"certificate_id": "prepared-cert", "issuer_type": "local_ca", "profile": "extron-rsa", "identifiers": ["10.0.0.10"]}
+    device = {"selector": "10.0.0.10", "certificate_id": "prepared-cert", "label": "UCS 303", "extron_ready": True, "selected": True}
+    page.route('**/api/certificates/public', lambda route: route.fulfill(json=[certificate]))
+    page.route('**/api/toolbelt/devices', lambda route: route.fulfill(json={"devices": [device]}))
+    page.route('**/api/toolbelt/reset-upload-tab', lambda route: route.fulfill(json={"devices": [device]}))
+    page.route('**/api/direct-extron/target?*', lambda route: route.fulfill(json={"target": {"host": "10.0.1.10"}}))
+    def remove(route):
+        removals.append(route.request.post_data_json)
+        route.fulfill(json={"status": "removal_acknowledged", "certificate_information": {"C": "test-default"}})
+    page.route('**/api/direct-extron/certificate/delete', remove)
+    page.goto(certmon.base_url)
+    page.wait_for_function("typeof switchTab === 'function'")
+    page.evaluate("""async () => {
+      switchTab('upload');
+      await loadAvailableCertificates();
+      await loadToolbeltDevices(false);
+      selectPreparedDirectDevice('10.0.0.10');
+    }""")
+    page.locator('#direct-extron-delete').click()
+    expect(page.locator('#direct-extron-delete-dialog')).to_be_visible()
+    expect(page.locator('#direct-extron-delete-device')).to_have_text('UCS 303 (10.0.0.10)')
+    assert removals == []
+    page.locator('#direct-extron-delete-dialog button').filter(has_text='Cancel').click()
+    assert removals == []
+    page.locator('#direct-extron-delete').click()
+    page.locator('#direct-extron-delete-nic').select_option('2')
+    confirmations = []
+    def accept(dialog):
+        confirmations.append(dialog.message)
+        dialog.accept()
+    page.on('dialog', accept)
+    page.locator('#direct-extron-delete-confirm').click()
+    expect(page.locator('#direct-extron-status')).to_contain_text('Device confirmed certificate removal on LAN B')
+    assert removals == [{"selector": "10.0.0.10", "nic": 2, "confirm_delete": True}]
+    assert 'LAN B (10.0.1.10)' in confirmations[0]
+    assert 'CertMon will be kept' in confirmations[0]
+    expect(page.locator('#direct-extron-activate')).to_be_disabled()
+
+
+@pytest.mark.parametrize("body", [[], {"selector": []}, {"selector": "10.0.0.10", "nic": 1, "confirm_delete": True, "pem": "secret"}])
+def test_certificate_delete_route_rejects_invalid_json_and_private_material(tmp_data_dir, monkeypatch, body):
+    import app
+
+    module = importlib.reload(app)
+    service = FakeRouteService()
+    module.direct_extron_service = service
+    module.artifact_store = object()
+    module.vault = object()
+    monkeypatch.setattr(module, 'authorize', lambda permission: None)
+    response = module.app.test_client().post('/api/direct-extron/certificate/delete', json=body)
+    assert response.status_code == 400
+    assert service.calls == []
+
+
+def test_viewer_cannot_delete_device_certificate(tmp_data_dir, monkeypatch):
+    from tests.test_rbac import create_viewer, auth_headers
+
+    module = load_server_app(tmp_data_dir, monkeypatch)
+    service = FakeRouteService()
+    module.direct_extron_service = service
+    module.artifact_store = object()
+    module.vault = object()
+    client = create_viewer(module)
+    response = client.post('/api/direct-extron/certificate/delete',
+                           json={"selector": "10.0.0.10", "nic": 1, "confirm_delete": True},
+                           headers=auth_headers(client))
+    assert response.status_code == 403
+    assert service.calls == []
+
+
 def test_direct_probe_html_error_has_actionable_message_and_no_upload(page, live_certmon):
     from playwright.sync_api import expect
 
@@ -735,7 +966,7 @@ def test_direct_probe_html_error_has_actionable_message_and_no_upload(page, live
     page.route('**/api/direct-extron/probe', lambda route: route.fulfill(status=500, content_type='text/html', body='<!doctype html><title>Server error</title>'))
     page.goto(certmon.base_url)
     page.wait_for_function("typeof switchTab === 'function'")
-    page.evaluate("switchTab('upload')")
+    page.evaluate("switchTab('upload'); document.getElementById('direct-extron-upload').showModal()")
     page.locator('button[onclick="probeDirectExtron()"]').click()
     expect(page.locator('#direct-extron-status')).to_contain_text('HTTP 500')
     expect(page.locator('#direct-extron-status')).to_contain_text('Check the CertMon log')
@@ -763,7 +994,7 @@ def test_host_key_approval_continues_test_without_extra_test_clicks(page, live_c
     page.route('**/api/direct-extron/host-keys/approve', approve_key)
     page.goto(certmon.base_url)
     page.wait_for_function("typeof switchTab === 'function'")
-    page.evaluate("switchTab('upload')")
+    page.evaluate("switchTab('upload'); document.getElementById('direct-extron-upload').showModal()")
     page.locator('button[onclick="probeDirectExtron()"]').click()
     expect(page.locator('#direct-extron-status')).to_contain_text('SFTP 10.0.0.10:22022')
     expect(page.locator('#direct-extron-status')).to_contain_text('testing continues automatically')

@@ -142,10 +142,15 @@ def test_viewer_can_discover_only_existing_public_certificate_artifacts(
             "identifiers": ["device.example.com"],
             "profile": "generic-rsa",
             "public_artifacts": ["certificate.pem", "request.csr"],
+            "download_names": {name: module._certificate_download_filename("cert-1", name) for name in ["certificate.pem", "request.csr"]},
+            "download_prefix": module._certificate_download_filename("cert-1", "certificate.pem").removesuffix("-certificate.pem"),
         }
     ]
     assert b"private" not in catalog.data.lower()
     assert b"secret" not in catalog.data.lower()
+    for name, filename in catalog.get_json()[0]["download_names"].items():
+        download = client.get(f"/api/certificates/cert-1/public/{name}")
+        assert f'filename="{filename}"' in download.headers["Content-Disposition"]
     assert client.get("/api/certificates").status_code == 403
     assert client.get("/api/certificates/cert-1/public/certificate.pem").status_code == 200
     assert client.get("/api/certificates/cert-1/private/private-key.pem").status_code == 403

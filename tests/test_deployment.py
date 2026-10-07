@@ -122,7 +122,7 @@ def test_non_windows_test_bootstrap_initializes_secure_services(tmp_data_dir):
 
 def test_upload_ui_uses_certificate_ids_instead_of_browser_pem_state():
     html = HTML.read_text(encoding="utf-8")
-    push_function = html.split("async function pushCert()", 1)[1]
+    push_function = html.split("async function pushCert(", 1)[1]
 
     assert 'id="push-target-select"' in html
     assert 'id="cert-pem"' not in html

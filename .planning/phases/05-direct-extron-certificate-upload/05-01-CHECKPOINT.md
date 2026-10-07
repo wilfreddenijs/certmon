@@ -159,3 +159,101 @@ and never replays SFTP or SIS. Persistent mismatch remains pending. Regression
 tests cover delayed success, temporary unreachability and timeout without replay.
 Targeted suites: 94 passed in 46.16s. UCS final automated verification and LAN B
 hardware acceptance remain open; Toolbelt retirement is not approved.
+
+## UCS 303 Hardware Feedback After Build 32 Delivery
+
+On 2026-10-06 the user tested a UCS 303, explicitly distinguishing it from
+the UCS SW 313. The screenshot for selector 192.168.0.114 on LAN A shows
+`Direct activation: verified`, `HTTPS verification: verified`, SFTP transfer
+confirmation of 3375 bytes, `SIS sent: true`, and the expected `CertI1`
+acknowledgement after the command echo. No pending cleanup warning is shown.
+This establishes automatic direct-upload success on this tested UCS 303.
+The build number is not visible in the supplied screenshot; feedback followed
+delivery of build 32. Do not infer UCS SW 313 or LAN B acceptance from this
+different model's result. Those hardware gates remain open, and Toolbelt
+retirement is not approved.
+
+## Device Certificate Removal Requested
+
+On 2026-10-06 the user explicitly requested deletion of the active device
+certificate, retaining the stored CertMon certificate. User supplied commands
+`ESC X1CERT CR` / `ESC X2CERT CR`, then `ESC V1CERT CR` / `ESC V2CERT CR`.
+The project's `docs/SIS command for Cert Ingest.png` confirms `CertX<nic>`
+acknowledgements and JSON certificate information, optionally prefixed with
+`CertV<nic>`. It does not specify the post-deletion value of the JSON `C` field.
+
+Implementation adds a LAN-choice dialog, device/endpoint confirmation,
+DEPLOY_CERTIFICATE and CSRF guards, audit attribution, pinned SSH trust, strict
+confirmation/NIC validation, and readback without automatic deletion replay.
+Pending imports block removal on that interface; upload/removal operations
+cannot overlap in this service. No private material or CertMon artifact is
+deleted. Results distinguish a device acknowledgement from independent
+confirmation of the fallback certificate; raw/public readback is available in
+collapsed technical details. Exact post-deletion response and hardware
+acceptance remain pending. The user has been asked for this PuTTY response.
+
+Successful uploads now show a green `Certificate uploaded and verified.`
+message with diagnostics collapsed; warning states remain visible.
+Targeted direct-upload, UI, role and CSRF suites: 123 passed in 40.40s.
+No new packaged build has been produced for these changes yet.
+
+## Unified Upload Workspace Requested
+
+On 2026-10-06 the user requested one prepared-device list with selectable
+Direct (SFTP + SIS) and Toolbelt methods, separate identifiable downloads,
+and an opaque sticky navigation area without scrolling text visible above it.
+The list now has a per-device method selector and an Open upload action.
+Direct upload uses a selected-device dialog retaining explicit probe, host-key
+approval, upload and removal controls; it does not add automatic direct batch
+execution. Toolbelt runs include only selected rows whose method is Toolbelt.
+Opening/changing a method does not start a probe or upload.
+
+Certificate downloads show the selected identifiers and certificate ID, plus
+the actual server download filenames. Links update immediately on selection
+and are cleared for an empty selection. Public catalog metadata contains
+public download names and the shared safe filename prefix, not private material.
+The filename suffix uses the last eight certificate-ID characters so certificates
+with a shared device-name prefix remain distinguishable. Existing permission
+checks on private/public downloads are unchanged.
+
+The sticky tabs cover the content scrollport's top padding; a regression test
+first detected a 24-pixel gap, then passed after the sticky offset correction.
+Desktop, scrolled, download, direct-dialog and mobile screenshots were inspected.
+Final targeted service/API/UI/role/CSRF suites: 150 passed in 55.35s. The expanded
+run also passed all role-browser cases; its earlier navigation failure passed
+in a dedicated three-test UI rerun after correction. Preview runs on loopback
+port 5053 with isolated .tmp/upload-preview-data. No packaged build yet.
+
+## Direct Batch And Credentials Follow-Up
+
+On 2026-10-07 the user reported that shared/per-device credential prompts do
+not open in the embedded browser and requested sequential Direct batch uploads.
+Browser prompt-based credential entry was replaced by a native HTML dialog
+with an explicit password field, save/error states and password clearing on
+close. Shared and individual credentials retain the existing encrypted vault
+and are used by both Direct and Toolbelt.
+
+All prepared devices now have selectable checkboxes. Direct and Toolbelt
+actions include only selected rows for their respective method. Direct batch
+supports LAN A/B, read-only connection preflight, explicit upload confirmation,
+per-device results and stop-after-current-device. The server resolves certificate
+IDs from prepared devices and runs uploads sequentially in a background worker,
+holding the existing certificate-operation lock. Every selected endpoint must
+pass trust/authentication checks before any transfer; host-key approval is still
+an explicit per-endpoint action. Uploads recheck trust and stop on uncertainty,
+never replaying an import automatically. Pending staged imports block a new
+batch for that device/interface until reviewed. Private material stays server-side.
+
+Batch progress is process-local; a server restart does not resume or replay a
+batch. Durable staged-PEM records remain available for recovery. Closing the
+device dialog does not stop the server worker. New service/API/browser tests
+cover sequencing, key approval, ambiguous imports, stop/exclusion, auth/CSRF,
+server-side certificate selection and the credential dialogs. Desktop/mobile
+screenshots of batch controls and credential entry were inspected. Hardware
+batch acceptance and LAN B testing remain pending. Preview remains on 5053;
+no new EXE has been packaged or pushed.
+
+Final targeted batch, upload UI, Direct service/API, UI contract, deployment,
+RBAC, CSRF and CA suites: 160 passed in 62.89 seconds. The earlier page-load
+timeout was addressed by waiting for DOM readiness in the workspace browser
+fixture instead of waiting for all external assets. Preview HTTP check: 200.

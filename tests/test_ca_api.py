@@ -256,6 +256,19 @@ def test_extron_combined_filename_includes_ip_when_hostname_is_first_identifier(
     )
 
 
+def test_download_names_distinguish_certificates_with_the_same_device_prefix(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    database = FakeCertificateDatabase()
+    first = "ucs-room-local-ca-extron-rsa-12345678"
+    second = "ucs-room-local-ca-extron-rsa-87654321"
+    metadata = dict(database.certificates["cert-1"])
+    database.certificates[first] = metadata
+    database.certificates[second] = metadata
+    monkeypatch.setattr(module, "database", database)
+    assert module._certificate_download_filename(first, "certificate.pem").endswith("-12345678-certificate.pem")
+    assert module._certificate_download_filename(second, "certificate.pem").endswith("-87654321-certificate.pem")
+
+
 def test_devices_txt_exports_certificate_ids_not_private_paths(
     tmp_data_dir, monkeypatch
 ):

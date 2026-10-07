@@ -1233,7 +1233,7 @@ def _certificate_download_filename(certificate_id, artifact_name):
     elif profile:
         parts.append(_filename_part(profile))
     base = "-".join(part for part in parts if part) or "certificate"
-    short_id = _filename_part(certificate_id)[:8]
+    short_id = _filename_part(certificate_id[-8:])
     if short_id and short_id not in base:
         base = f"{base}-{short_id}"
     artifact_labels = {
@@ -1938,6 +1938,8 @@ def list_public_certificates():
                 "identifiers": metadata.get("identifiers", []),
                 "profile": metadata.get("profile"),
                 "public_artifacts": public_artifacts,
+                "download_names": {name: _certificate_download_filename(certificate_id, name) for name in public_artifacts},
+                "download_prefix": _certificate_download_filename(certificate_id, "certificate.pem").removesuffix("-certificate.pem"),
             }
         )
     return jsonify(certificates)
@@ -2096,6 +2098,77 @@ def direct_extron_activate():
     except (KeyError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
     audit("direct_extron_activation", target=body.get("selector"), success=result.get("status") == "verified", details={"status": result.get("status")})
+    return jsonify(result)
+
+
+@app.route("/api/direct-extron/batches", methods=["POST"])
+def direct_extron_batch_start():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {"selectors", "nic", "mode"}:
+        return jsonify({"error": "Expected selectors, nic and mode"}), 400
+    selectors = body.get("selectors")
+    if (not isinstance(selectors, list) or not selectors or len(selectors) > 100
+            or any(not isinstance(value, str) for value in selectors)
+            or len(set(selectors)) != len(selectors)
+            or type(body.get("nic")) is not int or body["nic"] not in (1, 2)
+            or body.get("mode") not in ("test", "upload")):
+        return jsonify({"error": "Invalid Direct batch selection"}), 400
+    prepared = {row["selector"]: row for row in toolbelt_service.list_devices()}
+    if any(selector not in prepared or not prepared[selector].get("extron_ready") for selector in selectors):
+        return jsonify({"error": "Select prepared Extron devices only"}), 400
+    targets = [{"selector": selector, "certificate_id": prepared[selector]["certificate_id"],
+                "nic": body["nic"]} for selector in selectors]
+    try:
+        result = direct_extron_service.start_batch(mode=body["mode"], targets=targets)
+    except (KeyError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_batch_started", details={"run_id": result["id"], "mode": body["mode"],
+                                                 "selectors": selectors, "nic": body["nic"]})
+    return jsonify(result), 202
+
+
+@app.route("/api/direct-extron/batches/<run_id>", methods=["GET"])
+@app.route("/api/direct-extron/batches/<run_id>/stop", methods=["POST"])
+def direct_extron_batch_status(run_id):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    result = (direct_extron_service.stop_batch(run_id) if request.method == "POST"
+              else direct_extron_service.get_batch(run_id))
+    if result is None:
+        return jsonify({"error": "Direct batch not found"}), 404
+    if request.method == "POST":
+        audit("direct_extron_batch_stop_requested", details={"run_id": run_id})
+    return jsonify(result)
+
+
+@app.route("/api/direct-extron/certificate/delete", methods=["POST"])
+def direct_extron_delete_certificate():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
+    try:
+        body = _direct_extron_body({"selector", "nic", "confirm_delete"})
+        if not isinstance(body.get("selector"), str):
+            raise ValueError("A device selector is required")
+        result = direct_extron_service.remove_certificate(
+            selector=body["selector"], nic=body.get("nic"), confirm_delete=body.get("confirm_delete")
+        )
+    except DirectConnectionError as error:
+        app.logger.exception("Direct Extron pre-deletion host-key check failed")
+        audit("direct_extron_certificate_deleted", target=body.get("selector"), success=False, details={"nic": body.get("nic")})
+        return jsonify({"error": str(error), "status": "connection_failed"}), 502
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_certificate_deleted", target=body.get("selector"),
+          success=result.get("status") == "removal_acknowledged",
+          details={"nic": body.get("nic"), "status": result.get("status")})
     return jsonify(result)
 
 

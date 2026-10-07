@@ -20,5 +20,5 @@
 | `selected-https-endpoint-fingerprint-verify` | INTEGRATE | |
 | `verification-only-recovery` | INTEGRATE | |
 | `sis-view-current-certificate-json` | OPT-OUT | HTTPS peer DER fingerprint comparison is the locked verification contract; adding a second parser would not strengthen activation acceptance. |
-| `sis-delete-user-certificate` | OPT-OUT | Destructive certificate removal is outside direct upload and requires separate explicit authorization/acceptance. |
+| `sis-delete-user-certificate` | IMPLEMENTED / HARDWARE PENDING | User explicitly authorized on 2026-10-06. One-device LAN choice, confirmation, pinned SSH, exact CertX acknowledgement and V-command JSON readback. No automatic replay; physical removal/readback acceptance remains pending. |
 | `non-certificate-sis-commands` | OPT-OUT | Explicitly outside the Phase 05 certificate/device transport surface. |

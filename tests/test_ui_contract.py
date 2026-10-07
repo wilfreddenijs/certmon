@@ -183,7 +183,7 @@ def test_private_material_is_not_kept_in_wizard_dom_state():
 
 def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     html = page()
-    push_function = html.split("async function pushCert()", 1)[1]
+    push_function = html.split("async function pushCert(", 1)[1]
 
     assert 'id="push-target-select"' in html
     assert 'id="push-certificate-select"' not in html
@@ -195,7 +195,7 @@ def test_upload_tab_uses_certificate_ids_not_browser_pem_fields():
     assert "key_pem" not in push_function
     assert "Each certificate belongs to one device" in html
     assert "certificate/device pair" in html
-    assert "For unsupported devices" in html
+    assert "Files for manual installation" in html
     assert "separate private-key.pem download" in html
 
 
@@ -355,9 +355,9 @@ def test_deployment_result_offers_private_key_download_without_storing_key_mater
 
     assert 'id="push-private-artifacts"' in html
     assert 'id="push-private-artifact-links"' in html
-    assert "/api/certificates/${certificate_id}/private/private-key.pem" in html
+    assert "artifactDownloadLink(certificate_id, 'private', 'private-key.pem'" in html
     assert "selectedCertificate.profile === 'extron-rsa'" in html
-    assert "/api/certificates/${certificate_id}/private/combined.pem" in html
+    assert "artifactDownloadLink(certificate_id, 'private', 'combined.pem'" in html
     assert "extron-combined.pem" in html
     assert "combined certificate/private-key PEM" in html
     assert "privateKeyPem" not in html
@@ -379,17 +379,17 @@ def test_local_ca_extron_pem_download_uses_private_combined_artifact():
 def test_upload_tab_has_toolbelt_batch_upload_flow():
     html = page()
 
-    assert "Prepared device upload" in html
-    assert "one central prepared-device list" in html
+    assert "Device uploads" in html
+    assert "Upload method" in html
+    assert "Direct (SFTP + SIS)" in html
     assert "Add device" in html
-    assert "Manual upload fallback" in html
-    assert "Download Certificates for Manual Upload" in html
+    assert "Certificate downloads" in html
+    assert "Files for manual installation" in html
     assert "/api/ca/extron-combined-zip" in html
     assert "Download all Extron PEMs (.zip)" in html
     assert "These files contain private keys" in html
     assert "Target Devices" not in html
     assert "Toolbelt batch upload" in html
-    assert "Test Toolbelt upload first" in html
     assert "Test Toolbelt upload" in html
     assert "Retry dry-run" not in html
     assert 'id="toolbelt-device-list"' in html
@@ -408,6 +408,8 @@ def test_upload_tab_has_toolbelt_batch_upload_flow():
     assert 'id="toolbelt-select-all"' in html
     assert "toggleAllToolbeltDevices(this.checked)" in html
     assert "Select all devices" in html
+    assert 'id="direct-batch-upload"' in html
+    assert 'id="device-credentials-dialog"' in html
     assert "selectAll.indeterminate" in html
     assert "async function persistToolbeltSelection()" in html
     assert "tries admin/extron, then admin/serial from Toolbelt" in html
@@ -426,7 +428,7 @@ def test_manual_upload_lists_all_certificate_profiles_as_download_targets():
     assert "filter(c => c.profile !== 'extron-rsa')" not in render_select
     assert "const deviceIp = identifiers.find(id => isIp(id))" in render_select
     assert "`${device} (${deviceIp})`" in render_select
-    assert "Download Certificates for Manual Upload" in html
+    assert "Files for manual installation" in html
     assert "certificate/device pair" in html
 
 

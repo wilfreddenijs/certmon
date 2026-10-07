@@ -277,12 +277,15 @@
     display: flex;
     gap: 0;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 24px;
+    margin: -24px -28px 24px;
     position: sticky;
-    top: 0;
+    top: -24px;
     z-index: 50;
     background: var(--bg);
-    padding-top: 2px;
+    padding: 14px 28px 0;
+    min-height: 58px;
+    align-items: center;
+    isolation: isolate;
   }
 
   .tab {
@@ -304,6 +307,18 @@
 
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+
+  .upload-section { padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .upload-device-row { display: grid; grid-template-columns: 22px minmax(160px, 1fr) minmax(140px, 180px) auto; gap: 12px; align-items: start; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .upload-device-row:last-child { border-bottom: 0; }
+  .upload-device-row code, .download-file { overflow-wrap: anywhere; }
+  .upload-device-row .help-text { margin-top: 4px; }
+  .upload-device-actions { display: flex; gap: 6px; flex-wrap: wrap; max-width: 230px; }
+  .upload-device-actions .btn { font-size: 11px; padding: 6px 10px; }
+  #direct-extron-upload { width: 1000px; max-width: calc(100vw - 32px); max-height: 90vh; margin: auto; overflow: auto; color: var(--text); }
+  #direct-extron-upload::backdrop, #direct-extron-delete-dialog::backdrop, #device-credentials-dialog::backdrop, #direct-batch-confirm::backdrop { background: rgba(0,0,0,0.7); }
+  .download-file { display: flex; flex-direction: column; align-items: flex-start; text-align: left; max-width: 100%; gap: 5px; white-space: normal; }
+  .download-file small { font-size: 10px; color: var(--muted); font-weight: 400; }
 
   .admin-toolbar, .admin-user-row {
     display: grid;
@@ -357,8 +372,10 @@
     .header-stats { flex-wrap: wrap; gap: 8px; }
     .main { grid-template-columns: minmax(0, 1fr); height: auto; }
     .sidebar { order: 2; border-right: 0; }
-    .content { min-width: 0; padding: 12px; }
-    .tabs { overflow-x: auto; }
+    .content { min-width: 0; padding: 12px; overflow: visible; }
+    .tabs { overflow-x: auto; margin: -12px -12px 16px; padding: 12px 12px 0; top: 0; }
+    .upload-device-row { grid-template-columns: 22px minmax(0, 1fr); }
+    .upload-device-row .upload-method, .upload-device-actions { grid-column: 2; }
     #direct-extron-upload input, #direct-extron-upload select { min-width: 0; max-width: 100%; }
   }
 
@@ -1039,11 +1056,13 @@
 
     <!-- Upload Tab -->
     <div class="tab-panel" id="tab-upload">
-      <div id="direct-extron-upload" data-required-permission="deploy_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
-        <div class="section-title" style="margin-bottom:8px">Direct Extron certificate upload</div>
-        <div class="help-text choice-help" style="margin-bottom:12px">Explicit one-device path. Test and approve the exact SSH host key before activating a selected certificate.</div>
+      <dialog class="modal" id="direct-extron-upload" data-required-permission="deploy_certificate" aria-labelledby="direct-extron-title">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px">
+          <div><div class="modal-title" id="direct-extron-title">Direct upload</div><div id="direct-extron-current-device" class="help-text" style="overflow-wrap:anywhere"></div></div>
+          <button class="btn btn-ghost" type="button" onclick="document.getElementById('direct-extron-upload').close()">Close</button>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end">
-          <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-selector">Prepared device</label><select id="direct-extron-selector" onchange="selectPreparedDirectDevice(this.value)"><option value="">Select a device</option></select></div>
+          <select id="direct-extron-selector" hidden aria-label="Prepared device"><option value="">Select a device</option></select>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-certificate">Certificate ID</label><input id="direct-extron-certificate" type="text" readonly></div>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-nic">Network interface</label><select id="direct-extron-nic" onchange="toggleDirectExtronLanB()"><option value="1">LAN A</option><option value="2">LAN B</option></select></div>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-lan-b-host">LAN B HTTPS host</label><input id="direct-extron-lan-b-host" type="text" autocomplete="off"></div>
@@ -1054,49 +1073,78 @@
           <button class="btn" type="button" onclick="probeDirectExtron()">Test direct connection</button>
           <button class="btn" id="direct-extron-approve" type="button" onclick="approveDirectExtronHostKey()" disabled>Approve displayed host key</button>
           <button class="btn btn-scan" id="direct-extron-activate" type="button" onclick="activateDirectExtron()" disabled>Upload certificate</button>
+          <button class="btn btn-danger" id="direct-extron-delete" type="button" onclick="openDirectExtronDelete()">Delete certificate...</button>
           <button class="btn btn-ghost" type="button" onclick="saveDirectExtronLanBTarget()" style="margin-left:auto">Save LAN B endpoint</button>
         </div>
         <div id="direct-extron-status" class="help-text" role="status" style="min-height:20px;margin-top:10px"></div>
         <div id="direct-extron-cleanup" style="margin-top:8px"></div>
-      </div>
-      <div id="toolbelt-batch" data-required-permission="deploy_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+      </dialog>
+      <div id="toolbelt-batch" class="upload-section" data-required-permission="deploy_certificate">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
           <div>
-            <div class="section-title" style="margin-bottom:8px">Prepared device upload</div>
-            <div class="help-text choice-help">
-              Upload is one central prepared-device list. Devices appear here only after an Extron-compatible Local CA certificate exists for a scanned device.
-              Test Toolbelt upload first; it prepares Toolbelt but does not click Apply or reboot devices.
-            </div>
+            <div class="section-title" style="margin-bottom:8px">Device uploads</div>
           </div>
           <button class="btn btn-ghost" onclick="goToDevicesForUpload()">Add device</button>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn" onclick="loadToolbeltDevices(true)">Test Toolbelt upload</button>
-            <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
-          </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-bottom:12px">
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" onclick="saveToolbeltDefaultCredentials()">Shared Device Credentials</button>
             <button class="btn btn-danger" onclick="removeAllPreparedToolbeltDevices()">Remove all</button>
             <button class="btn btn-danger" id="toolbelt-stop-btn" onclick="stopToolbeltRun()" disabled>Stop after current device</button>
           </div>
         </div>
-        <div id="toolbelt-run-status" class="help-text" style="margin-bottom:10px"></div>
         <div id="toolbelt-device-list" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+          <div class="section-title">Direct <span id="direct-batch-count" class="help-text"></span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <select id="direct-batch-nic" aria-label="Direct batch network interface" onchange="invalidateDirectBatchTest()"><option value="1">LAN A</option><option value="2">LAN B</option></select>
+            <button class="btn" id="direct-batch-test" onclick="startDirectBatch('test')" disabled>Test selected Direct devices</button>
+            <button class="btn" id="direct-batch-upload" onclick="confirmDirectBatch()" disabled>Upload selected Direct devices</button>
+            <button class="btn btn-danger" id="direct-batch-stop" onclick="stopDirectBatch()" disabled>Stop after current device</button>
+          </div>
+          <div id="direct-batch-status" class="help-text" role="status" style="margin-top:10px"></div>
+        </div>
+        <div id="toolbelt-controls" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+          <div class="section-title" style="margin-bottom:10px">Toolbelt <span id="toolbelt-selected-count" class="help-text"></span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="toolbelt-test-btn" onclick="startToolbeltDryRun()" disabled>Test Toolbelt upload</button>
+            <button class="btn" id="toolbelt-upload-btn" onclick="startToolbeltUpload()" disabled>Start Toolbelt upload</button>
+          </div>
+          <div id="toolbelt-run-status" class="help-text" style="margin-top:10px" role="status"></div>
+        </div>
       </div>
 
-      <details id="manual-upload-fallback" data-required-permission="download_public_certificate" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
-        <summary style="cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent)">Manual upload fallback</summary>
-        <div class="help-text choice-help" style="margin:10px 0 16px">
-          For unsupported devices only. The automatic Toolbelt prepared-device list above is the primary Upload workflow.
-        </div>
+      <dialog class="modal" id="device-credentials-dialog" aria-labelledby="device-credentials-title" style="width:440px;max-width:calc(100vw - 32px);margin:auto;color:var(--text)">
+        <form onsubmit="event.preventDefault();submitDeviceCredentials()">
+          <h3 id="device-credentials-title" style="font-size:18px">Device credentials</h3>
+          <div id="device-credentials-target" class="help-text" style="overflow-wrap:anywhere;margin-bottom:16px"></div>
+          <label class="form-label" for="device-credentials-user">Username</label>
+          <input id="device-credentials-user" type="text" required autocomplete="username" style="width:100%;margin-bottom:12px" />
+          <label class="form-label" for="device-credentials-password">Password</label>
+          <input id="device-credentials-password" type="password" required autocomplete="new-password" style="width:100%;margin-bottom:12px" />
+          <div id="device-credentials-error" role="alert" class="help-text" style="color:var(--danger)"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('device-credentials-dialog').close()">Cancel</button>
+            <button type="submit" id="device-credentials-save" class="btn">Save credentials</button>
+          </div>
+        </form>
+      </dialog>
+      <dialog class="modal" id="direct-batch-confirm" style="width:440px;max-width:calc(100vw - 32px);margin:auto;color:var(--text)">
+        <h3 style="font-size:18px">Upload certificates</h3>
+        <p id="direct-batch-confirm-summary"></p>
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('direct-batch-confirm').close()">Cancel</button>
+        <button type="button" class="btn" onclick="document.getElementById('direct-batch-confirm').close();startDirectBatch('upload')">Start batch upload</button>
+      </dialog>
+
+      <details id="manual-upload-fallback" class="upload-section" data-required-permission="download_public_certificate">
+        <summary style="cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent)">Certificate downloads</summary>
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-            <div class="section-title" style="margin-bottom:0">Download Certificates for Manual Upload</div>
+            <div class="section-title" style="margin-bottom:0">Files for manual installation</div>
             <a data-required-permission="download_private_key" href="/api/ca/extron-combined-zip" download="certmon-extron-combined-pems.zip"><button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--warning);border-color:var(--warning)" title="Download all Extron combined PEM files in one ZIP. These files contain private keys; keep the ZIP secret and delete local copies after upload.">Download all Extron PEMs (.zip)</button></a>
           </div>
 
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
+          <div style="padding:16px 0;margin-bottom:16px">
             <div class="form-group">
               <label class="form-label">Certificate / device</label>
               <select id="push-target-select" style="width:100%" onchange="selectManualUploadTarget(this.value)">
@@ -1110,7 +1158,7 @@
           </div>
 
           <!-- Push log / result -->
-          <div id="push-result" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div id="push-result" style="display:none;padding:16px 0">
             <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:600;margin-bottom:10px" id="push-result-title"></div>
             <div id="push-log" style="font-size:11px;color:var(--muted);line-height:1.8;font-family:'JetBrains Mono',monospace"></div>
             <div id="push-public-artifacts" style="display:none;margin-top:14px">
@@ -1129,12 +1177,22 @@
           </div>
 
         </div>
-        </div>
       </details>
       </div>
     </div>
   </div>
 </div>
+
+<dialog class="modal" id="direct-extron-delete-dialog" aria-labelledby="direct-extron-delete-title" style="max-width:calc(100vw - 32px)">
+  <div class="modal-title" id="direct-extron-delete-title">Delete device certificate</div>
+  <p id="direct-extron-delete-device" style="overflow-wrap:anywhere"></p>
+  <div class="form-group"><label class="form-label" for="direct-extron-delete-nic">Network interface</label><select id="direct-extron-delete-nic"><option value="1">LAN A</option><option value="2">LAN B</option></select></div>
+  <p class="help-text">Only the device certificate on the selected interface will be removed. The certificate stored in CertMon is kept.</p>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" type="button" onclick="document.getElementById('direct-extron-delete-dialog').close()">Cancel</button>
+    <button class="btn btn-danger" id="direct-extron-delete-confirm" type="button" onclick="deleteDirectExtronCertificate()">Delete certificate</button>
+  </div>
+</dialog>
 
 <dialog class="modal" id="role-permissions-dialog" aria-labelledby="role-permissions-title">
   <div class="modal-title" id="role-permissions-title">Roles and permissions</div>
@@ -2946,6 +3004,152 @@
   let selectedManualTarget = null;
   let pendingDeployment = null;
   let toolbeltDevices = [];
+  const preparedUploadMethods = new Map();
+  const directUploadStates = new Map();
+  let directBatchRunId = null;
+  let directBatchTestSignature = null;
+  let credentialsSelector = null;
+
+  function selectedDirectDevices() {
+    return toolbeltDevices.filter(d => d.selected && preparedUploadMethods.get(d.selector) !== 'toolbelt');
+  }
+
+  function directBatchSignature() {
+    return JSON.stringify({nic: Number(document.getElementById('direct-batch-nic').value),
+      targets: selectedDirectDevices().map(d => [d.selector, d.certificate_id])});
+  }
+
+  function invalidateDirectBatchTest() {
+    directBatchTestSignature = null;
+    renderDirectBatchControls();
+  }
+
+  function renderDirectBatchControls() {
+    const count = selectedDirectDevices().length;
+    const busy = !!directBatchRunId || !!toolbeltRunId;
+    document.getElementById('direct-batch-count').textContent = `${count} selected`;
+    document.getElementById('direct-batch-test').disabled = !count || busy;
+    document.getElementById('direct-batch-upload').disabled = !count || busy || directBatchTestSignature !== directBatchSignature();
+    document.getElementById('direct-batch-nic').disabled = busy;
+    document.getElementById('direct-batch-stop').disabled = !directBatchRunId;
+  }
+
+  function confirmDirectBatch() {
+    if (directBatchTestSignature !== directBatchSignature() || directBatchRunId) return;
+    const nic = document.getElementById('direct-batch-nic').value === '1' ? 'A' : 'B';
+    document.getElementById('direct-batch-confirm-summary').textContent =
+      `Upload ${selectedDirectDevices().length} certificates to LAN ${nic}, one device at a time?`;
+    document.getElementById('direct-batch-confirm').showModal();
+  }
+
+  async function startDirectBatch(mode) {
+    if (directBatchRunId || toolbeltRunId) return;
+    if (mode === 'upload' && directBatchTestSignature !== directBatchSignature()) return;
+    const signature = directBatchSignature();
+    const status = document.getElementById('direct-batch-status');
+    const body = {mode, selectors: selectedDirectDevices().map(d => d.selector),
+      nic: Number(document.getElementById('direct-batch-nic').value)};
+    directBatchRunId = 'starting';
+    directBatchTestSignature = null;
+    renderToolbeltDevices();
+    status.textContent = mode === 'test' ? 'Testing selected Direct devices...' : 'Starting sequential Direct upload...';
+    try {
+      const run = await directExtronJson('/api/direct-extron/batches', body);
+      directBatchRunId = run.id;
+      await pollDirectBatch(signature);
+    } catch (error) {
+      directBatchRunId = null;
+      status.textContent = error.message;
+      renderToolbeltDevices();
+    }
+  }
+
+  async function pollDirectBatch(signature) {
+    if (!directBatchRunId) return;
+    const status = document.getElementById('direct-batch-status');
+    try {
+      const res = await fetch(`/api/direct-extron/batches/${encodeURIComponent(directBatchRunId)}`);
+      if ([401, 403, 404].includes(res.status)) {
+        directBatchRunId = null;
+        directBatchTestSignature = null;
+        status.textContent = 'Batch progress is no longer available. Check device results before starting another upload.';
+        renderToolbeltDevices();
+        return;
+      }
+      const run = await readDirectExtronResponse(res);
+      const messages = {ready: 'Connection ready', testing: 'Testing connection...', pending: 'Waiting',
+        uploading: 'Uploading...', verified: 'Certificate uploaded and verified',
+        approval_required: 'Approve SSH host key in Open upload', host_key_changed: 'SSH host key changed: review in Open upload',
+        cleanup_pending: 'Upload needs review / cleanup', authentication_failed: 'Sign-in failed',
+        connection_failed: 'Connection failed', credentials_required: 'Enter device or shared credentials',
+        skipped: run.mode === 'upload' ? 'Not uploaded' : 'Not tested',
+        upload_unconfirmed: 'Upload not confirmed; review before retrying'};
+      for (const device of run.devices) {
+        directUploadStates.set(device.selector, {certificate_id: device.certificate_id,
+          ok: ['ready', 'verified'].includes(device.status), message: messages[device.status] || device.status});
+      }
+      const finished = run.devices.filter(d => d.status === (run.mode === 'test' ? 'ready' : 'verified')).length;
+      status.textContent = run.status === 'running'
+        ? `${run.mode === 'test' ? 'Testing' : 'Uploading'}: ${run.current_device || 'preparing'} (${finished}/${run.devices.length})`
+        : run.status === 'complete'
+          ? run.mode === 'test' ? 'All selected connections are ready.' : `${run.devices.length} certificates uploaded and verified.`
+          : run.status === 'stopped' ? 'Batch stopped after the current device.' : 'Batch needs attention. Review the result beside each device; no automatic retry.';
+      if (run.status === 'running') {
+        renderToolbeltDevices();
+        setTimeout(() => pollDirectBatch(signature), 1000);
+      } else {
+        if (run.mode === 'test' && run.status === 'complete') directBatchTestSignature = signature;
+        directBatchRunId = null;
+        renderToolbeltDevices();
+      }
+    } catch (error) {
+      status.textContent = `Progress temporarily unavailable: ${error.message}. The batch is not restarted.`;
+      setTimeout(() => pollDirectBatch(signature), 3000);
+    }
+  }
+
+  async function stopDirectBatch() {
+    if (!directBatchRunId || directBatchRunId === 'starting') return;
+    try {
+      await directExtronJson(`/api/direct-extron/batches/${encodeURIComponent(directBatchRunId)}/stop`, {});
+      document.getElementById('direct-batch-status').textContent = 'Stop requested; finishing the current device.';
+    } catch (error) { document.getElementById('direct-batch-status').textContent = error.message; }
+  }
+
+  function openDeviceCredentials(selector) {
+    credentialsSelector = selector;
+    const dialog = document.getElementById('device-credentials-dialog');
+    document.getElementById('device-credentials-title').textContent = selector ? 'Device credentials' : 'Shared device credentials';
+    document.getElementById('device-credentials-target').textContent = selector || 'Shared credentials for Direct and Toolbelt';
+    document.getElementById('device-credentials-user').value = 'admin';
+    document.getElementById('device-credentials-password').value = '';
+    document.getElementById('device-credentials-error').textContent = '';
+    document.getElementById('device-credentials-save').disabled = false;
+    dialog.onclose = () => { document.getElementById('device-credentials-password').value = ''; };
+    dialog.showModal();
+  }
+
+  async function submitDeviceCredentials() {
+    const save = document.getElementById('device-credentials-save');
+    if (save.disabled) return;
+    save.disabled = true;
+    const selector = credentialsSelector;
+    try {
+      const res = await fetch(selector ? `/api/toolbelt/devices/${encodeURIComponent(selector)}/credentials` : '/api/toolbelt/default-credentials', {
+        method: 'PATCH', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: document.getElementById('device-credentials-user').value.trim(),
+          password: document.getElementById('device-credentials-password').value})
+      });
+      await readDirectExtronResponse(res);
+      document.getElementById('device-credentials-dialog').close();
+      invalidateDirectExtronProbe();
+      invalidateDirectBatchTest();
+      await loadToolbeltDevices(false);
+    } catch (error) {
+      document.getElementById('device-credentials-error').textContent = error.message;
+    } finally { save.disabled = false; }
+  }
+  let directExtronSelectedSelector = '';
   let toolbeltRunId = null;
   let toolbeltPollTimer = null;
   let toolbeltAutoDryRunStarted = false;
@@ -3157,15 +3361,26 @@
       select.add(new Option(`${device.label} (${device.selector})`, device.selector));
     }
     select.value = previous;
-    selectPreparedDirectDevice(select.value);
+    selectPreparedDirectDevice(select.value, false);
   }
 
-  function selectPreparedDirectDevice(selector) {
+  function selectPreparedDirectDevice(selector, open = true) {
     const device = toolbeltDevices.find(device => device.extron_ready && device.selector === selector);
     const certificate = document.getElementById('direct-extron-certificate');
+    if (directExtronSelectedSelector !== (device ? device.selector : '')) {
+      directExtronSelectedSelector = device ? device.selector : '';
+      invalidateDirectExtronProbe();
+      setDirectExtronStatus('');
+      document.getElementById('direct-extron-cleanup').replaceChildren();
+      document.getElementById('direct-extron-nic').value = '1';
+      toggleDirectExtronLanB();
+    }
     if (certificate.value !== (device ? device.certificate_id : '')) invalidateDirectExtronProbe();
     document.getElementById('direct-extron-selector').value = device ? device.selector : '';
     certificate.value = device ? device.certificate_id : '';
+    document.getElementById('direct-extron-current-device').textContent = device ? `${device.label} (${device.selector})` : '';
+    const dialog = document.getElementById('direct-extron-upload');
+    if (device && open && !dialog.open) dialog.showModal();
   }
 
   function invalidateDirectExtronProbe() {
@@ -3186,10 +3401,23 @@
     };
   }
 
-  function setDirectExtronStatus(message, warning) {
+  function setDirectExtronStatus(message, warning, technicalDetails = '', success = false) {
     const status = document.getElementById('direct-extron-status');
     status.textContent = message;
-    status.style.color = warning ? 'var(--warning)' : 'var(--muted)';
+    status.style.color = warning ? 'var(--warning)' : success ? 'var(--ok)' : 'var(--muted)';
+    if (technicalDetails) {
+      const details = document.createElement('details');
+      details.style.marginTop = '8px';
+      details.style.color = 'var(--muted)';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Technical details';
+      summary.style.cursor = 'pointer';
+      const content = document.createElement('div');
+      content.style.overflowWrap = 'anywhere';
+      content.textContent = technicalDetails;
+      details.append(summary, content);
+      status.append(details);
+    }
   }
 
   function toggleDirectExtronLanB() {
@@ -3233,19 +3461,8 @@
   }
 
   async function saveDirectExtronCredentials() {
-    invalidateDirectExtronProbe();
     const { selector } = directExtronFields();
-    const username = prompt(`Username for ${selector}`, 'admin');
-    if (!username) return;
-    const password = prompt(`Password for ${selector}. CertMon stores it encrypted.`);
-    if (password === null) return;
-    try {
-      const res = await fetch(`/api/direct-extron/devices/${encodeURIComponent(selector)}/credentials`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
-      });
-      const data = await readDirectExtronResponse(res);
-      setDirectExtronStatus('Encrypted device credentials saved. Test the connection before activation.');
-    } catch (error) { setDirectExtronStatus(error.message, true); }
+    openDeviceCredentials(selector);
   }
 
   async function probeDirectExtron() {
@@ -3305,9 +3522,61 @@
       const sisDetails = result.sis_diagnostics ? ` SIS sent: ${result.sis_diagnostics.write_confirmed}. SIS response: ${result.sis_diagnostics.received}. Pre-send: ${result.sis_diagnostics.preloaded}.` : '';
       const sftpDetails = result.sftp_diagnostics ? ` SFTP transfer confirmed before import: ${result.sftp_diagnostics.remote_size} bytes.` : '';
       const pending = result.status === 'cleanup_pending' ? (result.verification === 'verified' ? ' The selected HTTPS certificate is active, but SIS completion is unconfirmed. Do not repeat the upload or clean up while processing may continue.' : ' Upload is not confirmed. Do not repeat the upload or clean up while the device may still be processing.') : '';
-      setDirectExtronStatus(`Direct activation: ${result.status}. ${details}${sftpDetails}${sisDetails}${pending}`, result.status !== 'verified');
+      const diagnosticMessage = `Direct activation: ${result.status}. ${details}${sftpDetails}${sisDetails}${pending}`;
+      if (result.status === 'verified') {
+        setDirectExtronStatus('Certificate uploaded and verified.', false, diagnosticMessage, true);
+        document.getElementById('direct-extron-cleanup').innerHTML = '';
+      } else {
+        setDirectExtronStatus(diagnosticMessage, true);
+      }
+      directUploadStates.set(fields.selector, {certificate_id: fields.certificate_id, ok: result.status === 'verified', message: result.status === 'verified' ? `Certificate uploaded and verified (LAN ${fields.nic === 1 ? 'A' : 'B'}).` : result.status});
+      renderToolbeltDevices();
       if (result.staged_name && result.status !== 'verified') renderDirectExtronCleanup(result.staged_name);
     } catch (error) { setDirectExtronStatus(error.message, true); }
+  }
+
+  function openDirectExtronDelete() {
+    const fields = directExtronFields();
+    if (!fields.selector) {
+      setDirectExtronStatus('Select a device before deleting its certificate.', true);
+      return;
+    }
+    const dialog = document.getElementById('direct-extron-delete-dialog');
+    dialog.dataset.selector = fields.selector;
+    dialog.dataset.label = document.getElementById('direct-extron-selector').selectedOptions[0].textContent;
+    document.getElementById('direct-extron-delete-device').textContent = dialog.dataset.label;
+    document.getElementById('direct-extron-delete-nic').value = String(fields.nic);
+    dialog.showModal();
+  }
+
+  async function deleteDirectExtronCertificate() {
+    const dialog = document.getElementById('direct-extron-delete-dialog');
+    const button = document.getElementById('direct-extron-delete-confirm');
+    if (button.disabled) return;
+    button.disabled = true;
+    const selector = dialog.dataset.selector;
+    const nic = Number(document.getElementById('direct-extron-delete-nic').value);
+    const lan = nic === 1 ? 'A' : 'B';
+    try {
+      const targetResponse = await fetch(`/api/direct-extron/target?selector=${encodeURIComponent(selector)}&nic=${nic}`);
+      const data = await readDirectExtronResponse(targetResponse);
+      if (!confirm(`Delete the active device certificate on ${dialog.dataset.label}, LAN ${lan} (${data.target.host})? The certificate in CertMon will be kept.`)) return;
+      dialog.close();
+      invalidateDirectExtronProbe();
+      setDirectExtronStatus(`Removing certificate on LAN ${lan} and reading back device status...`);
+      const result = await directExtronJson('/api/direct-extron/certificate/delete', { selector, nic, confirm_delete: true });
+      const information = result.certificate_information;
+      const details = JSON.stringify(result, null, 2);
+      if (result.status === 'removal_acknowledged') {
+        const message = information && information.C === 'US' ? `Device acknowledged removal on LAN ${lan}, but still reports a user-supplied certificate. Removal is not verified.` : information ? `Device confirmed certificate removal on LAN ${lan}. Certificate status read back: ${information.C}.` : `Device confirmed certificate removal on LAN ${lan}, but certificate status could not be read back. Do not repeat the deletion.`;
+        setDirectExtronStatus(message, !information || information.C === 'US', details, false);
+      } else if (['approval_required', 'host_key_changed'].includes(result.status)) {
+        setDirectExtronStatus('Certificate was not removed. Test the selected interface and approve its displayed host key first.', true, details);
+      } else {
+        setDirectExtronStatus('Certificate removal could not be confirmed. Check the device before retrying.', true, details);
+      }
+    } catch (error) { setDirectExtronStatus(error.message, true); }
+    finally { button.disabled = false; }
   }
 
   function renderDirectExtronCleanup(stagedName) {
@@ -3370,7 +3639,7 @@
   function toolbeltStatusLabel(state) {
     if (!state) return '<span style="color:var(--muted)">not tested</span>';
     const color = state.ok ? 'var(--ok)' : 'var(--warning)';
-    return `<span style="color:${color}">${state.ok ? 'OK' : 'attention'}${state.message ? ' — ' + state.message : ''}</span>`;
+    return `<span style="color:${color}">${state.ok ? 'OK' : 'attention'}${state.message ? ' — ' + escAttr(state.message) : ''}</span>`;
   }
 
   function renderToolbeltDevices() {
@@ -3380,6 +3649,9 @@
     if (!toolbeltDevices.length) {
       list.innerHTML = '<div class="help-text">No Extron Local CA certificates yet. Generate Extron-compatible Local CA certificates first; they will appear in devices.txt and here.</div>';
       uploadBtn.disabled = true;
+      document.getElementById('toolbelt-test-btn').disabled = true;
+      document.getElementById('toolbelt-selected-count').textContent = '0 selected';
+      renderDirectBatchControls();
       return;
     }
     const toolbeltCredentialsLabel = d => {
@@ -3389,36 +3661,67 @@
       }
       return 'tries admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
     };
-    const selectedCount = toolbeltDevices.filter(d => d.selected).length;
-    const allSelected = selectedCount === toolbeltDevices.length;
+    const toolbeltCandidates = toolbeltDevices.filter(d => preparedUploadMethods.get(d.selector) === 'toolbelt');
+    const selectedCount = toolbeltCandidates.filter(d => d.selected).length;
+    const allSelected = toolbeltDevices.every(d => d.selected);
     list.innerHTML = `
       <label style="display:flex;gap:10px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:rgba(0,229,255,0.05)">
         <input id="toolbelt-select-all" type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllToolbeltDevices(this.checked)" />
         <span style="font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--text)">Select all devices</span>
-        <span class="help-text" style="margin-left:auto">${selectedCount}/${toolbeltDevices.length} selected</span>
+        <span class="help-text" style="margin-left:auto">${toolbeltDevices.length} devices</span>
       </label>
     ` + toolbeltDevices.map(d => `
-      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)">
-        <label style="display:flex;gap:10px;align-items:flex-start">
-          <input type="checkbox" ${d.selected ? 'checked' : ''} onchange="toggleToolbeltDevice('${escAttr(d.selector)}', this.checked)" />
-          <div style="flex:1">
-            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)">${d.label}</div>
-            <div class="help-text">Selector: <code>${d.selector}</code> · certificate: <code>${d.certificate_id}</code></div>
-            <div class="help-text">Local CA: ${d.extron_ready ? 'Extron PEM ready' : 'not Extron-ready'} · credentials: ${toolbeltCredentialsLabel(d)}</div>
-            <div class="help-text">Dry-run status: ${toolbeltStatusLabel(d.dry_run)}</div>
-            <div class="help-text">Upload status: ${toolbeltStatusLabel(d.upload)}</div>
+      <div class="upload-device-row" data-selector="${escAttr(d.selector)}">
+          <input aria-label="Select ${escAttr(d.label)} for upload" type="checkbox" ${d.selected ? 'checked' : ''} ${directBatchRunId || toolbeltRunId ? 'disabled' : ''} onchange="toggleToolbeltDevice('${escAttr(d.selector)}', this.checked)" />
+          <div style="min-width:0">
+            <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)">${escAttr(d.label)}</div>
+            <div class="help-text"><code>${escAttr(d.selector)}</code></div>
+            <div class="help-text">Certificate: <code>${escAttr(d.certificate_id)}</code></div>
+            <div class="help-text">Credentials: ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? toolbeltCredentialsLabel(d) : d.credentials_saved ? 'saved encrypted' : d.default_credentials_saved ? 'shared credentials' : 'not configured'}</div>
+            ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? `<div class="help-text">Toolbelt test: ${toolbeltStatusLabel(d.dry_run)} · upload: ${toolbeltStatusLabel(d.upload)}</div>` : `<div class="help-text">Direct upload: ${toolbeltStatusLabel(directUploadStates.get(d.selector)?.certificate_id === d.certificate_id ? directUploadStates.get(d.selector) : null)}</div>`}
           </div>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();saveToolbeltCredentials('${escAttr(d.selector)}')">Device Credentials</button>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="event.preventDefault();selectPreparedDirectDevice('${escAttr(d.selector)}');document.getElementById('direct-extron-upload').scrollIntoView({block:'start'})">Direct upload</button>
+          <div class="upload-method"><label class="form-label">Upload method<select aria-label="Upload method for ${escAttr(d.label)}" onchange="setPreparedUploadMethod('${escAttr(d.selector)}', this.value)" ${toolbeltRunId || directBatchRunId ? 'disabled' : ''}>
+            <option value="direct" ${preparedUploadMethods.get(d.selector) !== 'toolbelt' ? 'selected' : ''}>Direct (SFTP + SIS)</option>
+            <option value="toolbelt" ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? 'selected' : ''}>Toolbelt</option>
+          </select></label></div>
+          <div class="upload-device-actions">
+          <button class="btn" onclick="openPreparedDeviceUpload('${escAttr(d.selector)}')">Open upload</button>
+          <button class="btn btn-ghost" onclick="saveToolbeltCredentials('${escAttr(d.selector)}')">Device Credentials</button>
           <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" title="Remove from Upload and delete the associated Local CA device certificate" onclick="event.preventDefault();removePreparedToolbeltDevice('${escAttr(d.certificate_id)}','${escAttr(d.label)}')">Remove</button>
-        </label>
+          </div>
       </div>
     `).join('');
     const selectAll = document.getElementById('toolbelt-select-all');
-    if (selectAll) selectAll.indeterminate = selectedCount > 0 && selectedCount < toolbeltDevices.length;
-    const hasUploadable = toolbeltDevices.some(d => d.selected && d.dry_run && d.dry_run.ok);
-    uploadBtn.disabled = !hasUploadable || !!toolbeltRunId;
+    if (selectAll) {
+      selectAll.indeterminate = !allSelected && toolbeltDevices.some(d => d.selected);
+      selectAll.disabled = !!directBatchRunId || !!toolbeltRunId;
+    }
+    document.getElementById('toolbelt-selected-count').textContent = `${selectedCount} selected`;
+    document.getElementById('toolbelt-test-btn').disabled = !selectedCount || !!toolbeltRunId || !!directBatchRunId;
+    const hasUploadable = toolbeltCandidates.some(d => d.selected && d.dry_run && d.dry_run.ok);
+    uploadBtn.disabled = !hasUploadable || !!toolbeltRunId || !!directBatchRunId;
     uploadBtn.classList.toggle('btn-ghost', uploadBtn.disabled);
+    renderDirectBatchControls();
+  }
+
+  function setPreparedUploadMethod(selector, method) {
+    if (toolbeltRunId || directBatchRunId || !['direct', 'toolbelt'].includes(method)) return;
+    preparedUploadMethods.set(selector, method);
+    renderToolbeltDevices();
+  }
+
+  function openPreparedDeviceUpload(selector) {
+    if (preparedUploadMethods.get(selector) !== 'toolbelt') {
+      selectPreparedDirectDevice(selector);
+      const nic = document.getElementById('direct-batch-nic').value;
+      if (document.getElementById('direct-extron-nic').value !== nic) {
+        document.getElementById('direct-extron-nic').value = nic;
+        toggleDirectExtronLanB();
+      }
+      return;
+    }
+    document.getElementById('toolbelt-controls').scrollIntoView({block: 'center'});
+    document.getElementById('toolbelt-test-btn').focus();
   }
 
   async function persistToolbeltSelection() {
@@ -3442,34 +3745,11 @@
   }
 
   async function saveToolbeltDefaultCredentials() {
-    const username = prompt('Shared device username', 'admin');
-    if (!username) return;
-    const password = prompt('Shared device password. CertMon tries this before admin/extron and serial fallback. Leave empty to cancel.');
-    if (!password) return;
-    const res = await fetch('/api/toolbelt/default-credentials', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Could not save shared credentials'); return; }
-    toolbeltDevices = data.devices || toolbeltDevices;
-    renderToolbeltDevices();
+    openDeviceCredentials(null);
   }
 
   async function saveToolbeltCredentials(selector) {
-    const username = prompt(`Username for ${selector}`, 'admin');
-    if (!username) return;
-    const password = prompt(`Password for ${selector}. Leave this dialog empty to cancel. CertMon stores it encrypted.`);
-    if (!password) return;
-    const res = await fetch(`/api/toolbelt/devices/${encodeURIComponent(selector)}/credentials`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Could not save credentials'); return; }
-    await loadToolbeltDevices(false);
+    openDeviceCredentials(selector);
   }
 
   async function startToolbeltDryRun() {
@@ -3481,9 +3761,13 @@
   }
 
   async function startToolbeltRun(mode) {
-    const selected = toolbeltDevices.filter(d => d.selected).map(d => d.selector);
+    const selected = toolbeltDevices.filter(d => d.selected && preparedUploadMethods.get(d.selector) === 'toolbelt').map(d => d.selector);
     const status = document.getElementById('toolbelt-run-status');
     status.style.color = 'var(--muted)';
+    if (!selected.length) {
+      status.textContent = 'Select at least one Toolbelt device.';
+      return;
+    }
     status.textContent = mode === 'upload' ? 'Starting Toolbelt upload...' : 'Starting safe Toolbelt dry-run...';
     if (mode === 'dry-run') {
       const selectedSet = new Set(selected);
@@ -3544,6 +3828,7 @@
   }
 
   async function removePreparedToolbeltDevice(certificateId, label) {
+    if (directBatchRunId || toolbeltRunId) return;
     const ok = confirm(`Remove ${label} from Upload?\n\nThis will delete the associated Local CA device certificate. The scanned device remains visible on Devices.`);
     if (!ok) return;
     const res = await fetch(`/api/ca/issued/${encodeURIComponent(certificateId)}`, { method: 'DELETE' });
@@ -3554,6 +3839,7 @@
   }
 
   async function removeAllPreparedToolbeltDevices() {
+    if (directBatchRunId || toolbeltRunId) return;
     if (!toolbeltDevices.length) return;
     const ok = confirm(`Remove all ${toolbeltDevices.length} prepared upload device(s)?\n\nThis will delete their associated Local CA device certificates. Scanned devices remain visible on Devices.`);
     if (!ok) return;
@@ -3600,15 +3886,17 @@
         const deviceIp = identifiers.find(id => isIp(id));
         const deviceLabel = deviceIp && deviceIp !== device ? `${device} (${deviceIp})` : device;
         const label = `${deviceLabel} · ${c.profile || c.issuer_type || 'certificate'} · ${c.certificate_id}`;
-        return `<option value="${c.certificate_id}"${c.certificate_id === cur ? ' selected' : ''}>${label}</option>`;
+        return `<option value="${escAttr(c.certificate_id)}"${c.certificate_id === cur ? ' selected' : ''}>${escAttr(label)}</option>`;
       }).join('');
+    if (!manualCertificates.some(c => c.certificate_id === cur)) sel.value = '';
+    if (document.getElementById('push-result').style.display === 'block') selectManualUploadTarget(sel.value);
   }
 
   function applyPendingDeployment() {
     if (!pendingDeployment) return;
     if (pendingDeployment.certificateId && document.getElementById('push-target-select')) {
       document.getElementById('push-target-select').value = pendingDeployment.certificateId;
-      selectedManualTarget = pendingDeployment.certificateId;
+      selectManualUploadTarget(pendingDeployment.certificateId);
     }
   }
 
@@ -3619,6 +3907,10 @@
 
   function selectManualUploadTarget(certificateId) {
     selectedManualTarget = certificateId || null;
+    document.getElementById('push-public-artifact-links').replaceChildren();
+    document.getElementById('push-private-artifact-links').replaceChildren();
+    document.getElementById('push-result').style.display = 'none';
+    if (certificateId) pushCert(false);
   }
 
   async function openManualUploadForCertificate(certificateId) {
@@ -3628,7 +3920,7 @@
     await loadAvailableCertificates();
     const select = document.getElementById('push-target-select');
     if (select) select.value = certificateId;
-    selectedManualTarget = certificateId;
+    selectManualUploadTarget(certificateId);
     const pushCard = document.getElementById('push-btn')?.closest('div[style*="border-radius:10px"]');
     flashCard(pushCard);
     if (select) select.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3654,7 +3946,20 @@
     loadData();  // refresh cert cards (back to "Upload" if no device left)
   }
 
-  async function pushCert() {
+  function artifactDownloadLink(certificateId, kind, name, filename, label) {
+    const link = document.createElement('a');
+    link.className = 'btn btn-ghost download-file';
+    link.href = `/api/certificates/${encodeURIComponent(certificateId)}/${kind}/${encodeURIComponent(name)}`;
+    link.download = filename;
+    const title = document.createElement('span');
+    title.textContent = label;
+    const file = document.createElement('small');
+    file.textContent = filename;
+    link.append(title, file);
+    return link;
+  }
+
+  async function pushCert(scroll = true) {
     const certificate_id = document.getElementById('push-target-select').value;
 
     if (!certificate_id) { alert('Please select a certificate/device pair'); return; }
@@ -3678,37 +3983,49 @@
 
     resultDiv.style.display = 'block';
     titleEl.style.color = 'var(--accent)';
-    titleEl.textContent = 'Certificate downloads ready';
-    logEl.innerHTML = '<div>Manual upload selected. CertMon does not connect to this device automatically.</div>';
-    const selectedCertificate = (availableCertificates || []).find(c => c.certificate_id === certificate_id) || {};
+    const selectedCertificate = (availableCertificates || []).find(c => c.certificate_id === certificate_id);
+    if (!selectedCertificate) {
+      selectManualUploadTarget('');
+      return;
+    }
+    const deviceLabel = (selectedCertificate.identifiers || []).join(', ') || certificate_id;
+    titleEl.textContent = `Downloads for ${deviceLabel}`;
+    logEl.textContent = `Certificate: ${certificate_id}`;
     const isExtronProfile = selectedCertificate.profile === 'extron-rsa';
     const publicArtifacts = selectedCertificate.public_artifacts || [];
+    const prefix = selectedCertificate.download_prefix || certificate_id;
+    const names = selectedCertificate.download_names || {};
+    const combinedFilename = `${prefix}-${isExtronProfile ? 'extron-combined.pem' : 'combined.pem'}`;
+    const privateFilename = `${prefix}-private-key.pem`;
 
     publicArtifactsDiv.style.display = 'block';
-    publicArtifactsEl.innerHTML = publicArtifacts.map(name =>
-      `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/public/${name}" download style="font-size:11px;padding:6px 10px">${name}</a>`
-    ).join('');
+    publicArtifactsEl.replaceChildren(...publicArtifacts.map(name =>
+      artifactDownloadLink(certificate_id, 'public', name, names[name] || `${prefix}-${name}`, name)
+    ));
 
     privateArtifactsDiv.style.display = hasPermission('download_private_key') ? 'block' : 'none';
-    privateArtifactsEl.innerHTML = hasPermission('download_private_key') ? (isExtronProfile
-      ? `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/combined.pem" download style="font-size:11px;padding:6px 10px;color:var(--warning);border-color:var(--warning)" title="Extron combined PEM contains certificate and private key. Keep it secret.">extron-combined.pem</a>`
-      : `<a class="btn btn-ghost" href="/api/certificates/${certificate_id}/private/private-key.pem" download style="font-size:11px;padding:6px 10px">private-key.pem</a>`) : '';
+    privateArtifactsEl.replaceChildren();
+    if (hasPermission('download_private_key')) {
+      privateArtifactsEl.append(isExtronProfile
+        ? artifactDownloadLink(certificate_id, 'private', 'combined.pem', combinedFilename, 'Extron combined PEM (certificate + private key)')
+        : artifactDownloadLink(certificate_id, 'private', 'private-key.pem', privateFilename, 'Private key (.pem)'));
+    }
 
     instrDiv.style.display = hasPermission('download_private_key') ? 'block' : 'none';
     instrText.textContent = isExtronProfile
       ? [
-          '1. Download extron-combined.pem.',
+          `1. Download ${combinedFilename}.`,
           '2. Upload that combined PEM in Extron Toolbelt or the device interface that expects a combined certificate/private-key PEM.',
-          '3. Keep extron-combined.pem secret and remove local copies after import.'
+          `3. Keep ${combinedFilename} secret and remove local copies after import.`
         ].join('\n')
       : [
-          '1. Download certificate.pem and private-key.pem.',
+          `1. Download ${names['certificate.pem'] || `${prefix}-certificate.pem`} and ${privateFilename}.`,
           '2. Download chain.pem or full-chain.pem if the device asks for a CA chain.',
           '3. Import the certificate and matching private key in the device web interface.',
           '4. Keep private-key.pem secret and remove local copies after import.'
         ].join('\n');
 
-    resultDiv.scrollIntoView({ behavior: 'smooth' });
+    if (scroll) resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     applyPermissionVisibility(resultDiv);
   }
 

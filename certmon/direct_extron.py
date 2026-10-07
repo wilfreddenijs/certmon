@@ -12,8 +12,11 @@ import re
 import socket
 import time
 import uuid
+import copy
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock, RLock, Thread
 from types import SimpleNamespace
 
 import paramiko
@@ -105,7 +108,7 @@ class ParamikoDirectTransport:
         finally:
             transport.close()
 
-    def ingest(self, identity, credentials, command, *, expected_fingerprint):
+    def ingest(self, identity, credentials, command, *, expected_fingerprint, response_kind="import"):
         transport = self._authenticated_transport(identity, credentials, expected_fingerprint)
         try:
             channel = transport.open_session(timeout=self.connect_timeout)
@@ -114,15 +117,18 @@ class ParamikoDirectTransport:
                 channel.get_pty(term="vt100")
                 channel.invoke_shell()
                 preloaded = self._drain(channel)
-                if b"CertI" in preloaded:
+                if b"CertI" in preloaded or (response_kind != "import" and b"Cert" in preloaded):
                     return SISExchange(preloaded=preloaded, received=b"", write_confirmed=False)
                 channel.sendall(command)
-                received = self._read_response(channel)
+                received = self._read_response(channel) if response_kind == "import" else self._read_response(channel, response_kind=response_kind)
                 return SISExchange(preloaded=b"", received=received, write_confirmed=True)
             finally:
                 channel.close()
         finally:
             transport.close()
+
+    def certificate_command(self, identity, credentials, command, *, expected_fingerprint, response_kind):
+        return self.ingest(identity, credentials, command, expected_fingerprint=expected_fingerprint, response_kind=response_kind)
 
     def delete(self, identity, credentials, remote_name, *, expected_fingerprint):
         transport = self._authenticated_transport(identity, credentials, expected_fingerprint)
@@ -187,15 +193,20 @@ class ParamikoDirectTransport:
                 raise OSError("Pre-send response exceeded limit")
         return bytes(data)
 
-    def _read_response(self, channel):
+    def _read_response(self, channel, *, response_kind="import"):
         data = bytearray()
         deadline = time.monotonic() + self.sis_response_timeout
-        while time.monotonic() < deadline and len(data) < self.max_response_bytes:
+        limit = 8192 if response_kind == "view" else self.max_response_bytes
+        while time.monotonic() < deadline and len(data) < limit:
             if not channel.recv_ready():
                 time.sleep(0.02)
                 continue
-            data.extend(channel.recv(min(128, self.max_response_bytes - len(data))))
-            if re.search(rb"(?:^|[\r\n])CertI[12]\r", data):
+            chunk = channel.recv(min(128, limit - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+            pattern = rb"\}\r" if response_kind == "view" else rb"(?:^|[\r\n])CertX[12]\r" if response_kind == "delete" else rb"(?:^|[\r\n])CertI[12]\r"
+            if re.search(pattern, data) or re.search(rb"(?:^|[\r\n])E\d{2}\r", data):
                 break
         return bytes(data)
 
@@ -214,6 +225,101 @@ class DirectExtronService:
         self.transport = transport or ParamikoDirectTransport()
         self.verifier = verifier or verify_device_certificate
         self.verification_timeout = verification_timeout
+        self._certificate_operation_lock = Lock()
+        self._batch_lock = RLock()
+        self._batches = {}
+
+    def start_batch(self, *, mode, targets):
+        if mode not in ("test", "upload") or not targets:
+            raise ValueError("Select at least one Direct device")
+        targets = copy.deepcopy(targets)
+        for target in targets:
+            self.target_for(target["selector"], target["nic"])
+            if not self.artifacts.has_certificate(target["certificate_id"]):
+                raise ValueError("A selected certificate is no longer available")
+        if not self._certificate_operation_lock.acquire(blocking=False):
+            raise ValueError("A certificate operation is already running")
+        run = {"id": uuid.uuid4().hex, "mode": mode, "status": "running",
+               "requested_stop": False, "current_device": None,
+               "devices": [dict(target, status="pending") for target in targets]}
+        with self._batch_lock:
+            self._batches[run["id"]] = run
+        try:
+            Thread(target=self._execute_batch, args=(run, targets), daemon=True).start()
+        except Exception:
+            self._certificate_operation_lock.release()
+            raise
+        return self.get_batch(run["id"])
+
+    def get_batch(self, run_id):
+        with self._batch_lock:
+            run = self._batches.get(run_id)
+            return copy.deepcopy(run) if run else None
+
+    def stop_batch(self, run_id):
+        with self._batch_lock:
+            run = self._batches.get(run_id)
+            if run is None:
+                return None
+            if run["status"] == "running":
+                run["requested_stop"] = True
+            return copy.deepcopy(run)
+
+    def _execute_batch(self, run, targets):
+        try:
+            # Preflight every endpoint before any private PEM is transferred.
+            ready = True
+            for index, target in enumerate(targets):
+                with self._batch_lock:
+                    if run["requested_stop"]:
+                        break
+                    run["current_device"] = target["selector"]
+                    run["devices"][index]["status"] = "testing"
+                try:
+                    result = self.probe_one(selector=target["selector"], nic=target["nic"])
+                    if run["mode"] == "upload" and any(
+                        record["selector"] == target["selector"] and record["nic"] == target["nic"]
+                        for record in self.recover_staged()
+                    ):
+                        result = {"status": "cleanup_pending"}
+                except DirectConnectionError:
+                    result = {"status": "connection_failed"}
+                except ValueError:
+                    result = {"status": "credentials_required"}
+                except (OSError, paramiko.SSHException):
+                    result = {"status": "connection_failed"}
+                with self._batch_lock:
+                    run["devices"][index].update(status=result["status"], result=result)
+                ready = ready and result["status"] == "ready"
+            if run["mode"] == "upload" and ready and not run["requested_stop"]:
+                for index, target in enumerate(targets):
+                    with self._batch_lock:
+                        if run["requested_stop"]:
+                            break
+                        run["current_device"] = target["selector"]
+                        run["devices"][index]["status"] = "uploading"
+                    try:
+                        result = self._activate_one(**target)
+                    except Exception:
+                        # Never retry a command that might already have reached the device.
+                        result = {"status": "upload_unconfirmed"}
+                    with self._batch_lock:
+                        run["devices"][index].update(status=result["status"], result=result)
+                    if result["status"] != "verified":
+                        ready = False
+                        break
+            with self._batch_lock:
+                for device in run["devices"]:
+                    if device["status"] == "pending" or (run["mode"] == "upload" and device["status"] == "ready"):
+                        device["status"] = "skipped"
+                run["status"] = "stopped" if run["requested_stop"] else "complete" if ready else "needs_attention"
+                run["current_device"] = None
+        except Exception:
+            with self._batch_lock:
+                run["status"] = "failed"
+                run["current_device"] = None
+        finally:
+            self._certificate_operation_lock.release()
 
     def target_for(self, selector, nic=1):
         selector = self._selector(selector)
@@ -281,6 +387,10 @@ class DirectExtronService:
         raise ValueError("No matching host-key endpoint to approve")
 
     def activate_one(self, *, selector, certificate_id, nic=1):
+        with self._certificate_operation():
+            return self._activate_one(selector=selector, certificate_id=certificate_id, nic=nic)
+
+    def _activate_one(self, *, selector, certificate_id, nic=1):
         target = self.target_for(selector, nic)
         trust = self._check_trust(target)
         if trust is not None:
@@ -326,6 +436,84 @@ class DirectExtronService:
         except (OSError, paramiko.SSHException):
             return self._set_staged(staged_name, "delete_failed", verification="verified", known_completion=True)
         return self._set_staged(staged_name, "deleted", verification="verified", result_status="verified", known_completion=True)
+
+    def remove_certificate(self, *, selector, nic, confirm_delete=False):
+        with self._certificate_operation():
+            return self._remove_certificate(selector=selector, nic=nic, confirm_delete=confirm_delete)
+
+    @contextmanager
+    def _certificate_operation(self):
+        if not self._certificate_operation_lock.acquire(blocking=False):
+            raise ValueError("A certificate upload or removal is already running; wait until it finishes")
+        try:
+            yield
+        finally:
+            self._certificate_operation_lock.release()
+
+    def _remove_certificate(self, *, selector, nic, confirm_delete=False):
+        if confirm_delete is not True:
+            raise ValueError("Explicit certificate deletion confirmation is required")
+        if type(nic) is not int or nic not in (1, 2):
+            raise ValueError("NIC must be 1 or 2")
+        target = self.target_for(selector, nic)
+        if any(record["selector"] == target.sis.selector and record["nic"] == nic
+               and record["status"] != "deleted" for record in self.recover_staged()):
+            raise ValueError("Resolve pending certificate uploads on this interface before deleting its certificate")
+        trust = self._check_trust(target)
+        if trust is not None:
+            return trust
+        credentials = self._credentials(target.sis.selector)
+        delete_command = f"\x1bX{nic}CERT\r".encode("ascii")
+        view_command = f"\x1bV{nic}CERT\r".encode("ascii")
+        result = {"status": "removal_unconfirmed", "nic": nic, "target": self._public_target(target)}
+        try:
+            exchange = self._exchange(self.transport.certificate_command(
+                target.sis, credentials, delete_command,
+                expected_fingerprint=self._approved_fingerprint(target.sis), response_kind="delete"))
+            result["delete_response"] = repr(exchange.received[:512])
+            acknowledged = not exchange.preloaded and exchange.write_confirmed and self._exact_ack(
+                exchange.received, nic, delete_command, operation="X")
+            if acknowledged:
+                result["status"] = "removal_acknowledged"
+            # Read back once, including after an ambiguous reply; never resend deletion.
+            view = self._exchange(self.transport.certificate_command(
+                target.sis, credentials, view_command,
+                expected_fingerprint=self._approved_fingerprint(target.sis), response_kind="view"))
+            result["view_response"] = repr(view.received[:8192])
+            information = self._certificate_information(view, nic, view_command)
+            if information is not None:
+                result["certificate_information"] = information
+        except HostKeyChangedError:
+            result["response"] = "host_key_changed"
+        except (paramiko.AuthenticationException, PermissionError):
+            result["response"] = "authentication_failed"
+        except (OSError, paramiko.SSHException):
+            result["response"] = "transport_interrupted"
+        return result
+
+    @staticmethod
+    def _certificate_information(exchange, nic, command):
+        if exchange.preloaded or not exchange.write_confirmed:
+            return None
+        lines = DirectExtronService._response_lines(exchange.received)
+        if lines is None:
+            return None
+        echoes = {command.rstrip(b"\r"), command.rstrip(b"\r").replace(b"\x1b", b"^[")}
+        if lines and lines[0] in echoes:
+            lines = lines[1:]
+        if len(lines) != 1:
+            return None
+        value = lines[0]
+        prefix = f"CertV{nic}".encode("ascii")
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+        try:
+            information = json.loads(value)
+        except (ValueError, UnicodeDecodeError):
+            return None
+        if not isinstance(information, dict) or not isinstance(information.get("C"), str) or not information["C"]:
+            return None
+        return information
 
     def cleanup_one(self, *, staged_name, confirm_finished=False):
         if Path(staged_name).name != staged_name:
@@ -467,12 +655,18 @@ class DirectExtronService:
         return value if isinstance(value, SISExchange) else SISExchange(b"", bytes(value), True)
 
     @staticmethod
-    def _exact_ack(value, nic, command=None):
-        expected = f"CertI{nic}".encode("ascii")
+    def _response_lines(value):
         if not value.endswith((b"\r", b"\n")):
-            return False
+            return None
         # A PTY may translate the device's CRLF into CRCRLF.
-        lines = value.rstrip(b"\r\n").replace(b"\r\r\n", b"\r\n").replace(b"\r\n", b"\r").split(b"\r")
+        return value.rstrip(b"\r\n").replace(b"\r\r\n", b"\r\n").replace(b"\r\n", b"\r").split(b"\r")
+
+    @staticmethod
+    def _exact_ack(value, nic, command=None, *, operation="I"):
+        expected = f"Cert{operation}{nic}".encode("ascii")
+        lines = DirectExtronService._response_lines(value)
+        if lines is None:
+            return False
         if lines == [expected]:
             return True
         if command is None:
