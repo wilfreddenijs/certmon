@@ -75,11 +75,213 @@ def test_select_device_opens_serial_column_only_after_rejected_credentials(uploa
     source = inspect.getsource(uploader.select_device)
 
     first_manage = source.index("manage.click_input()")
-    serial_enable = source.index("ensure_serial_column_visible")
-    serial_read = source.index("discover_serial_from_row")
+    serial_enable = source.rindex("ensure_serial_column_visible")
+    serial_read = source.rindex("discover_serial_from_row")
 
     assert "except SerialFallbackNeeded" in source
     assert first_manage < serial_enable < serial_read
+
+
+@pytest.fixture
+def add_ui(monkeypatch, uploader):
+    state = types.SimpleNamespace(open=False, submitted=[], filled=[], cancelled=False, reject=False)
+
+    class Control:
+        def __init__(self, text, top, action=None):
+            self.text = text
+            self.top = top
+            self.action = action
+
+        def window_text(self):
+            return self.text
+
+        def is_visible(self):
+            return True
+
+        def is_enabled(self):
+            return True
+
+        def rectangle(self):
+            return types.SimpleNamespace(left=70, right=420, top=self.top, bottom=self.top + 18)
+
+        def click_input(self):
+            if self.action:
+                self.action()
+
+    def submit():
+        state.submitted.append(dict(state.filled))
+        if not state.reject:
+            state.open = False
+
+    def cancel():
+        state.cancelled = True
+        state.open = False
+
+    controls = {
+        'Text': [Control('IP Address/Hostname', 100), Control('Username', 160), Control('Password', 220)],
+        'Edit': [Control('admin', 185), Control('', 245)],
+        'ComboBox': [Control('', 125)],
+        'Button': [Control('Add', 300, submit), Control('Cancel', 300, cancel)],
+    }
+    dialog = types.SimpleNamespace(descendants=lambda control_type: controls.get(control_type, []))
+
+    def open_dialog():
+        state.open = True
+
+    win = types.SimpleNamespace(descendants=lambda control_type: [Control('Add', 10, open_dialog)] if control_type == 'Button' else [])
+    monkeypatch.setattr(uploader, '_find_add_device_dialog', lambda win: dialog if state.open else None)
+    monkeypatch.setattr(uploader, '_fill_edit', lambda edit, root, value: state.filled.append((edit.top, value)) or True)
+    monkeypatch.setattr(uploader, '_credentials_rejected_present', lambda root: state.reject)
+    counter = iter(range(0, 10000, 3))
+    monkeypatch.setattr(uploader, 'time', types.SimpleNamespace(time=lambda: next(counter), sleep=lambda seconds: None))
+    return win, state, controls
+
+
+def test_add_device_fills_address_and_saved_password_without_editing_admin(uploader, add_ui):
+    win, state, _ = add_ui
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'username': 'admin', 'password': 'secret'}}
+    uploader.add_device(win, '192.168.0.112')
+    assert state.filled == [(125, '192.168.0.112'), (245, 'secret')]
+    assert len(state.submitted) == 1
+    assert not state.open
+    assert not state.cancelled
+
+
+def test_add_device_retries_password_candidates_and_cancels_on_rejection(uploader, add_ui):
+    win, state, _ = add_ui
+    state.reject = True
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'password_candidates': ['first', 'second']}}
+    with pytest.raises(RuntimeError, match='credentials rejected'):
+        uploader.add_device(win, '192.168.0.112')
+    assert state.filled == [(125, '192.168.0.112'), (245, 'first'), (245, 'second')]
+    assert len(state.submitted) == 2
+    assert state.cancelled
+
+
+def test_add_device_requires_serial_fallback_only_after_candidate_rejected(uploader, add_ui):
+    win, state, _ = add_ui
+    state.reject = True
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'password_candidates': ['extron', '__SERIAL__']}}
+    with pytest.raises(uploader.SerialFallbackNeeded):
+        uploader.add_device(win, '192.168.0.112')
+    assert len(state.submitted) == 1
+    assert state.cancelled
+
+
+def test_add_device_does_not_submit_when_field_fill_fails(monkeypatch, uploader, add_ui):
+    win, state, _ = add_ui
+    monkeypatch.setattr(uploader, '_fill_edit', lambda *args: False)
+    with pytest.raises(RuntimeError, match='address'):
+        uploader.add_device(win, '192.168.0.112')
+    assert state.submitted == []
+    assert state.cancelled
+
+
+def test_add_device_preserves_credentials_out_of_progress_events(monkeypatch, uploader, add_ui):
+    win, state, _ = add_ui
+    events = []
+    monkeypatch.setattr(uploader, 'emit', lambda event, **fields: events.append((event, fields)))
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'password': 'secret-sentinel'}}
+    uploader.add_device(win, '192.168.0.112')
+    assert events[0][0] == 'device_adding'
+    assert 'secret-sentinel' not in repr(events)
+
+
+def test_add_serial_candidate_is_not_persisted_before_manage_verification(monkeypatch, uploader, add_ui):
+    win, state, _ = add_ui
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'password_candidates': ['__SERIAL__']}}
+    monkeypatch.setattr(uploader, '_record_resolved_credential', lambda *args: pytest.fail('Add alone does not confirm authentication'))
+    assert uploader.add_device(win, '192.168.0.112', serial='A123456') == ('admin', 'A123456')
+    assert len(state.submitted) == 1
+
+
+def test_main_does_not_start_discovery_for_upload_batches(uploader):
+    assert 'ensure_discovery_started' not in inspect.getsource(uploader.main)
+
+
+def test_select_device_adds_first_then_requires_exact_address_without_discovery(monkeypatch, uploader):
+    calls = []
+    cell = types.SimpleNamespace(rectangle=lambda: types.SimpleNamespace(top=200, bottom=220),
+                                 click_input=lambda: calls.append('row'))
+    button = types.SimpleNamespace(element_info=types.SimpleNamespace(automation_id='DeviceDiscoveryUserControl_ManageButton'),
+                                   rectangle=cell.rectangle, click_input=lambda: calls.append('manage'))
+    tab = types.SimpleNamespace(click_input=lambda: calls.append('utilities'))
+    win = types.SimpleNamespace(descendants=lambda control_type: [button] if control_type == 'Button' else [])
+    monkeypatch.setattr(uploader, 'add_device', lambda win, ip: calls.append(('add', ip)))
+
+    def find(win, ip, start_discovery):
+        assert start_discovery is False
+        calls.append(('find', ip))
+        return cell
+
+    monkeypatch.setattr(uploader, 'find_device_cell', find)
+    monkeypatch.setattr(uploader, 'accept_credentials_prompt', lambda *args, **kwargs: False)
+    monkeypatch.setattr(uploader, '_find_text_control', lambda *args: tab)
+    monkeypatch.setattr(uploader, '_text_visible', lambda *args: True)
+    monkeypatch.setattr(uploader.time, 'sleep', lambda seconds: None)
+    uploader.select_device(win, '192.168.0.112')
+    assert calls == [('add', '192.168.0.112'), ('find', '192.168.0.112'), 'row', 'manage', 'utilities']
+
+
+def test_exact_row_matching_does_not_accept_ip_prefix(uploader):
+    cell = types.SimpleNamespace(window_text=lambda: '192.168.0.112', is_visible=lambda: True)
+    win = types.SimpleNamespace(descendants=lambda control_type: [cell])
+    assert uploader._visible_device_cell(win, '192.168.0.11') is None
+    assert uploader._visible_device_cell(win, '192.168.0.112') is cell
+
+
+def test_add_dialog_lookup_is_scoped_to_toolbelt_process(monkeypatch, uploader):
+    calls = []
+    dialog = types.SimpleNamespace(is_visible=lambda: True)
+
+    def windows(**kwargs):
+        calls.append(kwargs)
+        return [dialog]
+
+    monkeypatch.setattr(uploader, 'Desktop', lambda **kwargs: types.SimpleNamespace(windows=windows))
+    assert uploader._find_add_device_dialog(types.SimpleNamespace(process_id=lambda: 123)) is dialog
+    assert calls == [{'process': 123, 'title': 'Add Device'}]
+
+
+def test_add_device_does_not_put_address_in_another_field(uploader, add_ui):
+    win, state, controls = add_ui
+    controls['ComboBox'] = []
+    with pytest.raises(RuntimeError, match='IP Address/Hostname'):
+        uploader.add_device(win, '192.168.0.112')
+    assert state.filled == []
+    assert state.submitted == []
+    assert state.cancelled
+
+
+def test_add_device_rejects_unsupported_username_before_submit(uploader, add_ui):
+    win, state, controls = add_ui
+    controls['Edit'][0].is_enabled = lambda: False
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'username': 'other', 'password': 'secret'}}
+    with pytest.raises(RuntimeError, match='configured username'):
+        uploader.add_device(win, '192.168.0.112')
+    assert state.submitted == []
+    assert state.cancelled
+
+
+def test_existing_offscreen_device_is_found_without_discovery(monkeypatch, uploader):
+    cell = types.SimpleNamespace(window_text=lambda: '192.168.0.112', is_visible=lambda: True)
+    state = {'page': 9}
+    scroller = types.SimpleNamespace(wheel_mouse_input=lambda wheel_dist: state.update(page=state['page'] + 1))
+    grid = types.SimpleNamespace(is_visible=lambda: True, type_keys=lambda *args, **kwargs: state.update(page=0))
+
+    def descendants(control_type):
+        if control_type == 'DataGrid':
+            return [grid]
+        if control_type == 'ScrollBar':
+            return [scroller]
+        if control_type in {'Text', 'Hyperlink'}:
+            return [cell] if state['page'] == 1 else []
+        return []
+
+    monkeypatch.setattr(uploader.time, 'sleep', lambda seconds: None)
+    monkeypatch.setattr(uploader, 'ensure_discovery_started', lambda *args, **kwargs: pytest.fail('Discovery must not start'))
+    assert uploader.find_device_cell(types.SimpleNamespace(descendants=descendants), '192.168.0.112', start_discovery=False) is cell
+    assert state['page'] == 1
 
 
 def test_serial_column_detection_accepts_ipv4_address_header(uploader):

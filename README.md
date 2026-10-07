@@ -100,7 +100,8 @@ For Cloudflare automation, create an API token limited to `Zone:DNS:Edit` and `Z
 The Upload tab contains a **Toolbelt batch upload** section for Extron devices. It is separate from the generic/manual upload flow.
 
 - The device list comes from CertMon's Local CA Extron mapping, the same data exported as `devices.txt`.
-- Opening the Upload tab starts a safe dry-run first. Dry-run prepares Toolbelt targeting and fields, but does not click Apply and does not reboot devices.
+- Select **Test Toolbelt upload** to run a dry-run first. Dry-run prepares Toolbelt targeting and fields, but does not click Apply and does not reboot devices.
+- Each device is entered through Toolbelt's **Add** dialog using its address and saved credentials. CertMon then opens the exact matching IP row and continues through **Manage** > **Utilities**. It does not start Discovery. Existing devices stay in place and are located by address, not row position.
 - Real upload requires an explicit **Start Toolbelt upload** click and is enabled only for selected devices whose dry-run is OK.
 - **Stop after current device** requests a safe stop before the next device starts; it does not force-kill an active Toolbelt operation.
 - CertMon materializes the Extron combined PEM only in a temporary server-side run folder and deletes it after the run.
@@ -108,9 +109,9 @@ The Upload tab contains a **Toolbelt batch upload** section for Extron devices. 
 
 First-run Toolbelt checklist:
 
-1. Install Extron Toolbelt and verify it discovers the devices.
+1. Install Extron Toolbelt and verify **Add** can connect to a device by its address and password.
 2. Run Toolbelt and CertMon at the same privilege level. If Toolbelt is elevated, CertMon/launcher must also be elevated.
-3. In Toolbelt's discovered-device list, enable **Fields** > **Serial Number** so CertMon can use it automatically when a device still uses it as the password.
+3. Save the device password in CertMon. Serial-number fallback can use an existing device row; it cannot read the serial number of a device that has not yet been added successfully.
 4. Confirm dry-run status in CertMon before starting a real upload.
 
 ## Data Directory

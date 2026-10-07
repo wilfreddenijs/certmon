@@ -16,7 +16,7 @@ drive Toolbelt's own GUI, which is what this does.
 
 WHAT IT DOES (per device)
 -------------------------
-1. Select the device by IP in Toolbelt's discovery list and click Manage.
+1. Add the device by IP and credentials, then open its exact IP row with Manage.
 2. Open the Utilities tab.
 3. SSL Certificate section: click "..." -> pick the .pem in the file dialog.
 4. Type the passphrase (blank for a combined .pem with an unencrypted key).
@@ -34,7 +34,7 @@ SAFETY
 REQUIREMENTS
 ------------
   pip install pywinauto comtypes
-Toolbelt must be installed and able to reach the devices (discovery working).
+Toolbelt must be installed and able to reach the devices.
 
 USAGE
 -----
@@ -964,15 +964,30 @@ def _visible_discovery_texts(win):
     return tuple(sorted(texts))
 
 
-def find_device_cell(win, ip):
+def find_device_cell(win, ip, start_discovery=True):
     found = _visible_device_cell(win, ip)
     if found is not None:
         return found
-    ensure_discovery_started(win, [ip], timeout=45, require_visible=False)
+    if start_discovery:
+        ensure_discovery_started(win, [ip], timeout=45, require_visible=False)
     found = _visible_device_cell(win, ip)
     if found is not None:
         return found
     seen_pages = set()
+    if not start_discovery:
+        # Add preserves an existing row's position; search from the top even
+        # when the previous device left the list scrolled down.
+        for control_type in ("DataGrid", "Table", "List"):
+            for control in win.descendants(control_type=control_type):
+                try:
+                    if control.is_visible():
+                        control.type_keys("^{HOME}", set_foreground=True)
+                        break
+                except Exception:
+                    continue
+        found = _visible_device_cell(win, ip)
+        if found is not None:
+            return found
     for _ in range(60):
         visible = _visible_discovery_texts(win)
         if visible in seen_pages:
@@ -1399,17 +1414,116 @@ def _wait_for_ui(win, ip, label, predicate, timeout=T_MANAGE):
 # ---------------------------------------------------------------------------
 # Device selection + navigation  (task #2)
 # ---------------------------------------------------------------------------
+def _find_add_device_dialog(win):
+    process_id = win.process_id()
+    candidates = Desktop(backend="uia").windows(process=process_id, title="Add Device")
+    visible = [dialog for dialog in candidates if dialog.is_visible()]
+    if len(visible) > 1:
+        raise RuntimeError("Multiple Toolbelt Add Device dialogs are open")
+    return visible[0] if visible else None
+
+
+def _add_device_edit(dialog, label):
+    labels = [control for control in dialog.descendants(control_type="Text")
+              if (control.window_text() or "").strip().rstrip(":").lower() == label.lower()]
+    if len(labels) != 1:
+        raise RuntimeError("Toolbelt Add Device field not found: %s" % label)
+    anchor = labels[0].rectangle()
+    next_label_top = min((control.rectangle().top for control in dialog.descendants(control_type="Text")
+                          if control.rectangle().top > anchor.top), default=float("inf"))
+    candidates = []
+    for control_type in ("Edit", "ComboBox"):
+        for edit in dialog.descendants(control_type=control_type):
+            rect = edit.rectangle()
+            if edit.is_visible() and anchor.bottom - 5 <= rect.top < next_label_top and abs(rect.left - anchor.left) < 30:
+                candidates.append((rect.top - anchor.bottom, control_type != "Edit", edit))
+    if not candidates:
+        raise RuntimeError("Toolbelt Add Device input not found: %s" % label)
+    return min(candidates, key=lambda item: item[:2])[2]
+
+
+def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
+    """Use Toolbelt's Add dialog without starting network discovery."""
+    dialog = _find_add_device_dialog(win)
+    if dialog is None:
+        buttons = [button for button in win.descendants(control_type="Button")
+                   if button.is_visible() and (button.window_text() or "").strip().lower() == "add"]
+        if len(buttons) != 1:
+            raise RuntimeError("Toolbelt Add toolbar button not found or ambiguous")
+        buttons[0].click_input()
+        dialog = _wait_for_ui(win, ip, "Add Device dialog", lambda: _find_add_device_dialog(win), timeout=T_DIALOG)
+    credential = _DEVICE_CREDENTIALS.get(ip) or {}
+    username = credential.get("username") or "admin"
+    candidates = _credential_candidates(credential, serial) or [(None, "prefilled")]
+    try:
+        address = _add_device_edit(dialog, "IP Address/Hostname")
+        if not _fill_edit(address, dialog, ip):
+            raise RuntimeError("Could not fill Toolbelt Add Device address")
+        user = _add_device_edit(dialog, "Username")
+        try:
+            displayed_username = user.get_value()
+        except Exception:
+            displayed_username = user.window_text()
+        if (displayed_username or "").strip().lower() != username.lower():
+            if not user.is_enabled() or not _fill_edit(user, dialog, username):
+                raise RuntimeError("Toolbelt Add Device does not accept the configured username")
+        password = _add_device_edit(dialog, "Password")
+        for candidate_password, source in candidates:
+            if candidate_password is not None and not _fill_edit(password, dialog, candidate_password):
+                raise RuntimeError("Could not fill Toolbelt Add Device password")
+            buttons = [button for button in dialog.descendants(control_type="Button")
+                       if button.is_visible() and (button.window_text() or "").strip().lower() == "add"]
+            if len(buttons) != 1:
+                raise RuntimeError("Toolbelt Add Device submit button not found or ambiguous")
+            emit("device_adding", selector=ip, message="Adding device by address in Toolbelt")
+            buttons[0].click_input()
+            deadline = time.time() + timeout
+            reject_grace = time.time() + 2.5
+            while time.time() < deadline:
+                current = _find_add_device_dialog(win)
+                if current is None:
+                    log.info("[%s] Toolbelt Add completed; checking exact device row", ip)
+                    return (username, candidate_password) if source == "serial" else None
+                if time.time() >= reject_grace and _credentials_rejected_present(current):
+                    break
+                time.sleep(POLL)
+            else:
+                raise RuntimeError("Toolbelt Add Device timed out for %s" % ip)
+        if "__SERIAL__" in (credential.get("password_candidates") or []) and not serial:
+            raise SerialFallbackNeeded(ip)
+        raise RuntimeError("credentials rejected for %s in Toolbelt Add Device" % ip)
+    finally:
+        try:
+            remaining = _find_add_device_dialog(win)
+            if remaining is not None:
+                for button in remaining.descendants(control_type="Button"):
+                    if button.is_visible() and (button.window_text() or "").strip().lower() == "cancel":
+                        button.click_input()
+                        break
+        except Exception:
+            log.warning("[%s] Could not close Toolbelt Add Device dialog", ip)
+
+
 def select_device(win, ip, timeout=T_MANAGE):
     """Find the device row for `ip`, click Manage, then open the Utilities tab."""
     log.info("[%s] selecting device", ip)
 
-    # Locate the IP cell in the discovery list
-    ip_cell = find_device_cell(win, ip)
+    serial = None
+    try:
+        resolved_add_credential = add_device(win, ip)
+    except SerialFallbackNeeded:
+        cell = find_device_cell(win, ip, start_discovery=False)
+        if cell is None or not ensure_serial_column_visible(win, row_y=cy(cell.rectangle())):
+            raise RuntimeError("credentials rejected for %s - save the device password in CertMon; no serial row is available" % ip)
+        serial = discover_serial_from_row(win, ip, cy(cell.rectangle()))
+        if not serial:
+            raise RuntimeError("credentials rejected for %s - no serial number is available" % ip)
+        resolved_add_credential = add_device(win, ip, serial=serial)
+    ip_cell = _wait_for_ui(win, ip, "exact device IP row", lambda: find_device_cell(win, ip, start_discovery=False), timeout=timeout)
     if ip_cell is None:
-        raise RuntimeError("device %s not found in discovery list (is discovery started?)" % ip)
+        raise RuntimeError("device %s not found in Toolbelt after Add" % ip)
 
     row_y = cy(ip_cell.rectangle())
-    serial = None
     # Click the row to select it
     ip_cell.click_input()
     time.sleep(0.5)
@@ -1440,7 +1554,7 @@ def select_device(win, ip, timeout=T_MANAGE):
                 "is hidden, open the toolbar overflow menu; if the column is off-screen, "
                 "scroll right or move the splitter." % ip
             )
-        refreshed_cell = find_device_cell(win, ip)
+        refreshed_cell = find_device_cell(win, ip, start_discovery=False)
         if refreshed_cell is not None:
             ip_cell = refreshed_cell
             row_y = cy(ip_cell.rectangle())
@@ -1481,6 +1595,8 @@ def select_device(win, ip, timeout=T_MANAGE):
         timeout=timeout,
     )
     log.info("[%s] Utilities tab open, SSL section visible", ip)
+    if resolved_add_credential is not None:
+        _record_resolved_credential(ip, *resolved_add_credential)
 
 
 # ---------------------------------------------------------------------------
@@ -1739,7 +1855,7 @@ def already_current(ip, pem_path):
 
 
 def upload_to_device(app, win, ip, pem_path, passphrase, commit, force=False):
-    """Full per-device flow (assumes device is in the discovery list)."""
+    """Full per-device flow using Add, exact row selection and Utilities."""
     if not reachable(ip):
         return False, "unreachable (port 4503 closed — offline or not routable)"
     if not os.path.exists(pem_path):
@@ -1909,7 +2025,6 @@ def main():
         ok = test_serial_column(app, win, devices[0][0])
         emit("run_finished", ok=1 if ok else 0, total=1, status="complete")
         return
-    ensure_discovery_started(win, [ip for ip, _ in devices])
 
     results = []
     for idx, (ip, pem_override) in enumerate(devices, 1):
