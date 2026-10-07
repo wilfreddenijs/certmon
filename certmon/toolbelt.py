@@ -18,6 +18,8 @@ SELECTION_KEY = "toolbelt_selected_devices"
 SECRET_PREFIX = "toolbelt-device-credentials:"
 DEFAULT_SECRET_ID = "toolbelt-default-credentials"
 SECRET_PURPOSE = "toolbelt-device-credentials"
+DIRECT_NIC_KEY = "direct_extron_device_nics"
+DIRECT_LAN_B_KEY = "direct_extron_lan_b_targets"
 
 
 def utc_now():
@@ -76,6 +78,8 @@ class ToolbeltBatchService:
         selected_setting = self.database.get_setting(SELECTION_KEY, None)
         selected = set(selected_setting or [])
         default_credentials_saved = self.database.get_secret(DEFAULT_SECRET_ID) is not None
+        direct_nics = self.database.get_setting(DIRECT_NIC_KEY, {})
+        lan_b_targets = self.database.get_setting(DIRECT_LAN_B_KEY, {})
         rows = []
         for cert in self.database.list_certificates():
             if cert.get("kind") != "leaf" or cert.get("issuer_type") != "local_ca":
@@ -103,6 +107,8 @@ class ToolbeltBatchService:
                     )
                     is not None,
                     "default_credentials_saved": default_credentials_saved,
+                    "direct_nic": direct_nics.get(selector, 1),
+                    "direct_lan_b": lan_b_targets.get(selector),
                 }
             )
         return sorted(rows, key=lambda row: (row["label"], row["selector"]))

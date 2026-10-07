@@ -2041,6 +2041,24 @@ def direct_extron_credentials(selector):
     return jsonify({"ok": True})
 
 
+@app.route("/api/direct-extron/devices/<path:selector>/interface", methods=["PATCH"])
+def direct_extron_device_interface(selector):
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {"nic", "host", "port"}:
+        return jsonify({"error": "Expected nic and optional LAN B host/port"}), 400
+    if selector not in {row["selector"] for row in toolbelt_service.list_devices()}:
+        return jsonify({"error": "Select a prepared device"}), 400
+    try:
+        result = direct_extron_service.save_device_interface(selector, **body)
+    except (TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+    audit("direct_extron_device_interface_saved", target=selector, details={"nic": result["nic"]})
+    return jsonify(result)
+
+
 @app.route("/api/direct-extron/probe", methods=["POST"])
 def direct_extron_probe():
     authorize(Permission.DEPLOY_CERTIFICATE)
@@ -2049,7 +2067,7 @@ def direct_extron_probe():
     try:
         body = _direct_extron_body({"selector", "nic"})
         result = direct_extron_service.probe_one(
-            selector=body.get("selector"), nic=body.get("nic", 1)
+            selector=body.get("selector"), nic=body.get("nic", 1), auto_first_use=True
         )
     except DirectConnectionError as error:
         app.logger.exception("Direct Extron host-key probe failed")
@@ -2108,25 +2126,25 @@ def direct_extron_batch_start():
         return jsonify({"error": "Direct Extron upload is unavailable"}), 503
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or set(body) - {"selectors", "nic", "mode"}:
-        return jsonify({"error": "Expected selectors, nic and mode"}), 400
+        return jsonify({"error": "Expected selectors and mode"}), 400
     selectors = body.get("selectors")
     if (not isinstance(selectors, list) or not selectors or len(selectors) > 100
             or any(not isinstance(value, str) for value in selectors)
             or len(set(selectors)) != len(selectors)
-            or type(body.get("nic")) is not int or body["nic"] not in (1, 2)
+            or ("nic" in body and (type(body["nic"]) is not int or body["nic"] not in (1, 2)))
             or body.get("mode") not in ("test", "upload")):
         return jsonify({"error": "Invalid Direct batch selection"}), 400
     prepared = {row["selector"]: row for row in toolbelt_service.list_devices()}
     if any(selector not in prepared or not prepared[selector].get("extron_ready") for selector in selectors):
         return jsonify({"error": "Select prepared Extron devices only"}), 400
     targets = [{"selector": selector, "certificate_id": prepared[selector]["certificate_id"],
-                "nic": body["nic"]} for selector in selectors]
+                "nic": body.get("nic", prepared[selector].get("direct_nic", 1))} for selector in selectors]
     try:
         result = direct_extron_service.start_batch(mode=body["mode"], targets=targets)
     except (KeyError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
     audit("direct_extron_batch_started", details={"run_id": result["id"], "mode": body["mode"],
-                                                 "selectors": selectors, "nic": body["nic"]})
+                                                 "targets": targets})
     return jsonify(result), 202
 
 

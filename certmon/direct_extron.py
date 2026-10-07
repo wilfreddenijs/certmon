@@ -24,10 +24,10 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from certmon.deployment import DeploymentMaterial, verify_device_certificate
-from certmon.toolbelt import DEFAULT_SECRET_ID, SECRET_PREFIX, SECRET_PURPOSE
+from certmon.toolbelt import DEFAULT_SECRET_ID, SECRET_PREFIX, SECRET_PURPOSE, DIRECT_NIC_KEY, DIRECT_LAN_B_KEY
 
 
-LAN_B_TARGETS_KEY = "direct_extron_lan_b_targets"
+LAN_B_TARGETS_KEY = DIRECT_LAN_B_KEY
 HOST_KEYS_KEY = "direct_extron_host_keys"
 STAGED_KEY = "direct_extron_staged_pems"
 
@@ -228,12 +228,15 @@ class DirectExtronService:
         self._certificate_operation_lock = Lock()
         self._batch_lock = RLock()
         self._batches = {}
+        self._trust_lock = RLock()
 
     def start_batch(self, *, mode, targets):
         if mode not in ("test", "upload") or not targets:
             raise ValueError("Select at least one Direct device")
         targets = copy.deepcopy(targets)
         for target in targets:
+            if type(target["nic"]) is not int or target["nic"] not in (1, 2):
+                raise ValueError("NIC must be 1 or 2")
             self.target_for(target["selector"], target["nic"])
             if not self.artifacts.has_certificate(target["certificate_id"]):
                 raise ValueError("A selected certificate is no longer available")
@@ -276,7 +279,7 @@ class DirectExtronService:
                     run["current_device"] = target["selector"]
                     run["devices"][index]["status"] = "testing"
                 try:
-                    result = self.probe_one(selector=target["selector"], nic=target["nic"])
+                    result = self.probe_one(selector=target["selector"], nic=target["nic"], auto_first_use=True)
                     if run["mode"] == "upload" and any(
                         record["selector"] == target["selector"] and record["nic"] == target["nic"]
                         for record in self.recover_staged()
@@ -349,12 +352,25 @@ class DirectExtronService:
         selector = self._selector(selector)
         self._save_secret(self._secret_id(selector), username=username, password=password, metadata={"selector": selector, "username": username})
 
+    def save_device_interface(self, selector, *, nic, host=None, port=443):
+        if type(nic) is not int or nic not in (1, 2):
+            raise ValueError("NIC must be 1 or 2")
+        selector = self._selector(selector)
+        with self._certificate_operation():
+            if nic == 2 and host is not None:
+                self.save_lan_b_target(selector, host=host, port=port)
+            self.target_for(selector, nic)
+            selections = dict(self.database.get_setting(DIRECT_NIC_KEY, {}))
+            selections[selector] = nic
+            self.database.put_setting(DIRECT_NIC_KEY, selections)
+        return {"nic": nic, "lan_b": self.database.get_setting(LAN_B_TARGETS_KEY, {}).get(selector)}
+
     def save_shared_credentials(self, *, username, password):
         self._save_secret(DEFAULT_SECRET_ID, username=username, password=password, metadata={"scope": "shared", "username": username})
 
-    def probe_one(self, *, selector, nic=1):
+    def probe_one(self, *, selector, nic=1, auto_first_use=False):
         target = self.target_for(selector, nic)
-        trust = self._check_trust(target)
+        trust = self._check_trust(target, auto_first_use=auto_first_use)
         if trust is not None:
             return trust
         credentials = self._credentials(target.sftp.selector)
@@ -370,6 +386,10 @@ class DirectExtronService:
         return {"status": "ready", "target": self._public_target(target)}
 
     def approve_host_key(self, *, selector, nic=1, fingerprint, connection=None):
+        with self._trust_lock:
+            return self._approve_host_key(selector=selector, nic=nic, fingerprint=fingerprint, connection=connection)
+
+    def _approve_host_key(self, *, selector, nic=1, fingerprint, connection=None):
         target = self.target_for(selector, nic)
         observed = self._observed_keys(target)
         supplied = str(fingerprint or "")
@@ -548,15 +568,27 @@ class DirectExtronService:
     def recover_staged(self):
         return [dict(value, staged_name=name) for name, value in self.database.get_setting(self.STAGED_KEY, {}).items() if value.get("status") != "deleted"]
 
-    def _check_trust(self, target):
-        approvals = self.database.get_setting(self.HOST_KEYS_KEY, {})
-        for identity, (algorithm, fingerprint) in self._observed_keys(target).items():
-            approved = approvals.get(identity.key())
-            if approved is None:
-                return {"status": "approval_required", "fingerprint": fingerprint, "identity": self._identity_dict(identity)}
-            if approved.get("algorithm") != algorithm or approved.get("fingerprint") != fingerprint:
-                return {"status": "host_key_changed", "fingerprint": fingerprint, "identity": self._identity_dict(identity)}
-        return None
+    def _check_trust(self, target, *, auto_first_use=False):
+        with self._trust_lock:
+            approvals = dict(self.database.get_setting(self.HOST_KEYS_KEY, {}))
+            observed = self._observed_keys(target)
+            # A changed known key blocks the entire target, even if its other key is new.
+            for identity, (algorithm, fingerprint) in observed.items():
+                approved = approvals.get(identity.key())
+                if approved is not None and (approved.get("algorithm") != algorithm or approved.get("fingerprint") != fingerprint):
+                    return {"status": "host_key_changed", "fingerprint": fingerprint, "identity": self._identity_dict(identity)}
+            changed = False
+            for identity, (algorithm, fingerprint) in observed.items():
+                if identity.key() in approvals:
+                    continue
+                if not auto_first_use:
+                    return {"status": "approval_required", "fingerprint": fingerprint, "identity": self._identity_dict(identity)}
+                approvals[identity.key()] = {"algorithm": algorithm, "fingerprint": fingerprint,
+                                             "identity": self._identity_dict(identity), "approval": "first_use"}
+                changed = True
+            if changed:
+                self.database.put_setting(self.HOST_KEYS_KEY, approvals)
+            return None
 
     def _observed_keys(self, target):
         result = {}

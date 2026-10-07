@@ -257,3 +257,32 @@ Final targeted batch, upload UI, Direct service/API, UI contract, deployment,
 RBAC, CSRF and CA suites: 160 passed in 62.89 seconds. The earlier page-load
 timeout was addressed by waiting for DOM readiness in the workspace browser
 fixture instead of waiting for all external assets. Preview HTTP check: 200.
+
+## Build 33 Hardware Follow-Up: First-Use Trust And Per-Device LAN
+
+On 2026-10-07 the user confirmed most of build 33 works, but explicitly requested
+background host-key acceptance and a separate LAN A/B choice for every device.
+This supersedes the earlier manual first-use enrollment requirement. Direct
+API probes and batch preflight now automatically pin both observed endpoint
+keys on first use. Stored-key changes still block before password authentication
+or private PEM transfer and require explicit review; the code never blindly
+replaces a known key. Transport connections still compare the pinned fingerprint.
+An observation failure on either port does not store partial new approvals.
+
+Each Direct row now persists its own interface in database settings. LAN B
+requires the device's explicit LAN B host/HTTPS port in a row-scoped native
+dialog. The central batch NIC selector and single-device Save LAN B endpoint
+button are removed. Batch requests resolve each selected device's certificate
+and persisted NIC on the server; a batch may mix LAN A and LAN B. The individual
+upload dialog shows this row's interface read-only. Changing either interface
+or endpoint invalidates the previous batch test. Legacy explicit batch NIC
+requests remain accepted for compatibility with build 33 clients.
+
+Tests cover distinct first-use SFTP/SIS keys, rejection of changed keys before
+authentication, mixed-interface sequential upload, persisted prepared-row
+metadata, invalid NIC/missing LAN B target, interface auth/CSRF guards and the
+row-scoped responsive UI. LAN B device/hardware acceptance remains pending.
+
+Build 34 candidate verification: 183 targeted tests passed in 63.38 seconds,
+covering Direct/batch/UI/deployment/RBAC/CSRF/CA and Toolbelt API/service suites.
+Desktop/mobile per-device LAN controls were captured; mobile layout inspected.

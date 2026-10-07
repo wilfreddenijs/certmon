@@ -744,7 +744,8 @@ def test_routes_and_ui_expose_only_server_side_direct_actions():
     for endpoint in ("probe", "host-keys/approve", "activate", "cleanup"):
         assert f"/api/direct-extron/{endpoint}" in html
         assert f"/api/direct-extron/{endpoint}" in app_source
-    assert "LAN B HTTPS host" in direct_panel
+    assert 'id="direct-extron-interface"' in direct_panel
+    assert "Save LAN B endpoint" not in direct_panel
     assert "combined_pem" not in direct_panel
     assert "private_key" not in direct_panel
 
@@ -825,7 +826,8 @@ def test_direct_upload_browser_starts_without_network_or_activation(page, live_c
     expect(page.locator('#direct-extron-activate')).to_be_disabled()
     expect(page.locator('#direct-extron-activate')).to_have_text('Upload certificate')
     buttons = page.locator('#direct-extron-upload button')
-    expect(buttons.last).to_have_text('Save LAN B endpoint')
+    expect(buttons.last).to_have_text('Delete certificate...')
+    expect(page.get_by_role('button', name='Save LAN B endpoint', exact=True)).to_have_count(0)
     assert not any('/api/direct-extron/probe' in url or '/api/direct-extron/activate' in url for url in requests)
     page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'direct-upload-desktop.png'), full_page=True)
     page.set_viewport_size({"width": 390, "height": 844})

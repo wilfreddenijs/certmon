@@ -4,10 +4,10 @@
 
 | capability | decision | reason |
 |---|---|---|
-| `ssh-host-key-enroll-22022` | INTEGRATE | |
-| `ssh-host-key-enroll-22023` | INTEGRATE | |
-| `ssh-host-key-rotate-22022` | INTEGRATE | |
-| `ssh-host-key-rotate-22023` | INTEGRATE | |
+| `ssh-host-key-enroll-22022` | IMPLEMENTED | Automatic first-use pinning explicitly requested by user on 2026-10-07. Password/private transfer connections still require the exact stored key. |
+| `ssh-host-key-enroll-22023` | IMPLEMENTED | Same first-use policy, separately scoped to the SIS endpoint. |
+| `ssh-host-key-rotate-22022` | IMPLEMENTED | Changed stored keys block and require explicit review; never silently overwritten. |
+| `ssh-host-key-rotate-22023` | IMPLEMENTED | Same changed-key policy, separately scoped to the SIS endpoint. |
 | `saved-device-or-shared-password-auth` | INTEGRATE | |
 | `read-only-connectivity-probe` | INTEGRATE | |
 | `sftp-root-stage-combined-pem` | INTEGRATE | |

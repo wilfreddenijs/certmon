@@ -154,10 +154,43 @@ def test_direct_batch_selection_test_confirmation_and_results(page, live_certmon
     assert len(calls) == 1
     page.get_by_role('button', name='Start batch upload', exact=True).click()
     expect(page.locator('#direct-batch-status')).to_have_text('2 certificates uploaded and verified.')
-    assert calls == [{"mode": mode, "selectors": ['192.168.0.1', '192.168.0.2'], "nic": 1} for mode in ('test', 'upload')]
+    assert calls == [{"mode": mode, "selectors": ['192.168.0.1', '192.168.0.2']} for mode in ('test', 'upload')]
     expect(page.locator('.upload-device-row').first).to_contain_text('Certificate uploaded and verified')
     page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'upload-direct-batch-desktop.png'))
     page.set_viewport_size({"width": 390, "height": 844})
     page.locator('#direct-batch-status').scroll_into_view_if_needed()
     page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'upload-direct-batch-mobile.png'))
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+
+
+def test_interface_choice_is_per_device_and_invalidates_batch_test(page, live_certmon):
+    prepare_upload_workspace(page, live_certmon)
+    saved = []
+    def save_interface(route):
+        body = route.request.post_data_json
+        saved.append((route.request.url.rsplit('/devices/', 1)[1], body))
+        route.fulfill(json={'nic': body['nic'], 'lan_b': {'host': body['host'], 'port': body['port']}})
+    page.route('**/api/direct-extron/devices/*/interface', save_interface)
+    page.evaluate('directBatchTestSignature = directBatchSignature(); renderDirectBatchControls()')
+    expect(page.locator('#direct-batch-upload')).to_be_enabled()
+    expect(page.locator('#direct-batch-nic')).to_have_count(0)
+    page.get_by_label('Network interface for Device 2', exact=True).select_option('2')
+    dialog = page.locator('#direct-interface-dialog')
+    expect(dialog).to_be_visible()
+    page.locator('#direct-interface-host').fill('192.168.1.2')
+    page.locator('#direct-interface-port').fill('8443')
+    dialog.get_by_role('button', name='Save', exact=True).click()
+    expect(dialog).not_to_be_visible()
+    expect(page.get_by_label('Network interface for Device 1', exact=True)).to_have_value('1')
+    expect(page.get_by_label('Network interface for Device 2', exact=True)).to_have_value('2')
+    expect(page.locator('#direct-batch-upload')).to_be_disabled()
+    assert saved == [('192.168.0.2/interface', {'nic': 2, 'host': '192.168.1.2', 'port': 8443})]
+    page.locator('.upload-device-row').nth(1).get_by_role('button', name='Open upload', exact=True).click()
+    expect(page.locator('#direct-extron-interface')).to_have_text('LAN B (192.168.1.2:8443)')
+    expect(page.locator('#direct-extron-nic')).to_have_value('2')
+    expect(page.get_by_role('button', name='Save LAN B endpoint', exact=True)).to_have_count(0)
+    page.locator('#direct-extron-upload').get_by_role('button', name='Close', exact=True).click()
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.get_by_label('Network interface for Device 2', exact=True).scroll_into_view_if_needed()
+    page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'upload-per-device-interface-mobile.png'))
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
