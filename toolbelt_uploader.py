@@ -434,6 +434,10 @@ class SerialFallbackNeeded(RuntimeError):
     pass
 
 
+class DeviceUnreachableError(RuntimeError):
+    pass
+
+
 def _wants_serial_fallback(ip):
     credential = _DEVICE_CREDENTIALS.get(ip) or {}
     return "__SERIAL__" in (credential.get("password_candidates") or [])
@@ -1455,6 +1459,21 @@ def _add_dialog_uia(dialog):
         return None
 
 
+def _device_unreachable_present(dialog):
+    for control in _add_dialog_controls(dialog, "Text"):
+        try:
+            if control.is_visible() and "device unreachable" in " ".join(
+                    (control.window_text() or "").lower().split()):
+                return True
+        except Exception:
+            continue
+    if getattr(getattr(dialog, "backend", None), "name", None) == "win32":
+        alternate = _add_dialog_uia(dialog)
+        if alternate is not None:
+            return _device_unreachable_present(alternate)
+    return False
+
+
 def _add_device_edit(dialog, label):
     try:
         return _find_add_device_edit(dialog, label)
@@ -1612,6 +1631,8 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
                 if current is None:
                     log.info("[%s] Toolbelt Add completed; checking exact device row", ip)
                     return (username, candidate_password) if source == "serial" else None
+                if _device_unreachable_present(current):
+                    raise DeviceUnreachableError("Device unreachable: %s (reported by Toolbelt)" % ip)
                 if time.time() >= reject_grace and _credentials_rejected_present(current):
                     break
                 time.sleep(POLL)
@@ -2180,7 +2201,7 @@ def main():
         try:
             ok, msg = upload_to_device(app, win, ip, pem, args.passphrase, args.commit, args.force)
         except Exception as e:
-            if "credentials rejected" in str(e).lower():
+            if isinstance(e, DeviceUnreachableError) or "credentials rejected" in str(e).lower():
                 ok, msg = False, "ERROR: %s" % e
                 log.error("[%s] %s", ip, msg)
             else:

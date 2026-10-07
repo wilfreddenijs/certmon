@@ -169,6 +169,81 @@ def test_add_device_retries_password_candidates_and_cancels_on_rejection(uploade
     assert state.cancelled
 
 
+@pytest.mark.parametrize('add_ui', ['uia', 'win32_generic_labels'], indirect=True)
+def test_add_device_unreachable_stops_without_password_or_serial_retry(uploader, add_ui):
+    win, state, controls = add_ui
+    state.reject = True
+    status = types.SimpleNamespace(
+        window_text=lambda: 'Device Unreachable', is_visible=lambda: True,
+        friendly_class_name=lambda: 'Window',
+        rectangle=lambda: types.SimpleNamespace(left=70, right=420, top=270, bottom=288))
+    controls['Text'].append(status)
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {'password_candidates': ['first', 'second', '__SERIAL__']}}
+    with pytest.raises(uploader.DeviceUnreachableError, match='Device unreachable: 192.168.0.112'):
+        uploader.add_device(win, '192.168.0.112')
+    assert len(state.submitted) == 1
+    assert state.filled == [(125, '192.168.0.112'), (245, 'first')]
+    assert state.cancelled
+
+
+@pytest.mark.parametrize('visible, text, expected', [
+    (True, 'DEVICE   UNREACHABLE', True),
+    (False, 'Device Unreachable', False),
+    (True, 'Credentials are incorrect', False),
+])
+def test_unreachable_detection_requires_visible_status(uploader, visible, text, expected):
+    status = types.SimpleNamespace(window_text=lambda: text, is_visible=lambda: visible)
+    dialog = types.SimpleNamespace(descendants=lambda control_type: [status] if control_type == 'Text' else [])
+    assert uploader._device_unreachable_present(dialog) is expected
+
+
+def test_native_unreachable_status_does_not_wait_for_uia(monkeypatch, uploader):
+    status = types.SimpleNamespace(window_text=lambda: 'Device Unreachable', is_visible=lambda: True,
+                                   friendly_class_name=lambda: 'Window')
+    native = types.SimpleNamespace(backend=types.SimpleNamespace(name='win32'), descendants=lambda: [status])
+    monkeypatch.setattr(uploader, '_add_dialog_uia', lambda dialog: pytest.fail('visible native error must stop immediately'))
+    assert uploader._device_unreachable_present(native)
+
+
+def test_native_unreachable_detection_can_read_uia_status(monkeypatch, uploader):
+    status = types.SimpleNamespace(window_text=lambda: 'Device Unreachable', is_visible=lambda: True)
+    alternate = types.SimpleNamespace(descendants=lambda control_type: [status] if control_type == 'Text' else [])
+    native = types.SimpleNamespace(backend=types.SimpleNamespace(name='win32'), descendants=lambda: [])
+    monkeypatch.setattr(uploader, '_add_dialog_uia', lambda dialog: alternate)
+    assert uploader._device_unreachable_present(native)
+
+
+@pytest.mark.parametrize('commit', [False, True])
+def test_batch_skips_unreachable_without_reconnecting_and_continues(monkeypatch, uploader, tmp_path, commit):
+    devices = tmp_path / 'devices.txt'
+    devices.write_text('10.10.186.105,offline.pem\n10.10.187.112,online.pem\n', encoding='utf-8')
+    monkeypatch.setattr(__import__('sys'), 'argv', ['toolbelt_uploader', '--list', str(devices)] + (['--commit'] if commit else []))
+    calls, events, connections = [], [], []
+    monkeypatch.setattr(uploader, 'setup_logging', lambda: None)
+    monkeypatch.setattr(uploader, 'emit', lambda event, **fields: events.append((event, fields)))
+    monkeypatch.setattr(uploader, 'connect_toolbelt', lambda: connections.append('connect') or (None, None))
+    monkeypatch.setattr(uploader, 'ensure_connection', lambda app, win: (app, win))
+    monkeypatch.setattr(uploader, '_close_stray_dialogs', lambda win: None)
+    monkeypatch.setattr(uploader, '_write_resolved_credentials', lambda: None)
+    monkeypatch.setattr(uploader.time, 'sleep', lambda seconds: None)
+
+    def upload(app, win, ip, *args):
+        calls.append(ip)
+        if ip == '10.10.186.105':
+            raise uploader.DeviceUnreachableError('Device unreachable: ' + ip)
+        return True, 'verified' if commit else 'dry-run (not applied)'
+
+    monkeypatch.setattr(uploader, 'upload_to_device', upload)
+    uploader.main()
+    assert calls == ['10.10.186.105', '10.10.187.112']
+    assert connections == ['connect']
+    failure = 'upload_failed' if commit else 'dry_run_failed'
+    success = 'upload_ok' if commit else 'dry_run_ok'
+    assert any(event == failure and fields['selector'] == '10.10.186.105' for event, fields in events)
+    assert any(event == success and fields['selector'] == '10.10.187.112' for event, fields in events)
+    assert events[-1] == ('run_finished', {'ok': 1, 'total': 2, 'status': 'complete'})
+
+
 def test_add_device_requires_serial_fallback_only_after_candidate_rejected(uploader, add_ui):
     win, state, _ = add_ui
     state.reject = True
