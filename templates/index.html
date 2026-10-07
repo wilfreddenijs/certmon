@@ -2207,6 +2207,18 @@
       if (!res.ok || result.error) {
         result = { created: [], failed: [{ name: 'Bulk create', error: result.error || 'Could not create certificates' }] };
       }
+      const remainingFailures = [];
+      for (const failure of result.failed || []) {
+        if (failure.code !== 'upload_certificate_conflict') { remainingFailures.push(failure); continue; }
+        const device = devices.find(item => item.key === failure.key);
+        try {
+          const replacement = await requestLocalCaCertificate(device, failure);
+          if (replacement.cancelled) continue;
+          if (!replacement.ok) { remainingFailures.push({ ...failure, error: replacement.error }); continue; }
+          result.created.push({ ...replacement, name: device.name, key: device.key });
+        } catch (error) { remainingFailures.push({ ...failure, error: error.message }); }
+      }
+      result.failed = remainingFailures;
       const createdKeys = new Set((result.created || []).map(item => item.key));
       devices.forEach(device => {
         if (createdKeys.has(device.key)) selectedDeviceKeys.delete(device.key);
@@ -3277,12 +3289,59 @@
       .filter(Boolean)
       .map(v => String(v).toLowerCase());
     const deviceIp = isIp(device.host) ? String(device.host).toLowerCase() : '';
-    return (availableCertificates || []).find(c => {
+    return [...(availableCertificates || [])].reverse().find(c => {
       if (c.issuer_type !== 'local_ca') return false;
       const certIdentifiers = (c.identifiers || []).map(id => String(id).toLowerCase());
       if (deviceIp) return certIdentifiers.includes(deviceIp);
       return certIdentifiers.some(id => identifiers.includes(id));
     });
+  }
+
+  function confirmUploadCertificateReplacement(existing) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:230;display:flex;align-items:center;justify-content:center;padding:20px';
+      overlay.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="replace-upload-title" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:520px;max-width:95vw;overflow-wrap:anywhere">
+        <div class="modal-title" id="replace-upload-title">Replace certificate?</div>
+        <p>Device <strong>${escapeHtml(existing.selector)}</strong> already has a certificate in the upload list.</p>
+        <p class="help-text">Current certificate: <code>${escapeHtml(existing.certificate_id)}</code></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+          <button class="btn btn-ghost" id="replace-upload-cancel">Cancel</button>
+          <button class="btn" id="replace-upload-confirm">Replace certificate</button>
+        </div>
+      </div>`;
+      const finish = value => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(value); };
+      const onKey = event => {
+        if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+        if (event.key === 'Tab') {
+          const first = overlay.querySelector('#replace-upload-cancel');
+          const last = overlay.querySelector('#replace-upload-confirm');
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+      };
+      overlay.querySelector('#replace-upload-cancel').onclick = () => finish(false);
+      overlay.querySelector('#replace-upload-confirm').onclick = () => finish(true);
+      overlay.onclick = event => { if (event.target === overlay) finish(false); };
+      document.body.appendChild(overlay);
+      document.addEventListener('keydown', onKey);
+      overlay.querySelector('#replace-upload-cancel').focus();
+    });
+  }
+
+  async function requestLocalCaCertificate(body, conflict = null) {
+    let data = conflict;
+    while (true) {
+      if (data && data.code === 'upload_certificate_conflict') {
+        if (!await confirmUploadCertificateReplacement(data.existing)) return { cancelled: true };
+        body = { ...body, replace_certificate_id: data.existing.certificate_id };
+      }
+      const res = await fetch('/api/ca/issue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      data = await res.json();
+      if (res.status !== 409 || data.code !== 'upload_certificate_conflict') return { ...data, ok: res.ok && !data.error };
+    }
   }
 
   function openDeviceLocalCAModal(host, cn, certificateId) {
@@ -3365,13 +3424,16 @@
       if (!issueIp && !issueHostname) { result.style.color = 'var(--warning)'; result.textContent = 'Enter an IP address or hostname.'; return; }
       result.style.color = 'var(--muted)';
       result.textContent = 'Creating Local CA certificate...';
-      const res = await fetch('/api/ca/issue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: issueIp, hostname: issueHostname, profile, name: cn || host })
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) { result.style.color = 'var(--critical)'; result.textContent = data.error || 'Could not create certificate'; return; }
+      const createButton = overlay.querySelector('#device-ca-create');
+      createButton.disabled = true;
+      let data;
+      try {
+        data = await requestLocalCaCertificate({ ip: issueIp, hostname: issueHostname, profile, name: cn || host });
+      } catch (error) {
+        result.style.color = 'var(--critical)'; result.textContent = error.message; return;
+      } finally { createButton.disabled = false; }
+      if (data.cancelled) { result.textContent = 'Cancelled. The existing certificate is unchanged.'; return; }
+      if (!data.ok || data.error) { result.style.color = 'var(--critical)'; result.textContent = data.error || 'Could not create certificate'; return; }
       result.style.color = 'var(--ok)';
       result.innerHTML = `Created <code>${data.certificate_id}</code>. <button class="btn btn-ghost" id="device-ca-view-upload" style="font-size:11px;padding:5px 10px;margin-left:8px">View upload options</button>`;
       overlay.querySelector('#device-ca-cancel').textContent = 'Close';

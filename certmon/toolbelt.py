@@ -81,12 +81,15 @@ class ToolbeltBatchService:
         direct_nics = self.database.get_setting(DIRECT_NIC_KEY, {})
         lan_b_targets = self.database.get_setting(DIRECT_LAN_B_KEY, {})
         rows = []
-        for cert in self.database.list_certificates():
+        seen = set()
+        # Database order is oldest first; the newest certificate owns each row.
+        for cert in reversed(self.database.list_certificates()):
             if cert.get("kind") != "leaf" or cert.get("issuer_type") != "local_ca":
                 continue
             selector = self._selector(cert)
-            if not selector:
+            if not selector or selector in seen:
                 continue
+            seen.add(selector)
             profile = cert.get("profile")
             rows.append(
                 {
@@ -453,11 +456,11 @@ class ToolbeltBatchService:
         identifiers = metadata.get("identifiers") or []
         for value in identifiers:
             try:
-                ipaddress.ip_address(value)
+                address = ipaddress.ip_address(value)
             except ValueError:
                 continue
-            return value
-        return identifiers[0] if identifiers else metadata.get("id")
+            return str(address)
+        return str(identifiers[0]).strip().lower().rstrip(".") if identifiers else metadata.get("id")
 
     @staticmethod
     def _status_key(selector, certificate_id, mode):

@@ -1,6 +1,7 @@
 import importlib
 import io
 import zipfile
+from types import SimpleNamespace
 
 
 class FakeArtifacts:
@@ -166,6 +167,44 @@ def test_local_ca_issue_allows_multiple_bulk_style_requests(tmp_data_dir, monkey
     assert second.get_json()["certificate_id"] == "cert-2"
     assert fake_ca.issues[0]["identifiers"] == ("IPLP", "10.10.116.172")
     assert fake_ca.issues[1]["identifiers"] == ("IPLP", "10.10.116.199")
+
+
+def test_issue_requires_confirmation_before_replacing_upload_certificate(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, 'artifact_store', FakeArtifacts())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, 'local_ca_service', fake_ca)
+    existing = {'selector': '192.168.0.10', 'certificate_id': 'old-cert', 'label': 'Original device'}
+    monkeypatch.setattr(module, 'toolbelt_service', SimpleNamespace(list_devices=lambda: [existing]))
+    client = module.app.test_client()
+    body = {'ip': '192.168.0.10', 'hostname': 'renamed.local', 'profile': 'extron-rsa'}
+    conflict = client.post('/api/ca/issue', json=body)
+    assert conflict.status_code == 409
+    assert conflict.get_json()['existing'] == existing
+    assert fake_ca.issues == []
+    stale = client.post('/api/ca/issue', json={**body, 'replace_certificate_id': 'stale-cert'})
+    assert stale.status_code == 409
+    assert fake_ca.issues == []
+    replaced = client.post('/api/ca/issue', json={**body, 'replace_certificate_id': 'old-cert'})
+    assert replaced.status_code == 200
+    assert len(fake_ca.issues) == 1
+
+
+def test_bulk_issue_does_not_create_duplicate_without_confirmation(tmp_data_dir, monkeypatch):
+    module = load_app(tmp_data_dir)
+    monkeypatch.setattr(module, 'artifact_store', FakeArtifacts())
+    fake_ca = FakeLocalCA()
+    monkeypatch.setattr(module, 'local_ca_service', fake_ca)
+    existing = {'selector': '192.168.0.10', 'certificate_id': 'old-cert', 'label': 'Original device'}
+    monkeypatch.setattr(module, 'toolbelt_service', SimpleNamespace(list_devices=lambda: [existing]))
+    response = module.app.test_client().post('/api/ca/issue-bulk', json={'devices': [
+        {'ip': '192.168.0.10', 'key': 'old', 'profile': 'extron-rsa'},
+        {'ip': '192.168.0.11', 'key': 'new', 'profile': 'extron-rsa'},
+    ]})
+    assert response.status_code == 200
+    assert response.get_json()['failed'][0]['code'] == 'upload_certificate_conflict'
+    assert response.get_json()['created'][0]['key'] == 'new'
+    assert [issue['identifiers'] for issue in fake_ca.issues] == [('192.168.0.11',)]
 
 
 def test_local_ca_issue_bulk_returns_created_and_failed_items(tmp_data_dir, monkeypatch):

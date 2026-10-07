@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 
 from playwright.sync_api import expect
 
@@ -23,6 +24,79 @@ def prepare_upload_workspace(page, live_certmon, count=2):
     page.evaluate("async () => { switchTab('upload'); await loadAvailableCertificates(); await loadToolbeltDevices(false); }")
     expect(page.locator('.upload-device-row')).to_have_count(count)
     return certificates, devices
+
+
+@pytest.mark.parametrize('replace', [False, True])
+def test_create_certificate_conflict_can_cancel_or_replace_one_upload_row(page, live_certmon, replace):
+    certificates, devices = prepare_upload_workspace(page, live_certmon, count=1)
+    if not replace:
+        page.set_viewport_size({'width': 390, 'height': 844})
+    requests = []
+
+    def issue(route):
+        body = route.request.post_data_json
+        requests.append(body)
+        if not body.get('replace_certificate_id'):
+            route.fulfill(status=409, json={
+                'code': 'upload_certificate_conflict', 'error': 'Existing upload certificate',
+                'existing': {key: devices[0][key] for key in ['selector', 'certificate_id', 'label']},
+            })
+            return
+        assert body['replace_certificate_id'] == 'cert-1'
+        certificates.append({**certificates[0], 'certificate_id': 'cert-new'})
+        devices[0]['certificate_id'] = 'cert-new'
+        route.fulfill(json={'ok': True, 'certificate_id': 'cert-new'})
+
+    page.route('**/api/ca/issue', issue)
+    page.evaluate("openDeviceLocalCAModal('192.168.0.1', 'renamed.example.com')")
+    page.locator('#device-ca-create').click()
+    dialog = page.get_by_role('dialog', name='Replace certificate?')
+    expect(dialog).to_be_visible()
+    expect(dialog).to_contain_text('192.168.0.1')
+    expect(dialog).to_contain_text('cert-1')
+    shots = Path('.tmp/replacement-ui')
+    shots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(shots / ('desktop.png' if replace else 'mobile.png')))
+    if replace:
+        dialog.get_by_role('button', name='Replace certificate', exact=True).click()
+        expect(page.locator('#device-ca-result')).to_contain_text('cert-new')
+        expect(page.locator('.upload-device-row')).to_have_count(1)
+        expect(page.locator('.upload-device-row')).to_contain_text('cert-new')
+        assert len(requests) == 2
+    else:
+        dialog.get_by_role('button', name='Cancel', exact=True).click()
+        expect(page.locator('#device-ca-result')).to_contain_text('unchanged')
+        expect(page.locator('.upload-device-row')).to_have_count(1)
+        assert devices[0]['certificate_id'] == 'cert-1'
+        assert len(requests) == 1
+
+
+def test_bulk_create_asks_before_replacing_existing_upload_certificate(page, live_certmon):
+    certificates, devices = prepare_upload_workspace(page, live_certmon, count=1)
+    requests = []
+    scanned = {'host': '192.168.0.1', 'port': 443, 'cn': 'renamed.example.com', 'status': 'ok', 'days_remaining': 100}
+    page.route('**/api/ca/issue-bulk', lambda route: route.fulfill(json={
+        'created': [], 'failed': [{'key': '192.168.0.1|443', 'name': scanned['cn'],
+                                 'code': 'upload_certificate_conflict', 'error': 'Existing certificate',
+                                 'existing': {key: devices[0][key] for key in ['selector', 'certificate_id', 'label']}}],
+    }))
+
+    def issue(route):
+        requests.append(route.request.post_data_json)
+        devices[0]['certificate_id'] = 'cert-new'
+        certificates.append({**certificates[0], 'certificate_id': 'cert-new'})
+        route.fulfill(json={'ok': True, 'certificate_id': 'cert-new'})
+
+    page.route('**/api/ca/issue', issue)
+    page.on('dialog', lambda dialog: dialog.accept())
+    page.evaluate("device => { currentCertificates = [device]; selectedDeviceKeys.add(deviceKey(device)); bulkCreateSelectedDeviceCertificates(); }", scanned)
+    dialog = page.get_by_role('dialog', name='Replace certificate?')
+    expect(dialog).to_be_visible()
+    assert requests == []
+    dialog.get_by_role('button', name='Replace certificate', exact=True).click()
+    expect(page.locator('.upload-device-row')).to_contain_text('cert-new')
+    expect(page.locator('.upload-device-row')).to_have_count(1)
+    assert requests[0]['replace_certificate_id'] == 'cert-1'
 
 
 def test_shared_device_list_opens_direct_and_limits_toolbelt_to_chosen_devices(page, live_certmon):

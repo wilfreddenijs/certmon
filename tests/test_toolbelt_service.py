@@ -137,6 +137,26 @@ def test_toolbelt_service_credentials_are_encrypted_and_not_returned(tmp_path):
     assert "admin" not in payload
 
 
+def test_upload_list_has_only_latest_certificate_for_each_ip(tmp_path):
+    database = FakeDatabase()
+    database.certificates.append({**database.certificates[0], "id": "cert-2", "device_name": "Renamed device"})
+    service = ToolbeltBatchService(database, FakeArtifacts(tmp_path), FakeVault())
+    service.save_credentials('192.168.0.10', username='admin', password='secret')
+    devices = service.list_devices()
+    assert len(devices) == 1
+    assert devices[0]['certificate_id'] == 'cert-2'
+    assert devices[0]['credentials_saved']
+    assert len(database.certificates) == 2
+
+
+def test_upload_list_coalesces_equivalent_ipv6_addresses(tmp_path):
+    database = FakeDatabase()
+    database.certificates[0]['identifiers'] = ['2001:db8::1']
+    database.certificates.append({**database.certificates[0], 'id': 'cert-2', 'identifiers': ['2001:0db8:0:0:0:0:0:1']})
+    service = ToolbeltBatchService(database, FakeArtifacts(tmp_path), FakeVault())
+    assert [(row['selector'], row['certificate_id']) for row in service.list_devices()] == [('2001:db8::1', 'cert-2')]
+
+
 def test_toolbelt_service_can_delete_device_credentials(tmp_path):
     database = FakeDatabase()
     service = ToolbeltBatchService(

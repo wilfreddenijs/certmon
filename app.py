@@ -1553,6 +1553,9 @@ def ca_issue():
         identifiers = tuple(value for value in (hostname, ip) if value)
         if not identifiers:
             return jsonify({"error": "Provide at least an IP or hostname"}), 400
+        conflict = _upload_certificate_conflict(identifiers, body)
+        if conflict:
+            return jsonify(conflict), 409
         result = local_ca_service.issue(
             identifiers=identifiers,
             profile_name=body.get("profile") or "extron-rsa",
@@ -1563,6 +1566,20 @@ def ca_issue():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _upload_certificate_conflict(identifiers, body):
+    if toolbelt_service is None:
+        return None
+    selector = ToolbeltBatchService._selector({"identifiers": identifiers})
+    existing = next((row for row in toolbelt_service.list_devices() if row["selector"] == selector), None)
+    if existing is None or body.get("replace_certificate_id") == existing["certificate_id"]:
+        return None
+    return {
+        "error": "This device already has a certificate in the upload list",
+        "code": "upload_certificate_conflict",
+        "existing": {key: existing[key] for key in ("selector", "certificate_id", "label")},
+    }
 
 
 @app.route("/api/ca/issue-bulk", methods=["POST"])
@@ -1588,6 +1605,10 @@ def ca_issue_bulk():
         client_key = device.get("key")
         if not identifiers:
             failed.append({"name": label, "key": client_key, "error": "Provide at least an IP or hostname"})
+            continue
+        conflict = _upload_certificate_conflict(identifiers, device)
+        if conflict:
+            failed.append({"name": label, "key": client_key, **conflict})
             continue
         try:
             result = local_ca_service.issue(
