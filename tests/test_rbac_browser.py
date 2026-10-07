@@ -253,8 +253,10 @@ def _assert_dynamic_information_views(page, seeded):
 def _assert_permission_visibility(page, permissions):
     visibility = page.evaluate(
         """() => ({
+            serverMode: authState.server_mode,
             required: [...document.querySelectorAll('[data-required-permission]')].map(element => ({
                 permission: element.dataset.requiredPermission,
+                serverOnly: element.hasAttribute('data-server-only'),
                 hidden: element.hidden,
             })),
             any: [...document.querySelectorAll('[data-any-permission]')].map(element => ({
@@ -268,7 +270,7 @@ def _assert_permission_visibility(page, permissions):
         })"""
     )
     for item in visibility["required"]:
-        assert item["hidden"] is (item["permission"] not in permissions), item
+        assert item["hidden"] is (item["permission"] not in permissions or (item["serverOnly"] and not visibility["serverMode"])), item
     for item in visibility["any"]:
         assert item["hidden"] is (not bool(set(item["permissions"]) & permissions))
     for element in page.locator("[data-required-permission]").all():
@@ -551,10 +553,19 @@ def test_desktop_mode_keeps_full_local_controls_without_authentication_gate(
     page, live_certmon
 ):
     certmon = live_certmon(server_mode=False)
-    page.goto(certmon.base_url)
+    requests = _request_paths(page)
+    page.goto(certmon.base_url, wait_until='domcontentloaded')
 
     expect(page.locator(".main")).to_be_visible()
     expect(page.locator("#auth-gate")).to_be_hidden()
     permissions = _status_permissions(page)
     assert permissions == {permission.value for permission in Permission}
     _assert_permission_visibility(page, permissions)
+    page.locator('[data-tab="admin"]').click()
+    expect(page.locator('#server-backup-section')).to_be_visible()
+    expect(page.locator('#user-administration-section')).to_be_hidden()
+    expect(page.locator('#administration-add-user')).to_be_hidden()
+    expect(page.locator('#administration-role-info')).to_be_hidden()
+    page.evaluate("async () => { applyPermissionVisibility(); await loadUsers(); openAddUser(); }")
+    expect(page.locator('#user-modal')).to_be_hidden()
+    assert '/api/users' not in _requested_paths(requests)

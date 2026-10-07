@@ -95,9 +95,10 @@ def test_administration_ui_is_admin_gated_and_supports_full_user_lifecycle():
     assert html.count('id="administration-tab"') == 1
     assert 'id="tab-admin"' in html
     assert 'data-any-permission="manage_users manage_server_backup"' in html
-    assert "if (!hasPermission('manage_users')) return;" in loader
+    assert "if (!authState.server_mode || !hasPermission('manage_users')) return;" in loader
+    assert 'data-required-permission="manage_users" data-server-only hidden' in html
     assert "fetch('/api/users')" in loader
-    assert loader.index("if (!hasPermission('manage_users')) return;") < loader.index("fetch('/api/users')")
+    assert loader.index("if (!authState.server_mode || !hasPermission('manage_users')) return;") < loader.index("fetch('/api/users')")
     assert "data.supported_roles" in html
     assert "supportedRoles.map(role" in html
     for command in ("Add user", "Edit roles", "Enable", "Disable", "Reset password"):
