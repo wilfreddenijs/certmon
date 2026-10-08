@@ -16,6 +16,7 @@ class Permission(str, Enum):
     MANAGE_SERVER_BACKUP = "manage_server_backup"
     MANAGE_USERS = "manage_users"
     VIEW_AUDIT = "view_audit"
+    MANAGE_AUDIT = "manage_audit"
 
 
 LOCAL_PERMISSIONS = frozenset(Permission)

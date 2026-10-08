@@ -360,7 +360,7 @@ class Database:
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (int(limit),),
+                (-1 if limit is None else int(limit),),
             ).fetchall()
         return [
             {
@@ -374,6 +374,20 @@ class Database:
             }
             for row in rows
         ]
+
+    def delete_audit_before(self, cutoff, *, username=None, source_ip=None):
+        with self.transaction() as conn:
+            deleted = conn.execute(
+                "DELETE FROM audit_events WHERE created_at < ?", (cutoff,)
+            ).rowcount
+            conn.execute(
+                """INSERT INTO audit_events(
+                    event_type, username, source_ip, target, success, details_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                ("audit_history_deleted", username, source_ip, cutoff, 1,
+                 json.dumps({"before_utc": cutoff, "deleted_count": deleted}), _utc_now()),
+            )
+        return deleted
 
     @contextmanager
     def transaction(self):

@@ -2,11 +2,10 @@
 
 CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certificates, and deploys stored certificates to supported devices such as Extron products.
 
-This guide describes **v1.0 build 49** (2026-10-08),
-source `13305e692078817c764d7a5eb5071a5fe4d46c38`.
-[Build 49](https://github.com/wilfreddenijs/certmon/actions/runs/37751386861)
-contains the Windows executable. Download the `CertMon-Windows` artifact while
-it is retained by GitHub Actions.
+This guide describes the current **v1.0** source on `main` (updated 2026-10-08).
+Successful [Windows builds](https://github.com/wilfreddenijs/certmon/actions/workflows/build-v1.yml)
+contain the executable. Download the latest `CertMon-Windows` artifact while
+it is retained by GitHub Actions; `BUILD-NOTES.txt` identifies its source commit.
 
 ## Security Status
 
@@ -90,6 +89,8 @@ inherits issuance and renewal-management rights, so **Delete entry** is then val
 Disabling an account, changing its roles, or resetting its password revokes all active sessions for that user. The user must sign in again after a role or password change; disabled users cannot sign in until an administrator enables them. User-management audit events record the acting administrator, source IP, target account, and changed fields without recording passwords or password hashes.
 
 The UI shows the current signed-in user and exposes an Audit tab. Sensitive actions such as login/logout, Local CA backup import/export, DNS credential changes, private artifact downloads, Toolbelt upload runs, and deployment attempts are recorded with username and source IP. Secrets are redacted from audit details.
+
+In **Audit**, **Export audit Excel** downloads all stored events, including timestamps (UTC), users, source and target IPs, upload results, and details. The screen shows only the latest 100 events; the Excel export is not limited to those rows. Admin and Security Admin can export in server mode. **Delete old events** permanently removes events strictly before midnight UTC on the chosen date, after confirmation. Events on that date and later are kept, and a new audit event records the deletion and number removed. Only Admin can delete in server mode; both actions are available in standalone mode. Export before deleting if you need to retain a copy.
 
 For team trust distribution, use **Local CA** > **Trust bundle**. The bundle contains only the public CertMon Local CA certificate and installation notes; it does not contain the Local CA private key. Use encrypted CA backup export/import only between trusted CertMon installations that must share the same signing CA.
 

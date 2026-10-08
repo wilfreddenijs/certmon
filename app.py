@@ -808,6 +808,62 @@ def api_audit():
     return jsonify(payload)
 
 
+@app.route("/api/audit/export/excel")
+def export_audit_excel():
+    authorize(Permission.VIEW_AUDIT)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    events = audit_service.list(limit=None)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Audit"
+    sheet.append(["Time (UTC)", "Event", "User", "Source IP", "Target / device IP", "Result", "Details"])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="253745")
+    for row_index, event in enumerate(events, start=2):
+        values = [event["created_at"], event["event_type"], event["username"] or "system",
+                  event["source_ip"] or "", event["target"] or "",
+                  "Success" if event["success"] else "Failed",
+                  json.dumps(event["details"], ensure_ascii=False)]
+        # Device names and other untrusted values must never become Excel formulas.
+        for column_index, value in enumerate(values, start=1):
+            cell = sheet.cell(row=row_index, column=column_index, value=value)
+            cell.data_type = "s"
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for column, width in zip("ABCDEFG", (28, 38, 22, 22, 40, 14, 90)):
+        sheet.column_dimensions[column].width = width
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(output, as_attachment=True,
+                     download_name=f"CertMon-Audit-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/api/audit/cleanup", methods=["POST"])
+def cleanup_audit():
+    authorize(Permission.MANAGE_AUDIT)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or body.get("confirm") is not True:
+        return jsonify({"error": "Confirm deletion before continuing"}), 400
+    try:
+        value = body.get("before", "")
+        cutoff = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if cutoff.strftime("%Y-%m-%d") != value or cutoff > datetime.now(timezone.utc):
+            raise ValueError()
+    except (TypeError, ValueError):
+        return jsonify({"error": "Choose a valid date, no later than today (UTC)"}), 400
+    user = current_user()
+    deleted = database.delete_audit_before(
+        cutoff.isoformat(), username=user["username"] if user else "local",
+        source_ip=request.remote_addr,
+    )
+    return jsonify({"ok": True, "deleted_count": deleted, "before_utc": cutoff.isoformat()})
+
+
 @app.route("/api/data")
 def api_data():
     return jsonify(load_data())

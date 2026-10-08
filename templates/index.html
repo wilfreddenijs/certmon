@@ -152,7 +152,7 @@
     margin-bottom: 8px;
   }
 
-  input[type="text"], input[type="number"], input[type="password"], #device-name-filter {
+  input[type="text"], input[type="number"], input[type="password"], #device-name-filter, #audit-delete-before {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -166,6 +166,7 @@
   }
 
   input:focus { border-color: var(--accent); }
+  #audit-delete-before { flex: none; color-scheme: dark; }
   input::placeholder { color: var(--muted); }
 
   .port-input { width: 70px; flex: none; }
@@ -1014,6 +1015,13 @@
         <div class="section-title" style="margin-bottom:8px">Audit log</div>
         <div class="help-text choice-help" style="margin-bottom:12px">Server-mode sensitive actions are recorded with user and source IP. Secrets are redacted.</div>
         <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;margin-bottom:12px" onclick="loadAudit()">Refresh audit</button>
+        <button class="btn btn-ghost" id="audit-export" type="button" onclick="exportAuditExcel()">Export audit Excel</button>
+        <div data-required-permission="manage_audit" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0">
+          <label for="audit-delete-before">Delete events before (UTC)</label>
+          <input id="audit-delete-before" type="date" style="width:170px">
+          <button class="btn btn-danger" id="audit-delete" type="button" onclick="deleteOldAudit()">Delete old events</button>
+        </div>
+        <div id="audit-action-result" class="help-text" role="status" style="margin-bottom:12px"></div>
         <div id="audit-list" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
     </div>
@@ -1252,7 +1260,8 @@
           ('manage_local_ca', 'Manage Local CA and import CA backup'),
           ('manage_server_backup', 'Export and stage full server backups'),
           ('manage_users', 'Manage users, roles and passwords'),
-          ('view_audit', 'View audit log')
+          ('view_audit', 'View and export audit log'),
+          ('manage_audit', 'Delete old audit events')
         ] %}
         <tr data-permission="{{ permission }}"><th scope="row">{{ label }}</th>{% for role, permissions in role_permissions.items() %}<td data-role="{{ role }}">{{ 'Yes' if permission in permissions else 'No' }}</td>{% endfor %}</tr>
         {% endfor %}
@@ -1919,6 +1928,47 @@
       return;
     }
     await loadUsers(currentlyDisabled ? 'User enabled' : 'User disabled; active sessions revoked');
+  }
+
+  async function exportAuditExcel() {
+    const button = document.getElementById('audit-export');
+    const result = document.getElementById('audit-action-result');
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/audit/export/excel');
+      if (!response.ok) throw new Error(readErrorMessage(await response.json(), 'Audit export failed'));
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `CertMon-Audit-${new Date().toISOString().slice(0,10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      result.textContent = 'Audit Excel exported.';
+    } catch (error) {
+      result.textContent = error.message;
+    } finally { button.disabled = false; }
+  }
+
+  async function deleteOldAudit() {
+    const date = document.getElementById('audit-delete-before').value;
+    const result = document.getElementById('audit-action-result');
+    if (!date) { result.textContent = 'Choose a date first.'; return; }
+    if (!confirm(`Permanently delete all audit events before ${date} at 00:00 UTC? Events on this date will be kept. Export first if you need a copy.`)) return;
+    const button = document.getElementById('audit-delete');
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/audit/cleanup', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({before: date, confirm: true})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(readErrorMessage(data, 'Audit cleanup failed'));
+      result.textContent = `${data.deleted_count} audit events deleted. Events from ${date} onward are kept.`;
+      loadAudit();
+    } catch (error) { result.textContent = error.message; }
+    finally { button.disabled = false; }
   }
 
   function prepareAuditTab() {
