@@ -256,6 +256,12 @@ def _assert_dynamic_information_views(page, seeded):
 
 
 def _assert_permission_visibility(page, permissions):
+    # Reload initially reveals the shell before its auth-status request settles.
+    page.wait_for_function(
+        """expected => authState.permissions?.length === expected.length &&
+            expected.every(permission => authState.permissions.includes(permission))""",
+        arg=sorted(permissions),
+    )
     visibility = page.evaluate(
         """() => ({
             serverMode: authState.server_mode,
