@@ -2013,12 +2013,39 @@ def list_public_certificates():
                 "certificate_id": certificate_id,
                 "identifiers": metadata.get("identifiers", []),
                 "profile": metadata.get("profile"),
+                "issuer_type": metadata.get("issuer_type"),
+                "created_at": metadata.get("created_at"),
+                "delete_permission": (Permission.MANAGE_LOCAL_CA.value
+                                      if metadata.get("issuer_type") == "local_ca"
+                                      else Permission.ISSUE_CERTIFICATE.value),
                 "public_artifacts": public_artifacts,
                 "download_names": {name: _certificate_download_filename(certificate_id, name) for name in public_artifacts},
                 "download_prefix": _certificate_download_filename(certificate_id, "certificate.pem").removesuffix("-certificate.pem"),
             }
         )
     return jsonify(certificates)
+
+
+@app.route("/api/certificates/<certificate_id>", methods=["DELETE"])
+def delete_stored_certificate(certificate_id):
+    authorize(Permission.ISSUE_CERTIFICATE)
+    metadata = database.get_certificate(certificate_id)
+    if metadata is None or metadata.get("kind") != "leaf":
+        return jsonify({"error": "Certificate not found"}), 404
+    if metadata.get("issuer_type") == "local_ca":
+        authorize(Permission.MANAGE_LOCAL_CA)
+    if artifact_store is not None:
+        try:
+            artifact_store.delete_certificate_set(certificate_id)
+        except OSError:
+            audit("stored_certificate_delete_failed", target=certificate_id, success=False)
+            return jsonify({"error": "Could not remove certificate files; certificate entry was kept"}), 500
+    database.delete_certificate(certificate_id)
+    audit("stored_certificate_deleted", target=certificate_id,
+          details={"identifiers": metadata.get("identifiers", []),
+                   "issuer_type": metadata.get("issuer_type"),
+                   "created_at": metadata.get("created_at")})
+    return jsonify({"ok": True, "removed": [certificate_id]})
 
 
 @app.route("/api/certificates/<certificate_id>/private/<artifact_name>")

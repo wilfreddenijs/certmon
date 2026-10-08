@@ -231,6 +231,12 @@ First-run Toolbelt checklist:
 
 Expand **Upload** > **Certificate downloads** and choose a certificate/device pair.
 The selected identity and download filenames change with the selection.
+The dropdown shows each certificate's creation date and time (UTC), newest first.
+Below the selected downloads, **Delete certificate from server** permanently removes
+that certificate and its stored public/private-key files after confirmation. It does
+not remove certificates installed on devices, the Local CA itself, or saved device
+credentials. Local CA leaf deletion requires Local CA management permission; other
+leaf certificates require certificate issuance permission. Deletions are recorded in Audit.
 
 - Public certificate and chain downloads are separate from private-key export.
 - Extron-compatible certificates offer a combined PEM containing the certificate

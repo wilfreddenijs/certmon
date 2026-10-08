@@ -74,7 +74,10 @@ class ArtifactStore:
 
     def delete_certificate_set(self, certificate_id):
         with self.mutation_lock:
-            shutil.rmtree(self._certificate_dir(certificate_id), ignore_errors=True)
+            try:
+                shutil.rmtree(self._certificate_dir(certificate_id))
+            except FileNotFoundError:
+                pass
 
     def read_public(self, certificate_id, name):
         self._validate_name(name)

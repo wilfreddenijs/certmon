@@ -1225,7 +1225,9 @@
               <div style="font-size:11px;color:var(--warning);font-weight:700;margin-bottom:6px">⚠ Manual upload required - follow these steps:</div>
               <pre id="push-instructions-text" style="font-size:11px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre>
             </div>
+            <button class="btn btn-danger" id="delete-stored-certificate" type="button" hidden style="margin-top:16px" onclick="deleteSelectedStoredCertificate()">Delete certificate from server</button>
           </div>
+          <div id="stored-certificate-delete-result" class="help-text" role="status"></div>
 
         </div>
       </details>
@@ -4169,18 +4171,48 @@
     `).join('');
   }
 
+  function certificateCreatedLabel(certificate) {
+    const date = new Date(certificate.created_at || '');
+    return Number.isNaN(date.getTime()) ? 'Creation date unknown'
+      : `Created ${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+  }
+
+  async function deleteSelectedStoredCertificate() {
+    const certificateId = document.getElementById('push-target-select').value;
+    const certificate = availableCertificates.find(c => c.certificate_id === certificateId);
+    if (!certificate) return;
+    const label = (certificate.identifiers || []).join(', ') || certificateId;
+    if (!confirm(`Delete the stored certificate for ${label}?\n\n${certificateId}\n${certificateCreatedLabel(certificate)}\n\nThis permanently removes its certificate and private-key files from the CertMon server. Certificates installed on devices and saved device credentials are not changed.`)) return;
+    const button = document.getElementById('delete-stored-certificate');
+    const result = document.getElementById('stored-certificate-delete-result');
+    button.disabled = true;
+    result.textContent = '';
+    try {
+      const response = await fetch(`/api/certificates/${encodeURIComponent(certificateId)}`, {method: 'DELETE'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(readErrorMessage(data, 'Could not delete certificate'));
+      if (pendingDeployment?.certificateId === certificateId) pendingDeployment = null;
+      await loadAvailableCertificates();
+      if (hasPermission('deploy_certificate')) await loadToolbeltDevices(false);
+      await loadData();
+      result.textContent = `Certificate ${certificateId} deleted from the server. Installed device certificates are unchanged.`;
+    } catch (error) { result.textContent = error.message; }
+    finally { button.disabled = false; }
+  }
+
   function renderCertificateSelect() {
     const sel = document.getElementById('push-target-select');
     if (!sel) return;
     const cur = sel.value;
-    const manualCertificates = availableCertificates || [];
+    const manualCertificates = [...(availableCertificates || [])].sort((a, b) =>
+      (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
     sel.innerHTML = '<option value="">— select a certificate/device pair —</option>' +
       manualCertificates.map(c => {
         const identifiers = c.identifiers || [];
         const device = identifiers[0] || c.certificate_id;
         const deviceIp = identifiers.find(id => isIp(id));
         const deviceLabel = deviceIp && deviceIp !== device ? `${device} (${deviceIp})` : device;
-        const label = `${deviceLabel} · ${c.profile || c.issuer_type || 'certificate'} · ${c.certificate_id}`;
+        const label = `${deviceLabel} · ${certificateCreatedLabel(c)} · ${c.profile || c.issuer_type || 'certificate'} · ${c.certificate_id}`;
         return `<option value="${escAttr(c.certificate_id)}"${c.certificate_id === cur ? ' selected' : ''}>${escAttr(label)}</option>`;
       }).join('');
     if (!manualCertificates.some(c => c.certificate_id === cur)) sel.value = '';
@@ -4205,6 +4237,8 @@
     document.getElementById('push-public-artifact-links').replaceChildren();
     document.getElementById('push-private-artifact-links').replaceChildren();
     document.getElementById('push-result').style.display = 'none';
+    document.getElementById('delete-stored-certificate').hidden = true;
+    document.getElementById('stored-certificate-delete-result').textContent = '';
     if (certificateId) pushCert(false);
   }
 
@@ -4285,7 +4319,10 @@
     }
     const deviceLabel = (selectedCertificate.identifiers || []).join(', ') || certificate_id;
     titleEl.textContent = `Downloads for ${deviceLabel}`;
-    logEl.textContent = `Certificate: ${certificate_id}`;
+    logEl.textContent = `Certificate: ${certificate_id} | ${certificateCreatedLabel(selectedCertificate)}`;
+    const deleteButton = document.getElementById('delete-stored-certificate');
+    deleteButton.dataset.requiredPermission = selectedCertificate.delete_permission ||
+      (selectedCertificate.issuer_type === 'local_ca' ? 'manage_local_ca' : 'issue_certificate');
     const isExtronProfile = selectedCertificate.profile === 'extron-rsa';
     const publicArtifacts = selectedCertificate.public_artifacts || [];
     const prefix = selectedCertificate.download_prefix || certificate_id;
