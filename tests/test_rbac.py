@@ -142,6 +142,9 @@ def test_viewer_can_discover_only_existing_public_certificate_artifacts(
             "identifiers": ["device.example.com"],
             "profile": "generic-rsa",
             "public_artifacts": ["certificate.pem", "request.csr"],
+            "issuer_type": None,
+            "created_at": module.database.get_certificate("cert-1")["created_at"],
+            "delete_permission": "issue_certificate",
             "download_names": {name: module._certificate_download_filename("cert-1", name) for name in ["certificate.pem", "request.csr"]},
             "download_prefix": module._certificate_download_filename("cert-1", "certificate.pem").removesuffix("-certificate.pem"),
         }
