@@ -83,6 +83,7 @@ def prepare_upload_workspace(page, live_certmon, count=2):
     devices = [{
         "selector": f"192.168.0.{i}", "certificate_id": f"cert-{i}", "label": f"Device {i}",
         "extron_ready": True, "selected": True, "credentials_saved": True,
+        "individual_password_configured": i == 1,
     } for i in range(1, count + 1)]
     page.route('**/api/certificates/public', lambda route: route.fulfill(json=certificates))
     page.route('**/api/toolbelt/devices', lambda route: route.fulfill(json={"devices": devices}))
@@ -92,6 +93,22 @@ def prepare_upload_workspace(page, live_certmon, count=2):
     page.evaluate("async () => { switchTab('upload'); await loadAvailableCertificates(); await loadToolbeltDevices(false); }")
     expect(page.locator('.upload-device-row')).to_have_count(count)
     return certificates, devices
+
+
+def test_individual_password_status_is_visible_for_both_methods(page, live_certmon):
+    prepare_upload_workspace(page, live_certmon)
+    rows = page.locator('.upload-device-row')
+    expect(rows.nth(0).locator('.individual-password-status')).to_have_text('Individual password: set')
+    expect(rows.nth(1).locator('.individual-password-status')).to_have_text('Individual password: not set')
+    rows.nth(0).get_by_role('combobox', name='Upload method').select_option('toolbelt')
+    expect(rows.nth(0).locator('.individual-password-status')).to_have_text('Individual password: set')
+    shots = Path('.tmp/credentials-ui')
+    shots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(shots / 'password-status-desktop.png'))
+    page.set_viewport_size({'width': 390, 'height': 844})
+    rows.nth(1).scroll_into_view_if_needed()
+    page.screenshot(path=str(shots / 'password-status-mobile.png'))
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
 
 
 @pytest.mark.parametrize('replace', [False, True])

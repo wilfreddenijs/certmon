@@ -3839,7 +3839,7 @@
       return;
     }
     const toolbeltCredentialsLabel = d => {
-      if (d.credentials_saved) return 'saved encrypted';
+      if (d.individual_password_configured) return 'individual credentials, then shared credentials if saved, then admin/extron, then admin/serial';
       if (d.default_credentials_saved) {
         return 'tries shared device password, then admin/extron, then admin/serial from Toolbelt; use Fields > Serial Number if dry-run asks for it';
       }
@@ -3861,7 +3861,8 @@
             <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)">${escAttr(d.label)}</div>
             <div class="help-text"><code>${escAttr(d.selector)}</code></div>
             <div class="help-text">Certificate: <code>${escAttr(d.certificate_id)}</code></div>
-            <div class="help-text">Credentials: ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? toolbeltCredentialsLabel(d) : d.credentials_saved ? 'saved encrypted' : d.default_credentials_saved ? 'shared credentials' : 'not configured'}</div>
+            <div class="help-text individual-password-status">Individual password: <span style="color:${d.individual_password_configured ? 'var(--ok)' : 'var(--muted)'}">${d.individual_password_configured ? 'set' : 'not set'}</span></div>
+            <div class="help-text">Credentials: ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? toolbeltCredentialsLabel(d) : d.individual_password_configured ? 'individual credentials, then shared credentials if saved, then admin/extron' : d.default_credentials_saved ? 'shared credentials, then admin/extron' : 'admin/extron'}</div>
             ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? `<div class="help-text">Toolbelt test: ${toolbeltStatusLabel(d.dry_run)} · upload: ${toolbeltStatusLabel(d.upload)}</div>` : `<div class="help-text">Direct upload: ${toolbeltStatusLabel(directUploadStates.get(d.selector)?.certificate_id === d.certificate_id ? directUploadStates.get(d.selector) : null)}</div>`}
           </div>
           <div class="upload-method"><label class="form-label">Upload method<select aria-label="Upload method for ${escAttr(d.label)}" onchange="setPreparedUploadMethod('${escAttr(d.selector)}', this.value)" ${toolbeltRunId || directBatchRunId ? 'disabled' : ''}>

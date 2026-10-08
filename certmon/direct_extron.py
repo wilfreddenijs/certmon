@@ -25,6 +25,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from certmon.deployment import DeploymentMaterial, verify_device_certificate
+from certmon.credentials import ordered_credentials
 from certmon.toolbelt import DEFAULT_SECRET_ID, SECRET_PREFIX, SECRET_PURPOSE, DIRECT_NIC_KEY, DIRECT_LAN_B_KEY
 
 
@@ -391,10 +392,10 @@ class DirectExtronService:
         trust = self._check_trust(target, auto_first_use=auto_first_use)
         if trust is not None:
             return trust
-        credentials = self._credentials(target.sftp.selector)
         try:
             for identity in (target.sftp, target.sis):
-                self.transport.probe_credentials(identity, credentials, expected_fingerprint=self._approved_fingerprint(identity))
+                self._with_credentials(identity, lambda credentials: self.transport.probe_credentials(
+                    identity, credentials, expected_fingerprint=self._approved_fingerprint(identity)))
         except HostKeyChangedError:
             return {"status": "host_key_changed", "identity": self._identity_dict(identity)}
         except (paramiko.AuthenticationException, PermissionError):
@@ -440,17 +441,18 @@ class DirectExtronService:
             return trust
         if not certificate_id or not self.artifacts.has_certificate(certificate_id):
             raise KeyError(certificate_id)
-        credentials = self._credentials(target.sftp.selector)
         staged_name = f"certmon-{uuid.uuid4().hex}.pem"
         record = self._record_staged(staged_name, target, certificate_id)
         try:
             with self.artifacts.materialize_private(certificate_id, "combined.pem") as pem_path:
-                staged = self.transport.stage(target.sftp, credentials, pem_path, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
+                staged = self._with_credentials(target.sftp, lambda credentials: self.transport.stage(
+                    target.sftp, credentials, pem_path, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp)))
                 if isinstance(staged, dict) and staged.get("transfer_verified") is True:
                     records = dict(self.database.get_setting(self.STAGED_KEY, {}))
                     records[staged_name] = dict(records[staged_name], sftp_diagnostics={"transfer_verified": True, "remote_size": staged["remote_size"]})
                     self.database.put_setting(self.STAGED_KEY, records)
-                exchange = self._exchange(self.transport.ingest(target.sis, credentials, self._sis_command(target.sis.nic, staged_name), expected_fingerprint=self._approved_fingerprint(target.sis)))
+                exchange = self._exchange(self._with_credentials(target.sis, lambda credentials: self.transport.ingest(
+                    target.sis, credentials, self._sis_command(target.sis.nic, staged_name), expected_fingerprint=self._approved_fingerprint(target.sis))))
         except HostKeyChangedError:
             return self._set_staged(staged_name, "cleanup_pending", response="host_key_changed")
         except (paramiko.AuthenticationException, PermissionError):
@@ -473,7 +475,8 @@ class DirectExtronService:
         if verification.status != "verified":
             return self._set_staged(staged_name, "cleanup_pending", verification=verification.status, known_completion=True)
         try:
-            self.transport.delete(target.sftp, credentials, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
+            self._with_credentials(target.sftp, lambda credentials: self.transport.delete(
+                target.sftp, credentials, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp)))
         except (paramiko.AuthenticationException, PermissionError):
             return self._set_staged(staged_name, "delete_failed", verification="verified", known_completion=True)
         except (OSError, paramiko.SSHException):
@@ -505,23 +508,22 @@ class DirectExtronService:
         trust = self._check_trust(target)
         if trust is not None:
             return trust
-        credentials = self._credentials(target.sis.selector)
         delete_command = f"\x1bX{nic}CERT\r".encode("ascii")
         view_command = f"\x1bV{nic}CERT\r".encode("ascii")
         result = {"status": "removal_unconfirmed", "nic": nic, "target": self._public_target(target)}
         try:
-            exchange = self._exchange(self.transport.certificate_command(
+            exchange = self._exchange(self._with_credentials(target.sis, lambda credentials: self.transport.certificate_command(
                 target.sis, credentials, delete_command,
-                expected_fingerprint=self._approved_fingerprint(target.sis), response_kind="delete"))
+                expected_fingerprint=self._approved_fingerprint(target.sis), response_kind="delete")))
             result["delete_response"] = repr(exchange.received[:512])
             acknowledged = not exchange.preloaded and exchange.write_confirmed and self._exact_ack(
                 exchange.received, nic, delete_command, operation="X")
             if acknowledged:
                 result["status"] = "removal_acknowledged"
             # Read back once, including after an ambiguous reply; never resend deletion.
-            view = self._exchange(self.transport.certificate_command(
+            view = self._exchange(self._with_credentials(target.sis, lambda credentials: self.transport.certificate_command(
                 target.sis, credentials, view_command,
-                expected_fingerprint=self._approved_fingerprint(target.sis), response_kind="view"))
+                expected_fingerprint=self._approved_fingerprint(target.sis), response_kind="view")))
             result["view_response"] = repr(view.received[:8192])
             information = self._certificate_information(view, nic, view_command)
             if information is not None:
@@ -581,7 +583,8 @@ class DirectExtronService:
         if trust is not None:
             return trust
         try:
-            self.transport.delete(target.sftp, self._credentials(target.sftp.selector), staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp))
+            self._with_credentials(target.sftp, lambda credentials: self.transport.delete(
+                target.sftp, credentials, staged_name, expected_fingerprint=self._approved_fingerprint(target.sftp)))
         except HostKeyChangedError:
             return {"status": "host_key_changed", "identity": self._identity_dict(target.sftp)}
         except (paramiko.SSHException, PermissionError, OSError):
@@ -636,14 +639,25 @@ class DirectExtronService:
     def _approved_fingerprint(self, identity):
         return self.database.get_setting(self.HOST_KEYS_KEY, {})[identity.key()]["fingerprint"]
 
-    def _credentials(self, selector):
-        stored = self.database.get_secret(self._secret_id(selector)) or self.database.get_secret(DEFAULT_SECRET_ID)
+    def _load_credentials(self, key):
+        stored = self.database.get_secret(key)
         if stored is None:
-            raise ValueError("No direct Extron credential is configured")
+            return None
         blob = stored["blob"] if isinstance(stored, dict) and "blob" in stored else stored
         value = self.vault.decrypt(blob, purpose=SECRET_PURPOSE)
         data = json.loads(value.decode("utf-8") if isinstance(value, bytes) else value)
         return {"username": data["username"], "password": data["password"]}
+
+    def _with_credentials(self, identity, action):
+        candidates = ordered_credentials(self._load_credentials(self._secret_id(identity.selector)),
+                                         self._load_credentials(DEFAULT_SECRET_ID))
+        for index, credentials in enumerate(candidates):
+            try:
+                return action(credentials)
+            except paramiko.AuthenticationException:
+                # Authentication fails before a transfer or SIS command is sent.
+                if index == len(candidates) - 1:
+                    raise
 
     def _save_secret(self, secret_id, *, username, password, metadata):
         if not username or password is None:

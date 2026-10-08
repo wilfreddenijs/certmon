@@ -702,7 +702,7 @@ def test_preloaded_ack_verifies_first_and_survives_restart_for_guarded_cleanup(t
     assert len(transport.sis_commands) == 1
 
 
-def test_per_device_credentials_never_fall_back_after_authentication_failure(tmp_path):
+def test_permission_error_does_not_retry_other_credentials(tmp_path):
     class RejectingTransport(FakeTransport):
         def probe_credentials(self, identity, credentials, **kwargs):
             super().probe_credentials(identity, credentials, **kwargs)
@@ -720,6 +720,71 @@ def test_per_device_credentials_never_fall_back_after_authentication_failure(tmp
     assert len(transport.auth_attempts) == 1
     assert transport.auth_attempts[0][1]["username"] == "operator"
     assert "secret" not in repr(result)
+
+
+@pytest.mark.parametrize('accepted', ['device-secret', 'shared-secret', 'extron', None])
+def test_direct_probe_tries_individual_shared_then_default(tmp_path, accepted):
+    class RejectingTransport(FakeTransport):
+        def probe_credentials(self, identity, credentials, **kwargs):
+            super().probe_credentials(identity, credentials, **kwargs)
+            if credentials['password'] != accepted:
+                raise paramiko.AuthenticationException('rejected')
+
+    service, _, _, transport = make_service(tmp_path, transport=RejectingTransport())
+    service.save_credentials('10.0.0.10', username='operator', password='device-secret')
+    result = service.probe_one(selector='10.0.0.10', auto_first_use=True)
+    expected = [('operator', 'device-secret'), ('admin', 'shared-secret'), ('admin', 'extron')]
+    if accepted:
+        expected = expected[:next(i for i, (_, p) in enumerate(expected) if p == accepted) + 1]
+    attempts = [(c['username'], c['password']) for _, c in transport.auth_attempts]
+    assert attempts == expected * (2 if accepted else 1)
+    assert result['status'] == ('ready' if accepted else 'authentication_failed')
+    assert 'secret' not in repr(result)
+
+
+def test_direct_upload_fallback_does_not_repeat_import_after_authentication(tmp_path):
+    class DefaultOnlyTransport(FakeTransport):
+        def probe_credentials(self, identity, credentials, **kwargs):
+            super().probe_credentials(identity, credentials, **kwargs)
+            if credentials['password'] != 'extron':
+                raise paramiko.AuthenticationException('rejected')
+
+        def stage(self, identity, credentials, *args, **kwargs):
+            if credentials['password'] != 'extron':
+                self.auth_attempts.append((identity, credentials))
+                raise paramiko.AuthenticationException('rejected')
+            return super().stage(identity, credentials, *args, **kwargs)
+
+        def ingest(self, identity, credentials, *args, **kwargs):
+            if credentials['password'] != 'extron':
+                self.auth_attempts.append((identity, credentials))
+                raise paramiko.AuthenticationException('rejected')
+            return super().ingest(identity, credentials, *args, **kwargs)
+
+    service, _, _, transport = make_service(tmp_path, transport=DefaultOnlyTransport())
+    service.save_credentials('10.0.0.10', username='admin', password='device-secret')
+    assert service.probe_one(selector='10.0.0.10', auto_first_use=True)['status'] == 'ready'
+    transport.auth_attempts.clear()
+    assert service.activate_one(selector='10.0.0.10', certificate_id='cert-1')['status'] == 'verified'
+    assert len(transport.sis_commands) == 1
+    assert len(transport.sftp_writes) == 1
+    for connection in ('sftp', 'sis'):
+        passwords = [c['password'] for identity, c in transport.auth_attempts if identity.connection == connection]
+        assert passwords[:3] == ['device-secret', 'shared-secret', 'extron']
+
+
+@pytest.mark.parametrize('failure', [OSError('offline'), PermissionError('denied')])
+def test_direct_connection_or_permission_failure_does_not_try_next_password(tmp_path, failure):
+    class BrokenTransport(FakeTransport):
+        def probe_credentials(self, identity, credentials, **kwargs):
+            super().probe_credentials(identity, credentials, **kwargs)
+            raise failure
+
+    service, _, _, transport = make_service(tmp_path, transport=BrokenTransport())
+    service.save_credentials('10.0.0.10', username='admin', password='individual')
+    result = service.probe_one(selector='10.0.0.10', auto_first_use=True)
+    assert result['status'] in ('connection_failed', 'authentication_failed')
+    assert len(transport.auth_attempts) == 1
 
 
 def test_delete_failure_is_durable_and_cleanup_never_reingests(tmp_path):

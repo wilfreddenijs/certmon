@@ -8,6 +8,27 @@ from certmon.toolbelt import DEFAULT_SECRET_ID, STATUS_KEY, ToolbeltBatchService
 from certmon.vault import EncryptedBlob
 
 
+def test_individual_password_status_tracks_nonempty_value_without_exposing_it(tmp_path):
+    service = ToolbeltBatchService(FakeDatabase(), FakeArtifacts(tmp_path), FakeVault())
+    assert service.list_devices()[0]['individual_password_configured'] is False
+    service.save_credentials('192.168.0.10', username='admin', password='')
+    row = service.list_devices()[0]
+    assert row['credentials_saved'] is True
+    assert row['individual_password_configured'] is False
+    service.save_credentials('192.168.0.10', username='admin', password='private-value')
+    row = service.list_devices()[0]
+    assert row['individual_password_configured'] is True
+    assert 'private-value' not in json.dumps(row)
+    service.save_default_credentials(username='admin', password='shared-value')
+    assert service._credentials_for('192.168.0.10')['credential_candidates'] == [
+        {'username': 'admin', 'password': 'private-value'},
+        {'username': 'admin', 'password': 'shared-value'},
+        {'username': 'admin', 'password': 'extron'},
+    ]
+    service.delete_credentials('192.168.0.10')
+    assert service.list_devices()[0]['individual_password_configured'] is False
+
+
 def wait_until(predicate, timeout=2):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -226,6 +247,7 @@ def test_toolbelt_service_uses_shared_password_before_factory_and_serial(tmp_pat
         credentials = json.loads(credential_path.read_text(encoding="utf-8"))
         assert credentials["192.168.0.10"] == {
             "username": "admin",
+            "credential_candidates": [{"username": "admin", "password": "shared-secret"}, {"username": "admin", "password": "extron"}],
             "password_candidates": ["shared-secret", "extron", "__SERIAL__"],
         }
         on_event({"event": "dry_run_ok", "selector": "192.168.0.10", "message": "ok"})
@@ -282,7 +304,8 @@ def test_toolbelt_service_saves_serial_fallback_after_dry_run(tmp_path):
         else:
             assert credentials["192.168.0.10"] == {
                 "username": "admin",
-                "password": "SERIAL123",
+                "credential_candidates": [{"username": "admin", "password": "SERIAL123"}, {"username": "admin", "password": "extron"}],
+                "password_candidates": ["SERIAL123", "extron", "__SERIAL__"],
             }
             on_event({"event": "upload_ok", "selector": "192.168.0.10", "message": "ok"})
 

@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from certmon.credentials import ordered_credentials
 from certmon.upload_queue import UploadQueueService
 
 
@@ -116,6 +117,9 @@ class ToolbeltBatchService:
                         self._secret_id(selector)
                     )
                     is not None,
+                    "individual_password_configured": bool(
+                        (self._load_secret_credentials(self._secret_id(selector)) or {}).get("password")
+                    ),
                     "default_credentials_saved": default_credentials_saved,
                     "direct_nic": direct_nics.get(selector, 1),
                     "direct_lan_b": lan_b_targets.get(selector),
@@ -445,16 +449,11 @@ class ToolbeltBatchService:
 
     def _credentials_for(self, selector):
         saved = self._load_secret_credentials(self._secret_id(selector))
-        if saved is not None:
-            return saved
-
         default = self._load_secret_credentials(DEFAULT_SECRET_ID) or {}
-        username = default.get("username") or "admin"
-        password_candidates = []
-        for candidate in (default.get("password"), "extron", "__SERIAL__"):
-            if candidate is not None and candidate not in password_candidates:
-                password_candidates.append(candidate)
-        return {"username": username, "password_candidates": password_candidates}
+        candidates = ordered_credentials(saved, default)
+        return {"username": candidates[0]["username"],
+                "credential_candidates": candidates,
+                "password_candidates": [candidate["password"] for candidate in candidates] + ["__SERIAL__"]}
 
     def _load_secret_credentials(self, secret_id):
         blob = self.database.get_secret(secret_id)

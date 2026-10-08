@@ -1323,6 +1323,38 @@ def _credential_candidates(credential, serial):
     return candidates
 
 
+def _credential_attempts(credential, serial):
+    configured = credential.get("credential_candidates")
+    if configured is None:
+        username = credential.get("username") or "admin"
+        return [(username, password, source) for password, source in _credential_candidates(credential, serial)]
+    attempts = []
+    for candidate in configured:
+        username = candidate.get("username") or "admin"
+        password = candidate.get("password")
+        if password and not any(u == username and p == password for u, p, _ in attempts):
+            attempts.append((username, password, "configured"))
+    if serial and not any(u == "admin" and p == serial for u, p, _ in attempts):
+        attempts.append(("admin", serial, "serial"))
+    return attempts
+
+
+def _set_credentials_username(win, username):
+    edits = [edit for edit in win.descendants(control_type="Edit") if edit.is_visible()]
+    password = _choose_password_edit(win, edits)
+    users = [edit for edit in edits if edit is not password]
+    if not users:
+        return username == "admin"
+    user = users[0]
+    try:
+        current = user.get_value()
+    except Exception:
+        current = user.window_text()
+    if (current or "").strip() == username:
+        return True
+    return user.is_enabled() and _fill_edit(user, win, username)
+
+
 def accept_credentials_prompt(win, ip, timeout=8, serial=None):
     """Accept Toolbelt's credentials modal, retrying serial-number fallback."""
     deadline = time.time() + timeout
@@ -1333,16 +1365,18 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
 
     credential = _DEVICE_CREDENTIALS.get(ip) or {}
     raw_candidates = credential.get("password_candidates") or []
-    candidates = _credential_candidates(credential, serial)
+    candidates = _credential_attempts(credential, serial)
     log.info(
         "[%s] Toolbelt credential candidate sources: %s",
         ip,
-        ", ".join(source for _, source in candidates) or "prefilled",
+        ", ".join(source for _, _, source in candidates) or "prefilled",
     )
     if not candidates:
-        candidates = [(None, "prefilled")]
+        candidates = [(credential.get("username") or "admin", None, "prefilled")]
 
-    for candidate_password, source in candidates:
+    for username, candidate_password, source in candidates:
+        if credential.get("credential_candidates") is not None and not _set_credentials_username(win, username):
+            continue
         if candidate_password:
             log.info(
                 "[%s] trying Toolbelt credential candidate source=%s value=%s",
@@ -1360,7 +1394,7 @@ def accept_credentials_prompt(win, ip, timeout=8, serial=None):
             if source == "serial":
                 _record_resolved_credential(
                     ip,
-                    credential.get("username") or "admin",
+                    username,
                     candidate_password,
                 )
             log.info("[%s] accepted credentials prompt", ip)
@@ -1603,22 +1637,24 @@ def add_device(win, ip, serial=None, timeout=T_CREDENTIAL_ACCEPT):
         _click_add_toolbar(win)
         dialog = _wait_for_ui(win, ip, "Add Device dialog", lambda: _find_add_device_dialog(win), timeout=T_DIALOG)
     credential = _DEVICE_CREDENTIALS.get(ip) or {}
-    username = credential.get("username") or "admin"
-    candidates = _credential_candidates(credential, serial) or [(None, "prefilled")]
+    candidates = _credential_attempts(credential, serial) or [(credential.get("username") or "admin", None, "prefilled")]
     try:
         address = _add_device_edit(dialog, "IP Address/Hostname")
         if not _fill_edit(address, dialog, ip):
             raise RuntimeError("Could not fill Toolbelt Add Device address")
         user = _add_device_edit(dialog, "Username")
-        try:
-            displayed_username = user.get_value()
-        except Exception:
-            displayed_username = user.window_text()
-        if (displayed_username or "").strip().lower() != username.lower():
-            if not user.is_enabled() or not _fill_edit(user, dialog, username):
-                raise RuntimeError("Toolbelt Add Device does not accept the configured username")
         password = _add_device_edit(dialog, "Password")
-        for attempt, (candidate_password, source) in enumerate(candidates):
+        for attempt, (username, candidate_password, source) in enumerate(candidates):
+            try:
+                displayed_username = user.get_value()
+            except Exception:
+                displayed_username = user.window_text()
+            if (displayed_username or "").strip() != username:
+                if not user.is_enabled() or not _fill_edit(user, dialog, username):
+                    if credential.get("credential_candidates") is None:
+                        raise RuntimeError("Toolbelt Add Device does not accept the configured username")
+                    log.info("[%s] Toolbelt username field cannot use this candidate; trying next", ip)
+                    continue
             if candidate_password is not None and not _fill_edit(password, dialog, candidate_password):
                 raise RuntimeError("Could not fill Toolbelt Add Device password")
             buttons = [button for button in _add_dialog_controls(dialog, "Button")

@@ -170,6 +170,39 @@ def test_add_device_retries_password_candidates_and_cancels_on_rejection(uploade
     assert state.cancelled
 
 
+def test_structured_credentials_keep_usernames_and_serial_last(uploader):
+    credential = {'credential_candidates': [
+        {'username': 'operator', 'password': 'same'},
+        {'username': 'admin', 'password': 'same'},
+        {'username': 'admin', 'password': 'extron'},
+    ]}
+    assert uploader._credential_attempts(credential, 'SERIAL') == [
+        ('operator', 'same', 'configured'), ('admin', 'same', 'configured'),
+        ('admin', 'extron', 'configured'), ('admin', 'SERIAL', 'serial')]
+
+
+@pytest.mark.parametrize('serial', [None, 'SERIAL'])
+def test_add_device_uses_individual_shared_default_then_serial(uploader, add_ui, serial):
+    win, state, controls = add_ui
+    state.reject = True
+    original_submit = controls['Button'][0].action
+
+    def submit():
+        state.reject = len(state.submitted) < (3 if serial else 2)
+        original_submit()
+
+    controls['Button'][0].action = submit
+    uploader._DEVICE_CREDENTIALS = {'192.168.0.112': {
+        'credential_candidates': [{'username': 'admin', 'password': p} for p in ('individual', 'shared', 'extron')],
+        'password_candidates': ['individual', 'shared', 'extron', '__SERIAL__'],
+    }}
+    uploader.add_device(win, '192.168.0.112', serial=serial)
+    passwords = [value for top, value in state.filled if top == 245]
+    assert passwords == ['individual', 'shared', 'extron'] + ([serial] if serial else [])
+    assert len(state.submitted) == len(passwords)
+    assert not state.open
+
+
 @pytest.mark.parametrize('add_ui', ['uia', 'win32_generic_labels'], indirect=True)
 def test_add_authentication_failed_retries_extron_without_timeout(monkeypatch, uploader, add_ui):
     win, state, controls = add_ui

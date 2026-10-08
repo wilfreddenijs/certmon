@@ -2,7 +2,7 @@
 
 CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certificates, and deploys stored certificates to supported devices such as Extron products.
 
-This guide describes the application through **v1.0 build 48** (2026-10-08),
+This guide describes the current source implementation. The **v1.0 build 48** baseline (2026-10-08) uses
 source `61e6b94b729c232d5f6fefe73c84dabe349a80c6`.
 [Build 48](https://github.com/wilfreddenijs/certmon/actions/runs/37696698593)
 contains the Windows executable. Download the `CertMon-Windows` artifact while
@@ -131,6 +131,19 @@ The **Upload** tab uses one prepared-device list. Choose **Direct** or **Toolbel
 as the upload method for each device, then select the devices for that method's
 batch controls. **Device Credentials** configures one device; **Shared Device
 Credentials** configures the shared credentials. Passwords are stored encrypted.
+Each device row shows **Individual password: set** or **not set**, based on whether
+a non-empty individual password is saved. The browser receives only this boolean
+status, never the password or its length.
+
+Both upload methods use the same credential order: a non-empty individual password
+with its configured username, then a non-empty shared password with its configured
+username, then the factory default `admin` / `extron`. Empty entries are skipped;
+duplicate username/password pairs are tried only once. A rejected password advances
+to the next candidate; connection failures and changed host keys do not trigger
+password fallback. This standardized fallback was added after build 48.
+
+Only Toolbelt adds a final `admin` / serial-number attempt when the serial number
+is available. Direct upload does not retrieve or use a serial-number password.
 
 For Direct devices, select **LAN A** or **LAN B** per device, not for the whole batch.
 LAN B also requires its reachable HTTPS host and port. A connection test is not
@@ -200,7 +213,7 @@ Toolbelt on the Windows computer running CertMon.
 - Real upload requires an explicit **Start Toolbelt upload** click and is enabled only for selected devices whose dry-run is OK.
 - **Stop after current device** requests a safe stop before the next device starts; it does not force-kill an active Toolbelt operation.
 - CertMon materializes the Extron combined PEM only in a temporary server-side run folder and deletes it after the run.
-- Saved per-device credentials override the shared credential configuration. Without a per-device override, CertMon tries the shared password if configured, then `extron`, then the serial number available from Toolbelt's device list, using the shared username or `admin` by default. If the serial number is not visible, choose **Fields** > **Serial Number** in Toolbelt and retry dry-run; if **Fields** is hidden, open the toolbar overflow menu, and if the serial column is off-screen, scroll right or move the splitter.
+- Toolbelt tries individual credentials, shared credentials, `admin` / `extron`, then `admin` / the serial number available from its device list. If the serial number is not visible, choose **Fields** > **Serial Number** in Toolbelt and retry dry-run; if **Fields** is hidden, open the toolbar overflow menu, and if the serial column is off-screen, scroll right or move the splitter. Toolbelt may lock the username field to `admin`; a candidate requiring an unavailable username is skipped rather than paired with the wrong password.
 - An explicit **Authentication Failed** response advances to the next credential candidate without waiting for the full connection timeout. **Device Unreachable** ends that device's attempt without password retries and lets the batch continue to the next device.
 
 First-run Toolbelt checklist:
