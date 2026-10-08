@@ -2,9 +2,9 @@
 
 CertMon scans TLS endpoints, tracks certificate expiry, issues replacement certificates, and deploys stored certificates to supported devices such as Extron products.
 
-This guide describes the current source implementation. The **v1.0 build 48** baseline (2026-10-08) uses
-source `61e6b94b729c232d5f6fefe73c84dabe349a80c6`.
-[Build 48](https://github.com/wilfreddenijs/certmon/actions/runs/37696698593)
+This guide describes **v1.0 build 49** (2026-10-08),
+source `13305e692078817c764d7a5eb5071a5fe4d46c38`.
+[Build 49](https://github.com/wilfreddenijs/certmon/actions/runs/37751386861)
 contains the Windows executable. Download the `CertMon-Windows` artifact while
 it is retained by GitHub Actions.
 
@@ -131,16 +131,19 @@ The **Upload** tab uses one prepared-device list. Choose **Direct** or **Toolbel
 as the upload method for each device, then select the devices for that method's
 batch controls. **Device Credentials** configures one device; **Shared Device
 Credentials** configures the shared credentials. Passwords are stored encrypted.
-Each device row shows **Individual password: set** or **not set**, based on whether
-a non-empty individual password is saved. The browser receives only this boolean
-status, never the password or its length.
+In build 49, each device row shows **Individual password: set** or **not set** below
+its address and certificate ID. **Set** means a non-empty individual password is
+saved; it does not mean that the password has been tested or accepted by the device.
+Use **Device Credentials** to save or clear the individual password. An empty
+saved password is shown as **not set** and is skipped during authentication.
+The browser receives only this boolean status, never the password or its length.
 
 Both upload methods use the same credential order: a non-empty individual password
 with its configured username, then a non-empty shared password with its configured
 username, then the factory default `admin` / `extron`. Empty entries are skipped;
 duplicate username/password pairs are tried only once. A rejected password advances
 to the next candidate; connection failures and changed host keys do not trigger
-password fallback. This standardized fallback was added after build 48.
+password fallback. This standardized fallback is available from build 49.
 
 Only Toolbelt adds a final `admin` / serial-number attempt when the serial number
 is available. Direct upload does not retrieve or use a serial-number password.
@@ -283,10 +286,13 @@ python launcher.py
 
 ### Current Application And Historical Acceptance
 
-Build 48 includes Direct and Toolbelt batches, per-device interface selection,
+Build 49 includes Direct and Toolbelt batches, per-device interface selection,
 device filters, optional successful-upload list cleanup, durable per-device upload
-audit results, and post-upload device refresh. The release implementation and UI
-were checked with 77 regression tests and 14 browser tests. These automated tests
+audit results, and post-upload device refresh. Build 49 adds the shared credential
+fallback order (individual, shared, `admin` / `extron`, then Toolbelt-only serial
+number) and a visible individual-password status on each upload row.
+The release implementation and UI were checked with 231 regression tests and
+15 browser tests. These automated tests
 do not replace live device/firmware testing or an antivirus assessment of an EXE.
 
 The acceptance reference below is historical, not the current feature list.

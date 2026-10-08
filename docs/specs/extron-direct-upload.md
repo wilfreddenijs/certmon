@@ -8,9 +8,13 @@ Status: Historical proposal; Direct upload is implemented alongside Toolbelt
 The original proposal below records the requirements and verification questions
 at the time of design. It is not the current operator guide. See the repository
 [README](../../README.md#upload-workspace) for the implemented workflow through
-build 48: Direct and Toolbelt remain available, with per-device LAN selection,
+build 49: Direct and Toolbelt remain available, with per-device LAN selection,
 batch processing, first-use host-key handling, HTTPS verification, upload-result
 audit records, optional list cleanup and post-upload inventory refresh.
+Build 49 standardizes credential fallback for both methods: non-empty individual
+credentials, non-empty shared credentials, then `admin` / `extron`. Only Toolbelt
+adds the serial-number fallback. Each upload row shows whether an individual
+password is set, without exposing the password itself.
 
 User tests have exercised Direct upload on SW4 USB Pro, UCS SW 313 and UCS 303.
 They do not establish support for every model, firmware or LAN B configuration.
