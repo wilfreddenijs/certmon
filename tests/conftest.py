@@ -28,7 +28,7 @@ def _wait_for_certmon(base_url):
             with urlopen(base_url, timeout=0.5) as response:
                 if response.status == 200:
                     return
-        except URLError:
+        except (URLError, TimeoutError):
             time.sleep(0.05)
     raise RuntimeError(f"CertMon did not become ready at {base_url}")
 

@@ -1,5 +1,7 @@
 import json
 import zipfile
+import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -67,7 +69,7 @@ def test_export_has_only_versioned_encrypted_layout(tmp_path):
 
 def test_valid_package_stages_sibling_and_reprotects_vault(tmp_path):
     service, data_dir, protector, package, exported = export_package(tmp_path)
-    before = {path.relative_to(data_dir): path.read_bytes() for path in data_dir.rglob("*") if path.is_file()}
+    before = source_state(data_dir)
 
     restored = service.stage_restore(package, "correct passphrase", data_dir.parent)
 
@@ -76,8 +78,26 @@ def test_valid_package_stages_sibling_and_reprotects_vault(tmp_path):
     assert restored.staged_path != data_dir
     assert Database(restored.staged_path / "certmon.db").get_certificate("cert-1")
     Vault(restored.staged_path / "secrets", protector).initialize()
-    after = {path.relative_to(data_dir): path.read_bytes() for path in data_dir.rglob("*") if path.is_file()}
+    after = source_state(data_dir)
     assert before == after
+
+
+def source_state(data_dir):
+    # SQLite checkpoints can change DB/WAL bytes without changing source data.
+    sqlite_files = {"certmon.db", "certmon.db-wal", "certmon.db-shm"}
+    files = {path.relative_to(data_dir): path.read_bytes()
+             for path in data_dir.rglob("*")
+             if path.is_file() and path.relative_to(data_dir).as_posix() not in sqlite_files}
+    with closing(sqlite3.connect(data_dir / "certmon.db")) as connection:
+        logical_database = tuple(connection.iterdump())
+    return files, logical_database
+
+
+def test_source_state_still_detects_actual_database_changes(tmp_path):
+    service, data_dir, _, _, _ = export_package(tmp_path)
+    before = source_state(data_dir)
+    service.database.put_setting("changed-during-restore", True)
+    assert source_state(data_dir) != before
 
 
 @pytest.mark.parametrize(

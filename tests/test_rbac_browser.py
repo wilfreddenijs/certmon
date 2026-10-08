@@ -98,7 +98,9 @@ def _create_admin(page, live_certmon):
     page.locator("#auth-username").fill("browser-admin")
     page.locator("#auth-password").fill(PASSWORD)
     page.locator("#auth-password-confirmation").fill(PASSWORD)
-    page.locator("#auth-submit").click()
+    with page.expect_response(lambda response: urlparse(response.url).path == "/api/auth/setup-first-admin") as setup:
+        page.locator("#auth-submit").click()
+    assert setup.value.status == 200
     expect(page.locator(".main")).to_be_visible()
     return certmon, import_module("app")
 
@@ -119,7 +121,8 @@ def _sign_in(browser, certmon, username, password=PASSWORD, controlled_clock=Fal
 def _submit_sign_in(page, username, password=PASSWORD):
     page.locator("#auth-username").fill(username)
     page.locator("#auth-password").fill(password)
-    page.locator("#auth-submit").click()
+    with page.expect_response(lambda response: urlparse(response.url).path == "/api/auth/login"):
+        page.locator("#auth-submit").click()
 
 
 def _seed_browser_artifacts(module):
@@ -242,12 +245,14 @@ def _assert_dynamic_information_views(page, seeded):
             int(state == "awaiting_external_ca")
         )
     page.locator('[data-tab="ca"]').click()
-    expect(page.locator("#ca-content")).to_contain_text(seeded["host"])
+    expect(page.locator("#ca-content")).to_contain_text("CertMon Local CA")
+    expect(page.locator("#ca-content")).not_to_contain_text("Issued Device Certificates")
     expect(
         page.locator(
             f'#ca-content a[href="/api/ca/download/{seeded["issued_certificate_id"]}"]'
         )
-    ).to_have_count(1)
+    ).to_have_count(0)
+    _assert_public_upload_links(page, seeded["issued_certificate_id"], ("certificate.pem", "chain.pem"))
 
 
 def _assert_permission_visibility(page, permissions):
