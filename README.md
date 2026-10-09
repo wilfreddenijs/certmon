@@ -7,6 +7,10 @@ Successful [Windows builds](https://github.com/wilfreddenijs/certmon/actions/wor
 contain the executable. Download the latest `CertMon-Windows` artifact while
 it is retained by GitHub Actions; `BUILD-NOTES.txt` identifies its source commit.
 
+For step-by-step operation with interface screenshots, read the
+[Illustrated User Manual](docs/user-manual.md). It covers each tab, device selection,
+certificate creation, upload workflows, downloads, Audit and administration.
+
 ## Security Status
 
 CertMon starts in desktop mode by default and binds to `127.0.0.1`. LAN binding is refused unless explicit server mode is enabled.
@@ -298,8 +302,13 @@ device filters, optional successful-upload list cleanup, durable per-device uplo
 audit results, and post-upload device refresh. Build 49 adds the shared credential
 fallback order (individual, shared, `admin` / `extron`, then Toolbelt-only serial
 number) and a visible individual-password status on each upload row.
-The release implementation and UI were checked with 231 regression tests and
-15 browser tests. These automated tests
+Build 51 adds Audit Excel export and date-based history cleanup. Build 53 also
+includes creation dates in certificate downloads and deletion of stored leaf
+certificates from the server. The [illustrated manual](docs/user-manual.md)
+documents this current baseline.
+The [build-53 test run](https://github.com/wilfreddenijs/certmon/actions/runs/37822940364)
+passed 523 tests, with one optional external ACME staging test deselected.
+These automated tests
 do not replace live device/firmware testing or an antivirus assessment of an EXE.
 
 The acceptance reference below is historical, not the current feature list.
