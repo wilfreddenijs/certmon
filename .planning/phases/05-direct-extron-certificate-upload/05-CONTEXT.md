@@ -1,7 +1,38 @@
 # Phase 05: Direct Extron Certificate Upload - Context
 
 Captured: 2026-10-04
-Status: Confirmed workflow captured; ready for planning, not implemented
+Status: Build 53 implementation reconciled; original decisions retained below as history
+
+## Superseding Decisions And Current Scope
+
+Reconciled 2026-10-10 from user feedback, source and commits. The original plan
+documents remain historical; use these amendments for current verification.
+
+- **D-06 amended:** Direct and Toolbelt remain selectable methods in one prepared
+  list. Toolbelt received user-requested Add-by-IP improvements; it is not retired.
+- **D-07 amended:** User requested background first-use SSH key acceptance for
+  batches. Commit `03ca875` pins previously unseen keys for exact endpoints before
+  authentication. Known-key changes still block; review/approval is explicit.
+  This is trust on first use, not independent device identity verification.
+- **D-08 amended:** Commit `13305e6` standardizes candidates: non-empty individual,
+  non-empty shared, then `admin` / `extron`; Toolbelt alone may try serial number
+  last when available. Authentication rejection may advance candidates; ambiguous
+  SIS activation must never be replayed to try another password.
+- **D-09 implemented, hardware pending:** Interface choice is per prepared device;
+  choosing LAN B opens its configuration dialog. A distinct saved HTTPS endpoint
+  is required before using LAN B. Mock tests are not physical acceptance.
+- **Protocol clarification:** Real terminal echo/CRCRLF responses led to commits
+  `f86ab3a`, `de1370a`, `3a266f4`. Import success requires the expected NIC-specific
+  acknowledgement and matching HTTPS certificate, not a file transfer alone.
+- **Documentation format:** `docs/user-manual.md` plus 16 screenshots (`15e5151`)
+  is the current operator manual; the planned RTF path is not the delivered guide.
+- **Open, not an accepted scope reduction:** Original plan 05-03 requires durable
+  batch progress. Current `_batches` snapshots are process-local; staged-file
+  records and audited outcomes persist. Decide whether to implement durable run
+  history or explicitly accept this limitation before closing the phase.
+
+No original high-risk acceptance gate is silently waived. No Toolbelt retirement,
+new hardware writes, or milestone closure is authorized by documentation repair.
 
 ## Scope
 

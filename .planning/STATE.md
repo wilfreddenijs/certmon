@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: direct-extron-certificate-upload
-status: awaiting_checkpoint
-stopped_at: Direct tracer implemented and checked inline; awaiting human UI feedback
-last_updated: "2026-10-05T17:24:36.895Z"
-last_activity: 2026-10-05
-last_activity_desc: Inline takeover reviewed late executor commits and passed 86 focused/browser/regression tests
+status: awaiting_verification
+stopped_at: Build 53 implementation reconciled; LAN B hardware acceptance and original-plan gaps remain open
+last_updated: "2026-10-10"
+last_activity: 2026-10-10
+last_activity_desc: Reconciled released implementation, human feedback, CI and illustrated manual without rerunning device operations
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 14
-  completed_plans: 10
+  completed_plans: 12
 ---
 
 # CertMon Planning State
@@ -22,12 +22,23 @@ Current phase: 05
 
 ## Current Position
 
-Phase: 05 (direct-extron-certificate-upload) — EXECUTING
-Plan: 1 of 4
-Status: Awaiting tracer UI feedback; implementation tests pass, physical acceptance not started
-Last activity: 2026-10-05 — Phase 05 execution started
+Phase: 05 (direct-extron-certificate-upload) - IMPLEMENTED WITH ACCEPTANCE GAPS
+Plans: 05-01 and 05-04 implementation recorded; 05-02 and 05-03 remain partial
+Status: Awaiting hardware evidence and disposition of original-plan gaps, not initial UI feedback
+Last activity: 2026-10-10 - Retrospective evidence reconciliation authorized by user
 
-Next action: Await latest interface feedback at http://127.0.0.1:5052/ (isolated preview data). Initial UI visually accepted; e6ac3ec adds Devices-to-direct-upload selection and automatic IP/certificate filling, with 50 direct/UI tests passed. After human tracer approval write 05-01-SUMMARY.md and enter 05-02 physical checkpoint. No physical operation, push or build performed.
+Next action: Use 05-UAT.md for missing independent LAN A/LAN B hardware evidence; use 05-VERIFICATION.md for restart-progress and other original-plan gaps. Do not repeat completed implementation or old preview/build delivery. Existing plans are historical contracts; 05-CONTEXT.md records superseding user decisions. No phase/milestone closure is claimed.
+
+## Current Evidence Baseline
+
+- Released application baseline: build 53, source `cfbab086d22d3ccc1cd0de7ebb46ff5d8e884c78`.
+- CI run 37822940364: 523 passed, 1 opt-in external ACME staging test deselected; Windows build run 37822940201 succeeded for the same source.
+- Illustrated manual and 16 fictional-data screenshots: `15e5151`, `docs/user-manual.md`.
+- Human reports confirm working Direct certificates on SW4 USB Pro, UCS SW 313 and UCS 303; observations are useful but lack the complete original model/firmware/fingerprint/no-reboot acceptance record.
+- Human feedback also confirms later Toolbelt EXE tests and build-38 filters. This is not independent LAN B acceptance.
+- First-use hostkey pinning, standardized password candidates and retained Toolbelt supersede original planning assumptions. Changed keys still require review.
+- Batch run/progress snapshots are process-local; staged PEM recovery and upload Audit outcomes are durable. The original persisted-run-progress requirement is not satisfied as written.
+- 4/5 phases remain closed. 12/14 plans have completed implementation summaries; partial summaries do not count as acceptance or completed plans.
 
 ## Final Acceptance
 
@@ -59,6 +70,8 @@ Next action: Await latest interface feedback at http://127.0.0.1:5052/ (isolated
 
 ## Session
 
-**Last session:** 2026-10-05
-**Stopped at:** Tracer UI feedback after inline verification
-**Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-01-CHECKPOINT.md
+**Last session:** 2026-10-10
+**Stopped at:** Phase 05 acceptance/evidence reconciliation; no new physical operations
+**Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-UAT.md
+
+Older notes below Final Acceptance are retained as history, not current next actions.

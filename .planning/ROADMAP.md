@@ -6,7 +6,7 @@
 - [x] Phase 02: Shared Server Mode and Team Local CA (accepted 2026-10-04)
 - [x] Phase 03: Toolbelt auto-upload UI with device progress and cancellation
 - [x] Phase 04: Extron workflow/UI simplification
-- [ ] Phase 05: Direct Extron certificate upload (4 plans drafted; independent checker pending)
+- [ ] Phase 05: Direct Extron certificate upload (build 53 implemented; hardware acceptance and original-plan gaps open)
 
 ## Phase Details
 
@@ -104,19 +104,24 @@ Plans:
 
 ### Phase 05: Direct Extron certificate upload
 
-**Status:** Planned and independently verified on 2026-10-05; ready to execute. Not implemented.
-**Goal:** Replace Toolbelt automation with combined-PEM transfer over SFTP (22022), SIS import over SSH (22023), and HTTPS certificate verification while preserving upload-list and credential workflows.
+**Status:** Reconciled 2026-10-10. Direct implementation, batch UI, Windows build and documentation exist; phase acceptance is incomplete. See 05-VERIFICATION.md and 05-UAT.md.
+**Goal:** Provide Direct combined-PEM transfer over SFTP (22022), SIS import over SSH (22023), and HTTPS verification alongside the retained Toolbelt method, preserving upload-list and credential workflows.
 **Canonical refs:** `docs/specs/extron-direct-upload.md`
 **Depends on:** Phase 04 upload workflow; preserve Phase 02 authorization boundaries.
-**Decisions:** LAN A by default, optional LAN B per device; no normal reboot. Retire Toolbelt only after the direct replacement is verified.
+**Decisions:** LAN A default, LAN B configured per device; no normal Direct reboot. First-use SSH keys automatically pinned, changed keys blocked. Individual -> shared -> admin/extron credentials; Toolbelt-only serial fallback. Toolbelt retained; no retirement authorized. See the superseding decisions in 05-CONTEXT.md.
 **Plans:** 4 plans
 
 Plans:
 
-- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-01-PLAN.md` - Package gate plus LAN A/LAN B tracer, fresh-channel SIS, deterministic credentials, and durable cleanup
-- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-02-PLAN.md` - Blocking one-LAN and two-LAN physical acceptance
-- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-03-PLAN.md` - Protocol hardening, exact-selected batch, persistence, and guarded APIs
-- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-04-PLAN.md` - Complete Upload UI, packaging, docs, and regressions
+- [x] `.planning/phases/05-direct-extron-certificate-upload/05-01-PLAN.md` - Tracer/package implementation summarized in 05-01-SUMMARY.md; not universal hardware acceptance
+- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-02-PLAN.md` - Partial human evidence in 05-02-SUMMARY.md; independent LAN B and complete acceptance record missing
+- [ ] `.planning/phases/05-direct-extron-certificate-upload/05-03-PLAN.md` - Implemented protocol/batches/APIs in 05-03-SUMMARY.md; persisted batch progress and original-contract review remain open
+- [x] `.planning/phases/05-direct-extron-certificate-upload/05-04-PLAN.md` - UI/build/docs/regressions summarized in 05-04-SUMMARY.md; phase-level hardware gate remains open
+
+These checkboxes distinguish completed implementation from phase acceptance.
+The original wave gates below are historical: expansion occurred through later
+user-requested builds without a complete 05-02 record. This reconciliation does
+not retroactively claim those gates passed or authorize new live-device actions.
 
 **Wave 1 - 05-01**
 

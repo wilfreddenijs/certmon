@@ -1,13 +1,36 @@
 ---
 phase: 05
 slug: direct-extron-certificate-upload
-status: planned
-nyquist_compliant: true
-wave_0_complete: false
+status: gaps_found
+nyquist_compliant: false
+wave_0_complete: true
 created: 2026-10-04
 ---
 
 # Phase 05 - Validation Strategy
+
+## Current Evidence Reconciliation
+
+Updated 2026-10-10. The map below is the original planned strategy, not an
+assertion that every task ran with its original gates/commands. Existing tracer
+fixtures and automated suites are delivered; full phase compliance remains open.
+
+Actual tests live in `tests/test_direct_extron.py`, `tests/test_direct_batch.py`,
+`tests/test_upload_workspace_ui.py`, `tests/test_credentials.py` and
+`tests/test_upload_queue.py`, plus existing RBAC/CSRF/Audit suites. The planned
+`tests/test_direct_extron_api.py` and `tests/test_direct_extron_packaging.py`
+do not exist. API coverage was integrated into other suites; successful Windows
+CI is packaging evidence, not the missing dedicated packaging test.
+
+Build-53 test run 37822940364 passed 523 tests with one opt-in ACME staging
+case deselected. These existing results were checked, not rerun, during this
+documentation update. See 05-VERIFICATION.md for gaps and 05-UAT.md for hardware.
+
+Useful current focused command (not executed during reconciliation):
+`py -m pytest tests/test_direct_extron.py tests/test_direct_batch.py tests/test_upload_workspace_ui.py tests/test_credentials.py tests/test_upload_queue.py tests/test_rbac.py tests/test_csrf.py -m "not acme_staging" -q`.
+
+No live device operation is implied by this command or by a green automated run.
+Do not use the old nonexistent-file commands below as current instructions.
 
 ## Test Infrastructure
 
@@ -58,9 +81,11 @@ Toolbelt retirement is blocked until these replacement tests are accepted.
 
 - [ ] Every final plan task has focused automated verification or a Wave 0 dependency.
 - [ ] No three consecutive implementation tasks lack automated feedback.
-- [ ] Missing test fixtures are created before use.
-- [ ] Full offline suite passes without watch-mode flags.
+- [x] Tracer fixtures are delivered; standalone planned API/packaging file paths differ from actual suites.
+- [x] Full offline CI suite passes without watch-mode flags (build 53, 523 passed).
 - [ ] Physical acceptance evidence is recorded separately from automated success.
 - [ ] Final plan/checker binds requirements and security threats to test commands.
 
-Planning binding complete; implementation and physical approval remain pending. `wave_0_complete` stays false until Task 05-01-02 creates and passes the fixtures.
+Original planning binding was completed; implementation fixtures now exist.
+Physical approval and independent final contract/security coverage review remain
+pending. Nyquist compliance is not asserted until remaining gaps are reviewed.

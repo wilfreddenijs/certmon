@@ -1,6 +1,10 @@
 # Plan 05-01 Checkpoint: Paramiko Package Identity Approval
 
-**Status:** implementation checked; awaiting human tracer UI feedback
+**Status:** historical checkpoint; tracer/UI gate superseded by later user feedback and releases
+
+Current status (reconciled 2026-10-10): see 05-01-SUMMARY.md, 05-UAT.md and
+05-VERIFICATION.md. Do not restart the old preview or package approval checkpoint.
+The observations below remain historical evidence, not current next actions.
 **Task:** 05-01-01 - Approve the official Paramiko package identity before installation
 **Gate:** blocking-human
 **Recorded:** 2026-10-05
