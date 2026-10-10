@@ -27,11 +27,11 @@ The original plans and superseding decisions in 05-CONTEXT.md are both considere
 | Exactly one credential, no fallback | Individual/shared/default candidates explicitly requested later; fallback only on authentication rejection | Superseded user decision; SIS replay remains prohibited |
 | Exact selected batches; missing selector handled as failed row | API rejects any missing/unready selection with 400; never broadens to all devices | Safe behavior differs from original per-row continuation contract |
 | Stop after current operation | `_execute_batch`, stop and lock tests | Implemented |
-| Run/progress survives service recreation | `_batches` is process-local | User decision or implementation required |
+| Run/progress survives service recreation | Durable whitelisted database snapshots; unfinished runs restored as interrupted | Implemented; regression verification in progress |
 | Durable staged-file cleanup and no import replay | STAGED_KEY, recorded endpoint, grace/explicit finished confirmation, restart tests | Implemented |
 | Standalone reverify API / run-scoped cleanup route | HTTPS check on ambiguity/import; cleanup uses a persisted staged basename, not a run URL | Standalone reverify route not delivered; route shape differs |
 | Encrypted PEM/passphrase SIS variant | Generated combined PEM is decrypted locally inside the service; `_sis_command` has no passphrase argument | External encrypted-PEM import variant not delivered; no claim of support |
-| Per-device LAN B target | Configured LAN B host used for SFTP, SIS and HTTPS | Implemented; manual corrected to match source |
+| Per-device LAN B target | Separate upload host, certificate NIC and LAN B HTTPS verification host | User-requested separation implemented; physical NIC-2 acceptance remains open |
 | Actor-attributed operations | Request-layer Audit records actor; background outcomes have run_id but no actor/source fields themselves | Trace through batch-start run_id; stronger self-contained attribution not delivered |
 | Server authorization / CSRF / private material handling | Direct routes require deploy_certificate; strict mutation fields, existing CSRF and no-private-material tests | Existing automated mitigation evidence; not blanket security certification |
 | Dependency / packaging evidence | approved package checkpoint, successful Windows workflow, new source packaging tests | Source/build verified; physical/runtime claims remain bounded |
@@ -57,9 +57,10 @@ The original plans and superseding decisions in 05-CONTEXT.md are both considere
 
 ## Pending User Input
 
-The user was asked whether to accept process-local batch status or implement
-durable snapshots, and whether independent LAN B hardware evidence is available.
-No answer has yet been recorded in this review. Do not close the phase on silence.
+The user explicitly requested durable batch snapshots and independently selectable
+upload connections. Both are implemented with tests under verification. The LAN B
+question concerned a certificate for NIC 2, verified on LAN B HTTPS, not necessarily
+an upload connection through LAN B. No new physical acceptance evidence was supplied.
 
 The other contract differences above must also receive an explicit disposition
 (accepted scope amendment or fix/test work) before claiming full original-plan

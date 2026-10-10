@@ -239,7 +239,7 @@ def test_certificate_removal_targets_one_interface_and_preserves_artifacts(tmp_p
     assert result["status"] == "removal_acknowledged"
     assert result["certificate_information"] == {"C": "test-default"}
     assert [command for _, command in transport.sis_commands] == [f"\x1bX{nic}CERT\r".encode(), f"\x1bV{nic}CERT\r".encode()]
-    assert all(identity.nic == nic and identity.host == ("10.0.0.10" if nic == 1 else "10.0.1.10") for identity, _ in transport.sis_commands)
+    assert all(identity.nic == nic and identity.host == "10.0.0.10" for identity, _ in transport.sis_commands)
     assert artifacts.has_certificate("cert-1") and artifacts.materializations == 0
     assert transport.sftp_writes == [] and transport.deleted == []
     assert database.get_setting(service.STAGED_KEY, {}) == {}
@@ -396,13 +396,15 @@ def test_each_port_requires_its_own_host_key_approval(tmp_path):
 
 def test_cleanup_uses_staged_endpoint_even_after_lan_b_target_changes(tmp_path):
     service, _, _, transport = make_service(tmp_path, transport=FakeTransport(delete_error=True, ack=b"CertI2\r"))
-    service.save_lan_b_target("10.0.0.10", host="10.0.1.10", port=8443)
+    service.save_device_interface("10.0.0.10", nic=2, host="10.0.1.10", port=8443,
+                                  management_host="10.0.3.10")
     approve(service, nic=2)
     result = service.activate_one(selector="10.0.0.10", certificate_id="cert-1", nic=2)
-    service.save_lan_b_target("10.0.0.10", host="10.0.2.10", port=443)
+    service.save_device_interface("10.0.0.10", nic=2, host="10.0.2.10", port=443,
+                                  management_host="10.0.4.10")
     transport.delete_error = False
     assert service.cleanup_one(staged_name=result["staged_name"], confirm_finished=True)["status"] == "deleted"
-    assert transport.deleted[-1][0].host == "10.0.1.10"
+    assert transport.deleted[-1][0].host == "10.0.3.10"
 
 
 def test_disconnect_after_send_verifies_without_retrying(tmp_path):

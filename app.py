@@ -2150,8 +2150,8 @@ def direct_extron_device_interface(selector):
     if _direct_extron_unavailable():
         return jsonify({"error": "Direct Extron upload is unavailable"}), 503
     body = request.get_json(silent=True)
-    if not isinstance(body, dict) or set(body) - {"nic", "host", "port"}:
-        return jsonify({"error": "Expected nic and optional LAN B host/port"}), 400
+    if not isinstance(body, dict) or set(body) - {"nic", "host", "port", "management_host"}:
+        return jsonify({"error": "Expected nic and optional upload host or LAN B HTTPS host/port"}), 400
     if selector not in {row["selector"] for row in toolbelt_service.list_devices()}:
         return jsonify({"error": "Select a prepared device"}), 400
     try:
@@ -2249,6 +2249,17 @@ def direct_extron_batch_start():
     audit("direct_extron_batch_started", details={"run_id": result["id"], "mode": body["mode"],
                                                  "targets": targets})
     return jsonify(result), 202
+
+
+@app.route("/api/direct-extron/batches/latest", methods=["GET"])
+def direct_extron_latest_batch():
+    authorize(Permission.DEPLOY_CERTIFICATE)
+    if _direct_extron_unavailable():
+        return jsonify({"error": "Direct Extron upload is unavailable"}), 503
+    result = direct_extron_service.latest_batch()
+    if result is None:
+        return jsonify({"error": "Direct batch not found"}), 404
+    return jsonify(result)
 
 
 @app.route("/api/direct-extron/batches/<run_id>", methods=["GET"])

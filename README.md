@@ -154,8 +154,11 @@ Only Toolbelt adds a final `admin` / serial-number attempt when the serial numbe
 is available. Direct upload does not retrieve or use a serial-number password.
 
 For Direct devices, select **LAN A** or **LAN B** per device, not for the whole batch.
-LAN B also requires its reachable host and HTTPS port. The current Direct transport
-uses that LAN B host for SFTP (22022), SIS/SSH (22023) and HTTPS, not just verification.
+LAN B also requires its reachable HTTPS verification host and port. Use **Upload
+connection** to separately choose the SFTP (22022) and SIS/SSH (22023) host; it
+defaults to the original device IP regardless of the certificate interface.
+Direct batch progress survives restart. Interrupted batches are shown for review
+and never automatically resumed; an in-flight upload is marked unconfirmed.
 A connection test is not
 an upload and does not activate a certificate.
 

@@ -34,9 +34,9 @@ API cases are integrated into these suites rather than the planned standalone
 
 ## Why This Plan Remains Partial
 
-- Original durable run/progress requirement is not implemented: `_batches` is an
-  in-memory dictionary. A restart loses the live run snapshot and does not resume
-  or replay it. Durable staged recovery and Audit outcomes are not equivalent.
+- At the build-53 reconciliation checkpoint, run snapshots were process-local.
+  The subsequent user-requested change persists safe progress and restores unfinished
+  runs as interrupted, never automatically replaying imports. Verification is in progress.
 - Original strict one-credential and manual first-use approval requirements were
   superseded by user decisions, not fulfilled verbatim.
 - Expansion occurred before the complete hardware checkpoint was recorded;
@@ -51,5 +51,7 @@ No new code changes or scope-waiver decisions were made during reconciliation.
 
 The user requested the closure steps on 2026-10-10. 05-CLOSURE-REVIEW.md records
 the current inline contract/security comparison and the outstanding decisions.
-No answer to the batch-persistence or LAN B acceptance questions is yet recorded.
+The user chose durable batch status and separately configurable upload connections.
+LAN B physical acceptance remains open; the question was clarified as NIC-2 certificate
+verification, independent of which connection carries SFTP/SIS.
 The plan remains partial; new source packaging tests do not change its status.

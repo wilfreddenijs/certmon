@@ -31,8 +31,9 @@ Next action: Use 05-UAT.md for missing independent LAN A/LAN B hardware evidence
 
 Closure pass: 05-CLOSURE-REVIEW.md now records the inline source/security-contract
 review. Fresh local regression: 523 passed, 1 deselected; 2 new source packaging
-contracts passed separately. Await the user's batch-persistence choice and LAN B
-evidence, and explicitly dispose of the remaining original-contract differences.
+contracts passed separately. The user chose durable batch progress and independently
+selectable upload connections. Those changes are being verified; LAN B hardware
+evidence and disposition of remaining original-contract differences are still open.
 
 ## Current Evidence Baseline
 
@@ -42,7 +43,7 @@ evidence, and explicitly dispose of the remaining original-contract differences.
 - Human reports confirm working Direct certificates on SW4 USB Pro, UCS SW 313 and UCS 303; observations are useful but lack the complete original model/firmware/fingerprint/no-reboot acceptance record.
 - Human feedback also confirms later Toolbelt EXE tests and build-38 filters. This is not independent LAN B acceptance.
 - First-use hostkey pinning, standardized password candidates and retained Toolbelt supersede original planning assumptions. Changed keys still require review.
-- Batch run/progress snapshots are process-local; staged PEM recovery and upload Audit outcomes are durable. The original persisted-run-progress requirement is not satisfied as written.
+- Direct batch run/progress snapshots now use durable database settings. Restart marks interrupted work without replaying imports; automated regression evidence is being collected. Staged PEM recovery and upload Audit outcomes remain durable.
 - 4/5 phases remain closed. 12/14 plans have completed implementation summaries; partial summaries do not count as acceptance or completed plans.
 
 ## Final Acceptance

@@ -1098,7 +1098,7 @@
           <select id="direct-extron-selector" hidden aria-label="Prepared device"><option value="">Select a device</option></select>
           <div class="form-group" style="margin:0"><label class="form-label" for="direct-extron-certificate">Certificate ID</label><input id="direct-extron-certificate" type="text" readonly></div>
           <input id="direct-extron-nic" type="hidden" value="1">
-          <div class="form-group" style="margin:0"><label class="form-label">Network interface</label><div id="direct-extron-interface" class="help-text">LAN A</div></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Certificate for</label><div id="direct-extron-interface" class="help-text">LAN A</div></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           <button class="btn btn-ghost" type="button" onclick="saveDirectExtronCredentials()">Device Credentials</button>
@@ -1166,12 +1166,16 @@
       </dialog>
       <dialog class="modal" id="direct-interface-dialog" aria-labelledby="direct-interface-title" style="width:440px;max-width:calc(100vw - 32px);margin:auto;color:var(--text)">
         <form onsubmit="event.preventDefault();saveDeviceLanB()">
-          <h3 id="direct-interface-title" style="font-size:18px">LAN B endpoint</h3>
+          <h3 id="direct-interface-title" style="font-size:18px">Direct connection and certificate target</h3>
           <div id="direct-interface-device" class="help-text" style="overflow-wrap:anywhere;margin-bottom:16px"></div>
-          <label class="form-label" for="direct-interface-host">LAN B HTTPS host</label>
+          <label class="form-label" for="direct-connection-host">Upload connection host (SFTP / SSH)</label>
+          <input id="direct-connection-host" type="text" required autocomplete="off" style="width:100%;margin-bottom:12px">
+          <div id="direct-verification-fields">
+          <label class="form-label" for="direct-interface-host">LAN B certificate verification host (HTTPS)</label>
           <input id="direct-interface-host" type="text" required autocomplete="off" style="width:100%;margin-bottom:12px">
           <label class="form-label" for="direct-interface-port">LAN B HTTPS port</label>
           <input id="direct-interface-port" type="number" required value="443" min="1" max="65535" style="width:100%;margin-bottom:12px">
+          </div>
           <div id="direct-interface-error" role="alert" class="help-text" style="color:var(--warning)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
             <button class="btn btn-ghost" type="button" onclick="document.getElementById('direct-interface-dialog').close()">Cancel</button>
@@ -3177,6 +3181,7 @@
   const preparedUploadMethods = new Map();
   const directUploadStates = new Map();
   let directBatchRunId = null;
+  let directBatchRestored = false;
   let directBatchTestSignature = null;
   let credentialsSelector = null;
   let interfaceSelector = null;
@@ -3188,7 +3193,8 @@
 
   function directBatchSignature() {
     return JSON.stringify(selectedDirectDevices().map(d =>
-      [d.selector, d.certificate_id, d.direct_nic || 1, d.direct_lan_b || null]));
+      [d.selector, d.certificate_id, d.direct_nic || 1, d.direct_lan_b || null,
+       d.direct_management_host || d.selector]));
   }
 
   function invalidateDirectBatchTest() {
@@ -3234,7 +3240,22 @@
     }
   }
 
-  async function pollDirectBatch(signature) {
+  async function restoreDirectBatch() {
+    if (directBatchRestored || directBatchRunId) return;
+    directBatchRestored = true;
+    try {
+      const res = await fetch('/api/direct-extron/batches/latest');
+      if (!res.ok) return;
+      const run = await readDirectExtronResponse(res);
+      directBatchRunId = run.id;
+      await pollDirectBatch(null, true);
+    } catch (error) {
+      directBatchRunId = null;
+      document.getElementById('direct-batch-status').textContent = 'Saved batch progress unavailable; no upload restarted.';
+    }
+  }
+
+  async function pollDirectBatch(signature, restored = false) {
     if (!directBatchRunId) return;
     const status = document.getElementById('direct-batch-status');
     try {
@@ -3253,6 +3274,7 @@
         cleanup_pending: 'Upload needs review / cleanup', authentication_failed: 'Sign-in failed',
         connection_failed: 'Connection failed', credentials_required: 'Enter device or shared credentials',
         skipped: run.mode === 'upload' ? 'Not uploaded' : 'Not tested',
+        interrupted: 'Connection test interrupted by restart',
         upload_unconfirmed: 'Upload not confirmed; review before retrying'};
       for (const device of run.devices) {
         directUploadStates.set(device.selector, {certificate_id: device.certificate_id,
@@ -3264,14 +3286,15 @@
         ? `${run.mode === 'test' ? 'Testing' : 'Uploading'}: ${run.current_device || 'preparing'} (${finished}/${run.devices.length})`
         : run.status === 'complete'
           ? run.mode === 'test' ? 'All selected connections are ready.' : `${run.devices.length} certificates uploaded and verified.`
+          : run.status === 'interrupted' ? 'Batch interrupted by server restart. Saved results restored; no automatic upload retry.'
           : run.status === 'stopped' ? 'Batch stopped after the current device.' : 'Batch needs attention. Review the result beside each device; no automatic retry.';
       if (run.status === 'running') {
         renderToolbeltDevices();
-        setTimeout(() => pollDirectBatch(signature), 1000);
+        setTimeout(() => pollDirectBatch(signature, restored), 1000);
       } else {
-        if (run.mode === 'test' && run.status === 'complete') directBatchTestSignature = signature;
+        if (!restored && run.mode === 'test' && run.status === 'complete') directBatchTestSignature = signature;
         directBatchRunId = null;
-        if (run.mode === 'upload') {
+        if (run.mode === 'upload' && !restored) {
           await loadToolbeltDevices(false);
           refreshUploadedDevices(run.devices.filter(d => d.status !== 'skipped').map(d => d.selector));
         }
@@ -3279,7 +3302,7 @@
       }
     } catch (error) {
       status.textContent = `Progress temporarily unavailable: ${error.message}. The batch is not restarted.`;
-      setTimeout(() => pollDirectBatch(signature), 3000);
+      setTimeout(() => pollDirectBatch(signature, restored), 3000);
     }
   }
 
@@ -3860,6 +3883,7 @@
       toolbeltDevices = data.devices || [];
       await loadUploadPreferences();
       renderToolbeltDevices();
+      await restoreDirectBatch();
       if (forceDryRun && toolbeltDevices.length) {
         toolbeltAutoDryRunStarted = true;
         startToolbeltDryRun();
@@ -3921,10 +3945,10 @@
             <option value="direct" ${preparedUploadMethods.get(d.selector) !== 'toolbelt' ? 'selected' : ''}>Direct (SFTP + SIS)</option>
             <option value="toolbelt" ${preparedUploadMethods.get(d.selector) === 'toolbelt' ? 'selected' : ''}>Toolbelt</option>
           </select></label>
-          ${preparedUploadMethods.get(d.selector) !== 'toolbelt' ? `<label class="form-label" style="margin-top:8px">Network interface<select aria-label="Network interface for ${escAttr(d.label)}" onchange="selectDeviceInterface('${escAttr(d.selector)}', Number(this.value))" ${directBatchRunId || toolbeltRunId || interfaceSaving ? 'disabled' : ''}>
+          ${preparedUploadMethods.get(d.selector) !== 'toolbelt' ? `<label class="form-label" style="margin-top:8px">Certificate for<select aria-label="Certificate interface for ${escAttr(d.label)}" onchange="selectDeviceInterface('${escAttr(d.selector)}', Number(this.value))" ${directBatchRunId || toolbeltRunId || interfaceSaving ? 'disabled' : ''}>
             <option value="1" ${(d.direct_nic || 1) === 1 ? 'selected' : ''}>LAN A</option>
             <option value="2" ${d.direct_nic === 2 ? 'selected' : ''}>LAN B</option>
-          </select></label>${d.direct_nic === 2 ? `<button class="btn btn-ghost" style="margin-top:6px" type="button" onclick="openDeviceLanB('${escAttr(d.selector)}')" ${directBatchRunId || toolbeltRunId || interfaceSaving ? 'disabled' : ''}>LAN B address</button>` : ''}` : ''}
+          </select></label><button class="btn btn-ghost" style="margin-top:6px" type="button" onclick="openDeviceLanB('${escAttr(d.selector)}', ${d.direct_nic || 1})" ${directBatchRunId || toolbeltRunId || interfaceSaving ? 'disabled' : ''}>Upload connection</button><div class="help-text" style="overflow-wrap:anywhere;margin-top:6px">${escapeHtml(d.direct_management_host || d.selector)}:22022 / 22023</div>` : ''}
           </div>
           <div class="upload-device-actions">
           <button class="btn" onclick="openPreparedDeviceUpload('${escAttr(d.selector)}')">Open upload</button>
@@ -3973,12 +3997,17 @@
     } catch (error) { document.getElementById('direct-batch-status').textContent = error.message; }
   }
 
-  function openDeviceLanB(selector) {
+  let interfaceDialogNic = 2;
+  function openDeviceLanB(selector, nic = 2) {
     if (directBatchRunId || toolbeltRunId || interfaceSaving) return;
     const device = toolbeltDevices.find(d => d.selector === selector);
     if (!device) return;
     interfaceSelector = selector;
-    document.getElementById('direct-interface-device').textContent = `${device.label} (${selector})`;
+    interfaceDialogNic = nic;
+    document.getElementById('direct-interface-device').textContent = `${device.label} (${selector}) - Certificate for LAN ${nic === 2 ? 'B' : 'A'}`;
+    document.getElementById('direct-connection-host').value = device.direct_management_host || selector;
+    document.getElementById('direct-verification-fields').hidden = nic !== 2;
+    document.getElementById('direct-interface-host').required = nic === 2;
     document.getElementById('direct-interface-host').value = device.direct_lan_b?.host || '';
     document.getElementById('direct-interface-port').value = String(device.direct_lan_b?.port || 443);
     document.getElementById('direct-interface-error').textContent = '';
@@ -3998,7 +4027,8 @@
       });
       const result = await readDirectExtronResponse(res);
       toolbeltDevices = toolbeltDevices.map(d => d.selector === selector
-        ? {...d, direct_nic: result.nic, direct_lan_b: result.lan_b} : d);
+        ? {...d, direct_nic: result.nic, direct_lan_b: result.lan_b,
+          direct_management_host: result.management_host || selector} : d);
       directUploadStates.delete(selector);
     } finally {
       interfaceSaving = false;
@@ -4011,9 +4041,13 @@
     const button = document.getElementById('direct-interface-save');
     button.disabled = true;
     try {
-      await saveDeviceInterface(interfaceSelector, {nic: 2,
-        host: document.getElementById('direct-interface-host').value.trim(),
-        port: Number(document.getElementById('direct-interface-port').value)});
+      const body = {nic: interfaceDialogNic,
+        management_host: document.getElementById('direct-connection-host').value.trim()};
+      if (interfaceDialogNic === 2) {
+        body.host = document.getElementById('direct-interface-host').value.trim();
+        body.port = Number(document.getElementById('direct-interface-port').value);
+      }
+      await saveDeviceInterface(interfaceSelector, body);
       document.getElementById('direct-interface-dialog').close();
     } catch (error) { document.getElementById('direct-interface-error').textContent = error.message; }
     finally { button.disabled = false; }

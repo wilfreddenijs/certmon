@@ -37,7 +37,7 @@ it does not replace human hardware acceptance or approve scope reductions.
 | Credentials | credentials/direct/Toolbelt tests; `13305e6` | Amended candidate order implemented |
 | Sequential exact selection / stop | test_direct_batch.py and upload workspace browser tests | Implemented |
 | Staged-file recovery / no import replay | direct cleanup/restart/ambiguous reply tests | Durable staged records implemented |
-| Durable live batch/run progress | `_batches` in certmon/direct_extron.py | Original plan requirement not delivered |
+| Durable live batch/run progress | Whitelisted database snapshots, SQLite restart and browser restoration tests | Implemented; current regression verification in progress |
 | Authorization / CSRF / Audit | existing RBAC/CSRF/API/queue tests in matching CI | Tested; not a fresh exhaustive threat audit |
 | Packaging / UI / manual | successful Windows build, browser suites, manual screenshots | Delivered, no phase closure implied |
 
@@ -46,8 +46,8 @@ it does not replace human hardware acceptance or approve scope reductions.
 1. Complete or recover the sanitized single-interface hardware record: firmware,
    expected/observed fingerprints, endpoint, acknowledgement, cleanup, no reboot.
 2. Independently verify both interfaces on authorized two-LAN hardware (05-UAT.md).
-3. Decide the original persisted-batch-progress requirement: implement it, or obtain
-   explicit acceptance of process-local run snapshots. Do not silently downgrade it.
+3. Verify the newly implemented persisted-batch progress and separately selected
+   upload connection against restart, no-replay and independent NIC-2 checks.
 4. Review the original security/behavior contract against the revised implementation,
    including reverify/passphrase/recovery expectations, and record any remaining
    unmet requirements. `requirements-completed: []` reflects the plans' lack of IDs.
@@ -59,7 +59,7 @@ it does not replace human hardware acceptance or approve scope reductions.
 
 The closure review is now performed inline (not independently by another reviewer).
 Current original-contract differences and pending user decisions are enumerated
-in 05-CLOSURE-REVIEW.md. Hardware acceptance, batch-persistence disposition and
+in 05-CLOSURE-REVIEW.md. Hardware acceptance, new-change verification and
 explicit scope treatment remain blocking; no phase closure is claimed.
 
 Do not rerun historical build delivery or redo implemented features. Gather only

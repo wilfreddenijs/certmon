@@ -95,6 +95,22 @@ def prepare_upload_workspace(page, live_certmon, count=2):
     return certificates, devices
 
 
+@pytest.mark.parametrize('mode,status,device_status', [
+    ('upload', 'interrupted', 'upload_unconfirmed'), ('test', 'complete', 'ready')])
+def test_saved_batch_restores_without_replaying_or_reusing_old_preflight(page, live_certmon, mode, status, device_status):
+    run = {'id': 'saved-run', 'mode': mode, 'status': status, 'devices': [
+        {'selector': '192.168.0.1', 'certificate_id': 'cert-1', 'nic': 1, 'status': device_status}]}
+    posts = []
+    page.route('**/api/direct-extron/batches/latest', lambda route: route.fulfill(json=run))
+    page.route('**/api/direct-extron/batches/saved-run', lambda route: route.fulfill(json=run))
+    page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' else None)
+    prepare_upload_workspace(page, live_certmon)
+    expected = 'no automatic upload retry' if status == 'interrupted' else 'All selected connections are ready.'
+    expect(page.locator('#direct-batch-status')).to_contain_text(expected)
+    expect(page.locator('#direct-batch-upload')).to_be_disabled()
+    assert not any('/direct-extron/batches' in url for url in posts)
+
+
 def test_individual_password_status_is_visible_for_both_methods(page, live_certmon):
     prepare_upload_workspace(page, live_certmon)
     rows = page.locator('.upload-device-row')
@@ -380,28 +396,51 @@ def test_interface_choice_is_per_device_and_invalidates_batch_test(page, live_ce
     def save_interface(route):
         body = route.request.post_data_json
         saved.append((route.request.url.rsplit('/devices/', 1)[1], body))
-        route.fulfill(json={'nic': body['nic'], 'lan_b': {'host': body['host'], 'port': body['port']}})
+        route.fulfill(json={'nic': body['nic'], 'management_host': body['management_host'],
+                            'lan_b': {'host': body['host'], 'port': body['port']}})
     page.route('**/api/direct-extron/devices/*/interface', save_interface)
     page.evaluate('directBatchTestSignature = directBatchSignature(); renderDirectBatchControls()')
     expect(page.locator('#direct-batch-upload')).to_be_enabled()
     expect(page.locator('#direct-batch-nic')).to_have_count(0)
-    page.get_by_label('Network interface for Device 2', exact=True).select_option('2')
+    page.get_by_label('Certificate interface for Device 2', exact=True).select_option('2')
     dialog = page.locator('#direct-interface-dialog')
     expect(dialog).to_be_visible()
+    page.locator('#direct-connection-host').fill('192.168.2.2')
     page.locator('#direct-interface-host').fill('192.168.1.2')
     page.locator('#direct-interface-port').fill('8443')
     dialog.get_by_role('button', name='Save', exact=True).click()
     expect(dialog).not_to_be_visible()
-    expect(page.get_by_label('Network interface for Device 1', exact=True)).to_have_value('1')
-    expect(page.get_by_label('Network interface for Device 2', exact=True)).to_have_value('2')
+    expect(page.get_by_label('Certificate interface for Device 1', exact=True)).to_have_value('1')
+    expect(page.get_by_label('Certificate interface for Device 2', exact=True)).to_have_value('2')
     expect(page.locator('#direct-batch-upload')).to_be_disabled()
-    assert saved == [('192.168.0.2/interface', {'nic': 2, 'host': '192.168.1.2', 'port': 8443})]
+    assert saved == [('192.168.0.2/interface', {'nic': 2, 'host': '192.168.1.2', 'port': 8443,
+                                             'management_host': '192.168.2.2'})]
     page.locator('.upload-device-row').nth(1).get_by_role('button', name='Open upload', exact=True).click()
     expect(page.locator('#direct-extron-interface')).to_have_text('LAN B (192.168.1.2:8443)')
     expect(page.locator('#direct-extron-nic')).to_have_value('2')
     expect(page.get_by_role('button', name='Save LAN B endpoint', exact=True)).to_have_count(0)
     page.locator('#direct-extron-upload').get_by_role('button', name='Close', exact=True).click()
     page.set_viewport_size({'width': 390, 'height': 844})
-    page.get_by_label('Network interface for Device 2', exact=True).scroll_into_view_if_needed()
+    page.get_by_label('Certificate interface for Device 2', exact=True).scroll_into_view_if_needed()
     page.screenshot(path=str(Path(__file__).parents[1] / '.tmp' / 'upload-per-device-interface-mobile.png'))
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+
+
+def test_lan_a_upload_connection_can_be_changed_without_lan_b_fields(page, live_certmon):
+    prepare_upload_workspace(page, live_certmon)
+    saved = []
+    def save_interface(route):
+        body = route.request.post_data_json
+        saved.append(body)
+        route.fulfill(json={'nic': body['nic'], 'management_host': body['management_host'], 'lan_b': None})
+    page.route('**/api/direct-extron/devices/*/interface', save_interface)
+    page.evaluate('directBatchTestSignature = directBatchSignature(); renderDirectBatchControls()')
+    page.locator('.upload-device-row').first.get_by_role('button', name='Upload connection', exact=True).click()
+    expect(page.locator('#direct-verification-fields')).not_to_be_visible()
+    page.locator('#direct-connection-host').fill('192.168.1.1')
+    page.locator('#direct-interface-dialog').get_by_role('button', name='Save', exact=True).click()
+    expect(page.locator('#direct-interface-dialog')).not_to_be_visible()
+    assert saved == [{'nic': 1, 'management_host': '192.168.1.1'}]
+    expect(page.get_by_label('Certificate interface for Device 1', exact=True)).to_have_value('1')
+    expect(page.locator('.upload-device-row').first).to_contain_text('192.168.1.1:22022 / 22023')
+    expect(page.locator('#direct-batch-upload')).to_be_disabled()

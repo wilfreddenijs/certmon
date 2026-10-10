@@ -283,18 +283,21 @@ more passwords. Direct does not use a serial-number fallback.
 
 ![LAN B verification endpoint dialog](screenshots/08-lan-b.png)
 
-*Figure 8. Enter the reachable LAN B HTTPS endpoint for the selected device.*
+*Figure 8. Choose the upload connection separately from the LAN B HTTPS verification endpoint.*
 
 1. Set the row's **Upload method** to Direct.
-2. Choose **LAN A** or **LAN B** in that row's **Network interface** control.
-3. For LAN B, enter its **LAN B HTTPS host** and **LAN B HTTPS port**, then click **Save**.
+2. Choose **LAN A** or **LAN B** in that row's **Certificate for** control.
+3. For LAN B, enter its **LAN B certificate verification host (HTTPS)** and HTTPS port.
+   Check **Upload connection host (SFTP / SSH)** separately, then click **Save**.
 4. Confirm the row shows the intended interface. These settings are per device.
 
-In the current implementation, the configured LAN B host is used for SFTP
-(`22022`), SSH/SIS (`22023`) and HTTPS verification (the port you enter). Ensure all
-three services are reachable at that host. It is not a verification-only address
-with SSH/SFTP still connecting to LAN A. The stored device selector and credential
-lookup remain associated with the original prepared device.
+Click **Upload connection** in a Direct row to change the SFTP (`22022`) and
+SSH/SIS (`22023`) host independently of the certificate interface. It defaults to
+the original device IP, usually LAN A. You can use another reachable address of
+the same device, including LAN B, without changing which NIC receives the
+certificate. HTTPS verification uses the original device endpoint for NIC 1 and
+the separately configured LAN B HTTPS endpoint for NIC 2. Device selection and
+credential lookup remain associated with the original prepared device.
 
 ## 7. Upload Directly With SFTP And SIS
 
@@ -312,6 +315,14 @@ lookup remain associated with the original prepared device.
 
 Changing the selected devices, certificate or interface can invalidate a previous
 test. Run the test again if the upload button becomes disabled.
+
+Direct batch status and individual outcomes are saved on the server. After a
+server restart, an unfinished batch is marked interrupted and its saved results
+reappear in Upload. An in-flight upload is marked unconfirmed, untouched devices
+are skipped, and no certificate import is automatically replayed. Check Audit,
+the device certificate and staged PEM cleanup before retrying. After reopening
+the page, run a fresh connection test before starting another batch; old test
+results do not authorize a new upload.
 
 Batch testing automatically stores previously unseen SSH host keys on first use.
 A changed stored key blocks the device for review. First-use acceptance is not an

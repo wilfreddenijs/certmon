@@ -93,6 +93,16 @@ For LAN B capture the reachable HTTPS endpoint under D-09 and verify on hardware
 
 ## Acceptance Boundaries
 
+### User Clarification, 2026-10-10
+
+- Persist Direct batch status durably across restart. Restore unfinished work as
+  interrupted and expose saved results; never automatically resume or replay imports.
+- Allow a separately selected upload connection host per device. The certificate
+  target remains NIC 1 or NIC 2; NIC-2 HTTPS verification uses its separate LAN B
+  host/port, regardless of the SFTP/SIS host. Default upload host is the original IP.
+- LAN B hardware acceptance means a certificate for NIC 2 independently verified
+  at LAN B HTTPS; merely connecting for upload through LAN B is not that evidence.
+
 - A connectivity/test action must not silently ingest or activate a certificate.
 - Transfer success alone is not upload success: require SIS success and HTTPS
   verification of the expected certificate fingerprint on the chosen interface.

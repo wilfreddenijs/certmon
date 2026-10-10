@@ -26,12 +26,13 @@ from cryptography.hazmat.primitives import serialization
 
 from certmon.deployment import DeploymentMaterial, verify_device_certificate
 from certmon.credentials import ordered_credentials
-from certmon.toolbelt import DEFAULT_SECRET_ID, SECRET_PREFIX, SECRET_PURPOSE, DIRECT_NIC_KEY, DIRECT_LAN_B_KEY
+from certmon.toolbelt import DEFAULT_SECRET_ID, SECRET_PREFIX, SECRET_PURPOSE, DIRECT_NIC_KEY, DIRECT_LAN_B_KEY, DIRECT_CONNECTION_KEY
 
 
 LAN_B_TARGETS_KEY = DIRECT_LAN_B_KEY
 HOST_KEYS_KEY = "direct_extron_host_keys"
 STAGED_KEY = "direct_extron_staged_pems"
+BATCHES_KEY = "direct_extron_batches"
 
 
 @dataclass(frozen=True)
@@ -219,6 +220,7 @@ class DirectExtronService:
     LAN_B_TARGETS_KEY = LAN_B_TARGETS_KEY
     HOST_KEYS_KEY = HOST_KEYS_KEY
     STAGED_KEY = STAGED_KEY
+    BATCHES_KEY = BATCHES_KEY
 
     def __init__(self, database, artifacts, vault, *, transport=None, verifier=None, verification_timeout=30):
         self.database = database
@@ -230,8 +232,38 @@ class DirectExtronService:
         self.verification_timeout = verification_timeout
         self._certificate_operation_lock = Lock()
         self._batch_lock = RLock()
-        self._batches = {}
+        self._batches = copy.deepcopy(database.get_setting(self.BATCHES_KEY, {}))
         self._trust_lock = RLock()
+        for run in self._batches.values():
+            if run["status"] == "running":
+                run.update(status="interrupted", current_device=None)
+                for device in run["devices"]:
+                    if device["status"] == "uploading":
+                        device["status"] = "upload_unconfirmed"
+                    elif device["status"] == "testing":
+                        device["status"] = "interrupted"
+                    elif device["status"] in ("pending", "ready"):
+                        device["status"] = "skipped"
+        if self._batches:
+            self._persist_batches()
+
+    def _persist_batches(self):
+        # Store only safe progress, never transport replies or credential values.
+        snapshots = {}
+        for run_id, run in self._batches.items():
+            snapshot = {key: copy.deepcopy(run[key]) for key in (
+                "id", "mode", "status", "started_at", "remove_successful",
+                "requested_stop", "current_device", "audit_error") if key in run}
+            snapshot["devices"] = [{key: copy.deepcopy(device[key]) for key in (
+                "selector", "certificate_id", "nic", "status") if key in device}
+                for device in run["devices"]]
+            snapshots[run_id] = snapshot
+        self.database.put_setting(self.BATCHES_KEY, snapshots)
+
+    def latest_batch(self):
+        with self._batch_lock:
+            run = max(self._batches.values(), key=lambda item: item.get("started_at", 0), default=None)
+            return copy.deepcopy(run)
 
     def start_batch(self, *, mode, targets):
         if mode not in ("test", "upload") or not targets:
@@ -245,15 +277,19 @@ class DirectExtronService:
                 raise ValueError("A selected certificate is no longer available")
         if not self._certificate_operation_lock.acquire(blocking=False):
             raise ValueError("A certificate operation is already running")
-        run = {"id": uuid.uuid4().hex, "mode": mode, "status": "running",
+        run = {"id": uuid.uuid4().hex, "mode": mode, "status": "running", "started_at": time.time(),
                "remove_successful": self.upload_queue.auto_remove(),
                "requested_stop": False, "current_device": None,
                "devices": [dict(target, status="pending") for target in targets]}
         with self._batch_lock:
             self._batches[run["id"]] = run
         try:
+            with self._batch_lock:
+                self._persist_batches()
             Thread(target=self._execute_batch, args=(run, targets), daemon=True).start()
         except Exception:
+            with self._batch_lock:
+                run["status"] = "failed"
             self._certificate_operation_lock.release()
             raise
         return self.get_batch(run["id"])
@@ -270,6 +306,7 @@ class DirectExtronService:
                 return None
             if run["status"] == "running":
                 run["requested_stop"] = True
+                self._persist_batches()
             return copy.deepcopy(run)
 
     def _execute_batch(self, run, targets):
@@ -283,6 +320,7 @@ class DirectExtronService:
                         break
                     run["current_device"] = target["selector"]
                     run["devices"][index]["status"] = "testing"
+                    self._persist_batches()
                 try:
                     result = self.probe_one(selector=target["selector"], nic=target["nic"], auto_first_use=True)
                     if run["mode"] == "upload" and any(
@@ -298,6 +336,7 @@ class DirectExtronService:
                     result = {"status": "connection_failed"}
                 with self._batch_lock:
                     run["devices"][index].update(status=result["status"], result=result)
+                    self._persist_batches()
                 ready = ready and result["status"] == "ready"
             if run["mode"] == "upload" and ready and not run["requested_stop"]:
                 for index, target in enumerate(targets):
@@ -306,6 +345,7 @@ class DirectExtronService:
                             break
                         run["current_device"] = target["selector"]
                         run["devices"][index]["status"] = "uploading"
+                        self._persist_batches()
                     try:
                         result = self._activate_one(**target)
                     except Exception:
@@ -313,6 +353,7 @@ class DirectExtronService:
                         result = {"status": "upload_unconfirmed"}
                     with self._batch_lock:
                         run["devices"][index].update(status=result["status"], result=result)
+                        self._persist_batches()
                     if result["status"] != "verified":
                         ready = False
                         break
@@ -339,9 +380,16 @@ class DirectExtronService:
                     final_status = "failed"
                     run["audit_error"] = "Could not save upload results to Audit. Upload list was not cleared."
             finally:
-                with self._batch_lock:
-                    run["status"] = final_status
-                self._certificate_operation_lock.release()
+                try:
+                    with self._batch_lock:
+                        run["status"] = final_status
+                        self._persist_batches()
+                except Exception:
+                    with self._batch_lock:
+                        run["status"] = "failed"
+                        run["audit_error"] = "Could not save batch progress. Review Audit and staged PEM status."
+                finally:
+                    self._certificate_operation_lock.release()
 
     def target_for(self, selector, nic=1):
         selector = self._selector(selector)
@@ -352,9 +400,10 @@ class DirectExtronService:
             if not target:
                 raise ValueError("LAN B endpoint must be configured before selecting NIC 2")
             host, https_port = target["host"], int(target["port"])
+        management_host = self.database.get_setting(DIRECT_CONNECTION_KEY, {}).get(selector, selector)
         return DirectTarget(
-            sftp=EndpointIdentity(selector, nic, "sftp", host, 22022),
-            sis=EndpointIdentity(selector, nic, "sis", host, 22023),
+            sftp=EndpointIdentity(selector, nic, "sftp", management_host, 22022),
+            sis=EndpointIdentity(selector, nic, "sis", management_host, 22023),
             https=EndpointIdentity(selector, nic, "https", host, https_port),
         )
 
@@ -371,18 +420,25 @@ class DirectExtronService:
         selector = self._selector(selector)
         self._save_secret(self._secret_id(selector), username=username, password=password, metadata={"selector": selector, "username": username})
 
-    def save_device_interface(self, selector, *, nic, host=None, port=443):
+    def save_device_interface(self, selector, *, nic, host=None, port=443, management_host=None):
         if type(nic) is not int or nic not in (1, 2):
             raise ValueError("NIC must be 1 or 2")
         selector = self._selector(selector)
+        if management_host is not None:
+            management_host = self._host(management_host)
         with self._certificate_operation():
             if nic == 2 and host is not None:
                 self.save_lan_b_target(selector, host=host, port=port)
             self.target_for(selector, nic)
+            if management_host is not None:
+                hosts = dict(self.database.get_setting(DIRECT_CONNECTION_KEY, {}))
+                hosts[selector] = management_host
+                self.database.put_setting(DIRECT_CONNECTION_KEY, hosts)
             selections = dict(self.database.get_setting(DIRECT_NIC_KEY, {}))
             selections[selector] = nic
             self.database.put_setting(DIRECT_NIC_KEY, selections)
-        return {"nic": nic, "lan_b": self.database.get_setting(LAN_B_TARGETS_KEY, {}).get(selector)}
+        return {"nic": nic, "lan_b": self.database.get_setting(LAN_B_TARGETS_KEY, {}).get(selector),
+                "management_host": self.target_for(selector, nic).sftp.host}
 
     def save_shared_credentials(self, *, username, password):
         self._save_secret(DEFAULT_SECRET_ID, username=username, password=password, metadata={"scope": "shared", "username": username})
@@ -575,8 +631,8 @@ class DirectExtronService:
             return {"status": "cleanup_pending", "staged_name": staged_name}
         original = record["target"]
         target = DirectTarget(
-            EndpointIdentity(record["selector"], record["nic"], "sftp", original["host"], 22022),
-            EndpointIdentity(record["selector"], record["nic"], "sis", original["host"], 22023),
+            EndpointIdentity(record["selector"], record["nic"], "sftp", record.get("management_host", original["host"]), 22022),
+            EndpointIdentity(record["selector"], record["nic"], "sis", record.get("management_host", original["host"]), 22023),
             EndpointIdentity(record["selector"], record["nic"], "https", original["host"], original["https_port"]),
         )
         trust = self._check_trust(target)
@@ -673,6 +729,7 @@ class DirectExtronService:
             "certificate_id": certificate_id,
             "status": "staged",
             "target": self._public_target(target),
+            "management_host": target.sftp.host,
             "known_completion": False,
             "grace_deadline": time.time() + 300,
         }
