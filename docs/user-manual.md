@@ -290,8 +290,11 @@ more passwords. Direct does not use a serial-number fallback.
 3. For LAN B, enter its **LAN B HTTPS host** and **LAN B HTTPS port**, then click **Save**.
 4. Confirm the row shows the intended interface. These settings are per device.
 
-The LAN B endpoint is used to verify its HTTPS certificate. It is not a replacement
-for the device's management address used for the SSH/SFTP connection.
+In the current implementation, the configured LAN B host is used for SFTP
+(`22022`), SSH/SIS (`22023`) and HTTPS verification (the port you enter). Ensure all
+three services are reachable at that host. It is not a verification-only address
+with SSH/SFTP still connecting to LAN A. The stored device selector and credential
+lookup remain associated with the original prepared device.
 
 ## 7. Upload Directly With SFTP And SIS
 

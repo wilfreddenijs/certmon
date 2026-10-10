@@ -154,7 +154,9 @@ Only Toolbelt adds a final `admin` / serial-number attempt when the serial numbe
 is available. Direct upload does not retrieve or use a serial-number password.
 
 For Direct devices, select **LAN A** or **LAN B** per device, not for the whole batch.
-LAN B also requires its reachable HTTPS host and port. A connection test is not
+LAN B also requires its reachable host and HTTPS port. The current Direct transport
+uses that LAN B host for SFTP (22022), SIS/SSH (22023) and HTTPS, not just verification.
+A connection test is not
 an upload and does not activate a certificate.
 
 After an actual Direct or Toolbelt batch finishes, CertMon's browser workspace

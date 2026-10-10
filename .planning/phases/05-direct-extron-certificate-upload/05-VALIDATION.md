@@ -18,9 +18,10 @@ fixtures and automated suites are delivered; full phase compliance remains open.
 Actual tests live in `tests/test_direct_extron.py`, `tests/test_direct_batch.py`,
 `tests/test_upload_workspace_ui.py`, `tests/test_credentials.py` and
 `tests/test_upload_queue.py`, plus existing RBAC/CSRF/Audit suites. The planned
-`tests/test_direct_extron_api.py` and `tests/test_direct_extron_packaging.py`
-do not exist. API coverage was integrated into other suites; successful Windows
-CI is packaging evidence, not the missing dedicated packaging test.
+`tests/test_direct_extron_api.py` does not exist; API coverage was integrated into
+other suites. The later closure pass adds `tests/test_direct_extron_packaging.py`
+with 2 passing source packaging contracts. Successful Windows CI remains separate
+packaging evidence; source contracts do not execute the frozen application.
 
 Build-53 test run 37822940364 passed 523 tests with one opt-in ACME staging
 case deselected. These existing results were checked, not rerun, during this
@@ -31,6 +32,12 @@ Useful current focused command (not executed during reconciliation):
 
 No live device operation is implied by this command or by a green automated run.
 Do not use the old nonexistent-file commands below as current instructions.
+
+Subsequent closure run on 2026-10-10: `py -m pytest -m "not acme_staging" -q`
+passed 523 tests, with 1 deselected, in 514.14s. The two new packaging contracts
+were added after full-suite collection and passed separately in 4.67s. The inline
+contract review is in 05-CLOSURE-REVIEW.md; physical acceptance and explicit
+disposition of the remaining differences still prevent phase sign-off.
 
 ## Test Infrastructure
 

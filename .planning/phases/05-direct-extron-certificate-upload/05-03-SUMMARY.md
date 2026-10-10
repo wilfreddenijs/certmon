@@ -46,3 +46,10 @@ API cases are integrated into these suites rather than the planned standalone
   tests are not a declaration that every original threat assertion is satisfied.
 
 No new code changes or scope-waiver decisions were made during reconciliation.
+
+## Subsequent Closure Review
+
+The user requested the closure steps on 2026-10-10. 05-CLOSURE-REVIEW.md records
+the current inline contract/security comparison and the outstanding decisions.
+No answer to the batch-persistence or LAN B acceptance questions is yet recorded.
+The plan remains partial; new source packaging tests do not change its status.

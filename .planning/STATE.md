@@ -5,10 +5,10 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: direct-extron-certificate-upload
 status: awaiting_verification
-stopped_at: Build 53 implementation reconciled; LAN B hardware acceptance and original-plan gaps remain open
+stopped_at: Closure review and fresh tests passed; awaiting hardware evidence and user scope decisions
 last_updated: "2026-10-10"
 last_activity: 2026-10-10
-last_activity_desc: Reconciled released implementation, human feedback, CI and illustrated manual without rerunning device operations
+last_activity_desc: Inline closure contract review; fresh 523-test regression plus two packaging contracts passed, no device operations
 progress:
   total_phases: 5
   completed_phases: 4
@@ -28,6 +28,11 @@ Status: Awaiting hardware evidence and disposition of original-plan gaps, not in
 Last activity: 2026-10-10 - Retrospective evidence reconciliation authorized by user
 
 Next action: Use 05-UAT.md for missing independent LAN A/LAN B hardware evidence; use 05-VERIFICATION.md for restart-progress and other original-plan gaps. Do not repeat completed implementation or old preview/build delivery. Existing plans are historical contracts; 05-CONTEXT.md records superseding user decisions. No phase/milestone closure is claimed.
+
+Closure pass: 05-CLOSURE-REVIEW.md now records the inline source/security-contract
+review. Fresh local regression: 523 passed, 1 deselected; 2 new source packaging
+contracts passed separately. Await the user's batch-persistence choice and LAN B
+evidence, and explicitly dispose of the remaining original-contract differences.
 
 ## Current Evidence Baseline
 
@@ -71,7 +76,7 @@ Next action: Use 05-UAT.md for missing independent LAN A/LAN B hardware evidence
 ## Session
 
 **Last session:** 2026-10-10
-**Stopped at:** Phase 05 acceptance/evidence reconciliation; no new physical operations
+**Stopped at:** Closure review complete inline; hardware and scope decisions pending
 **Resume file:** .planning/phases/05-direct-extron-certificate-upload/05-UAT.md
 
 Older notes below Final Acceptance are retained as history, not current next actions.
