@@ -5,10 +5,10 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: direct-extron-certificate-upload
 status: awaiting_verification
-stopped_at: Closure review and fresh tests passed; awaiting hardware evidence and user scope decisions
+stopped_at: Durable Direct batches and independent upload hosts implemented; awaiting hardware evidence and remaining scope decisions
 last_updated: "2026-10-10"
 last_activity: 2026-10-10
-last_activity_desc: Inline closure contract review; fresh 523-test regression plus two packaging contracts passed, no device operations
+last_activity_desc: Build 54 created; durable restart progress and separate upload hosts verified locally, no device operations
 progress:
   total_phases: 5
   completed_phases: 4
@@ -27,23 +27,25 @@ Plans: 05-01 and 05-04 implementation recorded; 05-02 and 05-03 remain partial
 Status: Awaiting hardware evidence and disposition of original-plan gaps, not initial UI feedback
 Last activity: 2026-10-10 - Retrospective evidence reconciliation authorized by user
 
-Next action: Use 05-UAT.md for missing independent LAN A/LAN B hardware evidence; use 05-VERIFICATION.md for restart-progress and other original-plan gaps. Do not repeat completed implementation or old preview/build delivery. Existing plans are historical contracts; 05-CONTEXT.md records superseding user decisions. No phase/milestone closure is claimed.
+Next action: Use 05-UAT.md for missing independent LAN A/LAN B hardware evidence; use 05-VERIFICATION.md for remaining original-plan gaps. Durable progress and upload-host separation are implemented. Existing plans are historical contracts; 05-CONTEXT.md records superseding user decisions. No phase/milestone closure is claimed.
 
 Closure pass: 05-CLOSURE-REVIEW.md now records the inline source/security-contract
 review. Fresh local regression: 523 passed, 1 deselected; 2 new source packaging
 contracts passed separately. The user chose durable batch progress and independently
-selectable upload connections. Those changes are being verified; LAN B hardware
+selectable upload connections. Those changes passed local verification; LAN B hardware
 evidence and disposition of remaining original-contract differences are still open.
 
 ## Current Evidence Baseline
 
-- Released application baseline: build 53, source `cfbab086d22d3ccc1cd0de7ebb46ff5d8e884c78`.
+- Latest Windows artifact: build 54, source `4f21608394a6a815bfecaa6a909712da4f842b0d`, successful run 38034681162, artifact 11662614507.
+- Local verification for the new changes: 534 passed, 1 external staging test skipped; the additional LAN-A connection browser case passed separately with the three restoration/interface cases. CI run 38034681139 passed the final committed test set: 535 passed, 1 external staging test deselected.
+- Prior released application baseline: build 53, source `cfbab086d22d3ccc1cd0de7ebb46ff5d8e884c78`.
 - CI run 37822940364: 523 passed, 1 opt-in external ACME staging test deselected; Windows build run 37822940201 succeeded for the same source.
 - Illustrated manual and 16 fictional-data screenshots: `15e5151`, `docs/user-manual.md`.
 - Human reports confirm working Direct certificates on SW4 USB Pro, UCS SW 313 and UCS 303; observations are useful but lack the complete original model/firmware/fingerprint/no-reboot acceptance record.
 - Human feedback also confirms later Toolbelt EXE tests and build-38 filters. This is not independent LAN B acceptance.
 - First-use hostkey pinning, standardized password candidates and retained Toolbelt supersede original planning assumptions. Changed keys still require review.
-- Direct batch run/progress snapshots now use durable database settings. Restart marks interrupted work without replaying imports; automated regression evidence is being collected. Staged PEM recovery and upload Audit outcomes remain durable.
+- Direct batch run/progress snapshots now use durable database settings. Restart marks interrupted work without replaying imports; SQLite restart, sensitive-data exclusion, pre-send persistence and browser restoration tests passed. Staged PEM recovery and upload Audit outcomes remain durable.
 - 4/5 phases remain closed. 12/14 plans have completed implementation summaries; partial summaries do not count as acceptance or completed plans.
 
 ## Final Acceptance

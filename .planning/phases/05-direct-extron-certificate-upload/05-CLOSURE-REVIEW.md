@@ -27,7 +27,7 @@ The original plans and superseding decisions in 05-CONTEXT.md are both considere
 | Exactly one credential, no fallback | Individual/shared/default candidates explicitly requested later; fallback only on authentication rejection | Superseded user decision; SIS replay remains prohibited |
 | Exact selected batches; missing selector handled as failed row | API rejects any missing/unready selection with 400; never broadens to all devices | Safe behavior differs from original per-row continuation contract |
 | Stop after current operation | `_execute_batch`, stop and lock tests | Implemented |
-| Run/progress survives service recreation | Durable whitelisted database snapshots; unfinished runs restored as interrupted | Implemented; regression verification in progress |
+| Run/progress survives service recreation | Durable whitelisted database snapshots; unfinished runs restored as interrupted | Implemented; SQLite, no-replay and browser tests passed |
 | Durable staged-file cleanup and no import replay | STAGED_KEY, recorded endpoint, grace/explicit finished confirmation, restart tests | Implemented |
 | Standalone reverify API / run-scoped cleanup route | HTTPS check on ambiguity/import; cleanup uses a persisted staged basename, not a run URL | Standalone reverify route not delivered; route shape differs |
 | Encrypted PEM/passphrase SIS variant | Generated combined PEM is decrypted locally inside the service; `_sis_command` has no passphrase argument | External encrypted-PEM import variant not delivered; no claim of support |
@@ -47,7 +47,7 @@ The original plans and superseding decisions in 05-CONTEXT.md are both considere
 - T-05-03/11: request authorization, CSRF and auditing remain required. Background
   upload outcome attribution is linked through run_id rather than copied actor fields.
 - T-05-04/13/18: bounded I/O, finite selected batches, operation locks and
-  stop-between-devices. No claim of bounded lifetime storage for in-memory batches.
+  stop-between-devices. No claim of bounded lifetime retention for saved batches.
 - T-05-06/07/08: model/firmware, LAN B endpoint/fingerprint and hardware evidence
   remain human acceptance items; no secrets should enter acceptance reports.
 - T-05-10: partial/ambiguous sends do not trigger another ingest; read-only HTTPS
@@ -58,7 +58,7 @@ The original plans and superseding decisions in 05-CONTEXT.md are both considere
 ## Pending User Input
 
 The user explicitly requested durable batch snapshots and independently selectable
-upload connections. Both are implemented with tests under verification. The LAN B
+upload connections. Both are implemented with passing local tests. The LAN B
 question concerned a certificate for NIC 2, verified on LAN B HTTPS, not necessarily
 an upload connection through LAN B. No new physical acceptance evidence was supplied.
 

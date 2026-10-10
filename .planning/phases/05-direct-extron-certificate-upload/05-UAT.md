@@ -22,6 +22,9 @@ evidence or blanket compatibility approval.
   safe SIS acknowledgement, expected/observed certificate fingerprints, cleanup
   state and no-reboot observation.
 - [ ] Two-LAN device model/firmware and distinct saved LAN B HTTPS host/port recorded.
+- [ ] Upload connection host (SFTP/SIS) recorded separately from certificate NIC and
+  HTTPS verification endpoint. Upload may connect through either LAN; the LAN B
+  acceptance test concerns the certificate for NIC 2, not merely the connection.
 - [ ] LAN A/NIC 1 result independently verified at its HTTPS endpoint.
 - [ ] LAN B/NIC 2 result independently verified at its own HTTPS endpoint; no inference
   from LAN A, including expected/observed fingerprint and NIC acknowledgement.

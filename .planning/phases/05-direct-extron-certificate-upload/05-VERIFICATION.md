@@ -37,7 +37,7 @@ it does not replace human hardware acceptance or approve scope reductions.
 | Credentials | credentials/direct/Toolbelt tests; `13305e6` | Amended candidate order implemented |
 | Sequential exact selection / stop | test_direct_batch.py and upload workspace browser tests | Implemented |
 | Staged-file recovery / no import replay | direct cleanup/restart/ambiguous reply tests | Durable staged records implemented |
-| Durable live batch/run progress | Whitelisted database snapshots, SQLite restart and browser restoration tests | Implemented; current regression verification in progress |
+| Durable live batch/run progress | Whitelisted database snapshots, SQLite restart and browser restoration tests | Implemented; local regression passed |
 | Authorization / CSRF / Audit | existing RBAC/CSRF/API/queue tests in matching CI | Tested; not a fresh exhaustive threat audit |
 | Packaging / UI / manual | successful Windows build, browser suites, manual screenshots | Delivered, no phase closure implied |
 
@@ -46,8 +46,8 @@ it does not replace human hardware acceptance or approve scope reductions.
 1. Complete or recover the sanitized single-interface hardware record: firmware,
    expected/observed fingerprints, endpoint, acknowledgement, cleanup, no reboot.
 2. Independently verify both interfaces on authorized two-LAN hardware (05-UAT.md).
-3. Verify the newly implemented persisted-batch progress and separately selected
-   upload connection against restart, no-replay and independent NIC-2 checks.
+3. Complete the physical NIC-2 check using the separately selected upload host;
+   automated durable-progress, restart and no-replay checks have passed.
 4. Review the original security/behavior contract against the revised implementation,
    including reverify/passphrase/recovery expectations, and record any remaining
    unmet requirements. `requirements-completed: []` reflects the plans' lack of IDs.
@@ -59,8 +59,21 @@ it does not replace human hardware acceptance or approve scope reductions.
 
 The closure review is now performed inline (not independently by another reviewer).
 Current original-contract differences and pending user decisions are enumerated
-in 05-CLOSURE-REVIEW.md. Hardware acceptance, new-change verification and
+in 05-CLOSURE-REVIEW.md. Hardware acceptance and
 explicit scope treatment remain blocking; no phase closure is claimed.
+
+## Durable Progress And Connection Separation
+
+Source `4f21608394a6a815bfecaa6a909712da4f842b0d` implements the user's decisions.
+Local full regression: 534 passed, 1 external staging test skipped (500.31 seconds).
+The subsequently added LAN-A connection case passed separately alongside three
+restoration/interface browser cases (4 passed). Direct batch suite: 22 passed.
+Desktop and 390px mobile screenshots were inspected; the illustrated manual now
+shows separate SFTP/SIS and NIC-2 HTTPS fields. No physical device writes occurred.
+Windows build 54 succeeded: run 38034681162, artifact 11662614507.
+Matching-source CI run 38034681139 passed: 535 passed, 1 opt-in external staging
+test deselected, 172.31 seconds. The final committed test set includes the extra
+LAN-A connection browser case.
 
 Do not rerun historical build delivery or redo implemented features. Gather only
 missing evidence and resolve explicit gaps. Do not retire Toolbelt or mark the

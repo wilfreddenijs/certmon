@@ -36,7 +36,7 @@ API cases are integrated into these suites rather than the planned standalone
 
 - At the build-53 reconciliation checkpoint, run snapshots were process-local.
   The subsequent user-requested change persists safe progress and restores unfinished
-  runs as interrupted, never automatically replaying imports. Verification is in progress.
+  runs as interrupted, never automatically replaying imports. Local restart and browser tests passed.
 - Original strict one-credential and manual first-use approval requirements were
   superseded by user decisions, not fulfilled verbatim.
 - Expansion occurred before the complete hardware checkpoint was recorded;
