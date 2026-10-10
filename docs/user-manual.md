@@ -3,7 +3,7 @@
 ## About This Guide
 
 This is the illustrated operator guide for CertMon v1.0, including the features
-available in **build 53**. Button and field names below match the English interface.
+available in **build 55**. Button and field names below match the English interface.
 For installation configuration and technical background, see the [project README](../README.md).
 
 The screenshots show the actual interface with **fictional demonstration data**.

@@ -6,9 +6,9 @@ current_phase: 05
 current_phase_name: direct-extron-certificate-upload
 status: awaiting_verification
 stopped_at: Durable Direct batches and independent upload hosts implemented; awaiting hardware evidence and remaining scope decisions
-last_updated: "2026-10-10"
-last_activity: 2026-10-10
-last_activity_desc: Build 54 created; durable restart progress and separate upload hosts verified locally, no device operations
+last_updated: "2026-10-11"
+last_activity: 2026-10-11
+last_activity_desc: Build 55 created; refresh checks HTTPS reachability and preserves last known certificates when offline
 progress:
   total_phases: 5
   completed_phases: 4
@@ -37,7 +37,9 @@ evidence and disposition of remaining original-contract differences are still op
 
 ## Current Evidence Baseline
 
-- Latest Windows artifact: build 54, source `4f21608394a6a815bfecaa6a909712da4f842b0d`, successful run 38034681162, artifact 11662614507.
+- Latest Windows artifact: build 55, source `4d8f35caa76b99f84110685f3bd2386169ef0150`, successful run 38090535288, artifact 11683614551. Matching CI run 38090535286: 540 passed, 1 external staging test deselected.
+- Build-55 refresh updates Online / Offline status for the monitored HTTPS endpoint, retains the last known certificate on failure, distinguishes TCP reachability from TLS-read errors, and uses the existing automatic post-upload refresh paths. Local focused verification: 29 passed plus the final screenshot case separately. No physical device operations or hardware acceptance are claimed.
+- Durable-batch/upload-host separation artifact: build 54, source `4f21608394a6a815bfecaa6a909712da4f842b0d`, successful run 38034681162, artifact 11662614507.
 - Local verification for the new changes: 534 passed, 1 external staging test skipped; the additional LAN-A connection browser case passed separately with the three restoration/interface cases. CI run 38034681139 passed the final committed test set: 535 passed, 1 external staging test deselected.
 - Prior released application baseline: build 53, source `cfbab086d22d3ccc1cd0de7ebb46ff5d8e884c78`.
 - CI run 37822940364: 523 passed, 1 opt-in external ACME staging test deselected; Windows build run 37822940201 succeeded for the same source.
