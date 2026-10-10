@@ -2367,6 +2367,7 @@
               <div style="min-width:0">
               <div class="cert-host">${c.cn || c.host}</div>
               <div class="cert-port">${c.host}:${c.port}</div>
+              ${c.availability ? `<div class="help-text device-availability" style="margin-top:4px;color:${c.availability === 'online' ? 'var(--ok)' : 'var(--critical)'}" title="${c.availability === 'online' ? 'HTTPS port reachable' : 'HTTPS endpoint unreachable; the device may be offline or blocked'}">${c.availability === 'online' ? 'Online' : 'Offline / unreachable'}</div>` : ''}
               <div style="margin-top:4px">
                 <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;
                   background:${c.self_signed ? 'rgba(255,171,0,0.12)' : 'rgba(0,230,118,0.10)'};
@@ -2378,12 +2379,13 @@
             </div>
             <div class="status-badge ${c.status}">${daysLabel}</div>
           </div>
-          ${c.error ? `<div style="color:var(--critical);font-size:12px;margin-bottom:10px">${c.error}</div>` : ''}
+          ${c.error ? `<div style="color:var(--critical);font-size:12px;margin-bottom:10px">${escapeHtml(c.error)}${c.serial ? ' (last known certificate)' : ''}</div>` : ''}
           <div class="cert-meta">
             <span class="meta-label">Issuer</span><span class="meta-value">${c.issuer || 'N/A'}</span>
             <span class="meta-label">Expires</span><span class="meta-value">${formatDate(c.not_after)}</span>
             <span class="meta-label">Issued</span><span class="meta-value">${formatDate(c.not_before)}</span>
             <span class="meta-label">Checked</span><span class="meta-value">${formatDate(c.last_checked)}</span>
+            ${c.availability_checked ? `<span class="meta-label">Connection checked</span><span class="meta-value">${new Date(c.availability_checked).toLocaleString('en-GB', {dateStyle: 'medium', timeStyle: 'short'})}</span>` : ''}
           </div>
           ${sansHtml ? `<div style="margin-bottom:12px">${sansHtml}</div>` : ''}
           <div class="days-bar">

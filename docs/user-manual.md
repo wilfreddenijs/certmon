@@ -126,8 +126,14 @@ device certificate details, not proof that a newer stored certificate was instal
    hidden by filters. Read the progress and failure message beside the button.
 3. Review **Checked** and the issuer/expiry after the refresh.
 
-An unreachable device can retain previously recorded certificate information.
-Do not treat its old card as confirmation of a fresh successful check.
+Refresh also checks reachability of the configured HTTPS endpoint. The card shows
+**Online** or **Offline / unreachable**, with a separate **Connection checked** time.
+If the connection fails, the last known certificate and its original **Checked**
+time are retained and labelled as last known. If the port is reachable but the TLS
+certificate cannot be read, the device remains Online with a certificate-read error.
+This is an HTTPS connection check, not ping or proof that a device is powered off:
+firewalls and disabled HTTPS can also make an endpoint unreachable. The same check
+runs during automatic refresh after individual or batch uploads.
 
 The card's red **X** removes that monitored endpoint from the inventory. It does
 not uninstall the certificate from the physical device.

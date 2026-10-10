@@ -390,17 +390,16 @@ def _safe_job_with_dns(job):
     return result
 
 
-def get_cert_info(host, port=443, timeout=3):
+def get_cert_info(host, port=443, timeout=3, *, include_connection_status=False):
+    reachable = False
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        conn = ctx.wrap_socket(
-            socket.create_connection((host, port), timeout=timeout),
-            server_hostname=host
-        )
-        cert_der = conn.getpeercert(binary_form=True)
-        conn.close()
+        with socket.create_connection((host, port), timeout=timeout) as tcp:
+            reachable = True
+            with ctx.wrap_socket(tcp, server_hostname=host) as conn:
+                cert_der = conn.getpeercert(binary_form=True)
 
         from cryptography import x509
         from cryptography.hazmat.backends import default_backend
@@ -452,16 +451,24 @@ def get_cert_info(host, port=443, timeout=3):
             "not_before": not_before.isoformat(), "not_after": not_after.isoformat(),
             "days_remaining": days_remaining, "status": status,
             "serial": str(cert.serial_number),
-            "last_checked": now.isoformat(), "error": None
+            "last_checked": now.isoformat(), "error": None,
+            "availability": "online", "availability_checked": now.isoformat()
         }
     except (socket.timeout, ConnectionRefusedError, OSError):
+        if include_connection_status:
+            return {"host": host, "port": port,
+                    "availability": "online" if reachable else "offline",
+                    "availability_checked": datetime.now(timezone.utc).isoformat(),
+                    "error": "HTTPS certificate could not be read" if reachable else "HTTPS endpoint unreachable"}
         return None
     except Exception as e:
         return {
             "host": host, "port": port, "cn": host, "issuer": "N/A", "sans": [],
             "not_before": None, "not_after": None, "days_remaining": None,
             "status": "error", "serial": None,
-            "last_checked": datetime.now(timezone.utc).isoformat(), "error": str(e)
+            "last_checked": datetime.now(timezone.utc).isoformat(), "error": str(e),
+            "availability": "online" if reachable else "offline",
+            "availability_checked": datetime.now(timezone.utc).isoformat()
         }
 
 
@@ -905,10 +912,15 @@ def refresh_host(host_port):
     parts = host_port.rsplit(":", 1)
     host = parts[0]
     port = int(parts[1]) if len(parts) > 1 else 443
-    info = get_cert_info(host, port)
-    if info:
-        database.update_monitored_certificate(f"{host}:{port}", info)
-    return jsonify({"ok": bool(info and not info.get("error")), "cert": info})
+    info = get_cert_info(host, port, include_connection_status=True)
+    failed = not info or bool(info.get("error"))
+    if failed:
+        info = {"host": host, "port": port,
+                "availability": (info or {}).get("availability", "offline"),
+                "availability_checked": (info or {}).get("availability_checked", datetime.now(timezone.utc).isoformat()),
+                "error": (info or {}).get("error") or "HTTPS endpoint unreachable"}
+    database.update_monitored_certificate(f"{host}:{port}", info, preserve_certificate=failed)
+    return jsonify({"ok": not failed, "cert": info})
 
 
 @app.route("/api/scan/ranges", methods=["POST"])

@@ -5,11 +5,13 @@ from playwright.sync_api import expect
 
 
 @pytest.mark.parametrize('mode', ['upload', 'test', 'toolbelt'])
-def test_refresh_all_and_automatic_refresh_after_upload(page, live_certmon, mode):
+@pytest.mark.parametrize('offline', [False, True])
+def test_refresh_all_and_automatic_refresh_after_upload(page, live_certmon, mode, offline):
     prepare_upload_workspace(page, live_certmon)
     scanned = {f'192.168.0.{i}:443': {
         'host': f'192.168.0.{i}', 'port': 443, 'cn': f'Device {i}',
         'status': 'ok', 'days_remaining': 100, 'cert_type': 'Self-signed', 'self_signed': True,
+        'serial': 'old',
     } for i in (1, 2)}
     calls = []
     page.route('**/api/data', lambda route: route.fulfill(json={'certificates': scanned}))
@@ -18,8 +20,14 @@ def test_refresh_all_and_automatic_refresh_after_upload(page, live_certmon, mode
         from urllib.parse import unquote
         key = unquote(route.request.url.rsplit('/', 1)[-1])
         calls.append(key)
-        scanned[key].update(cert_type='CA: CertMon', self_signed=False, issuer='CertMon')
-        route.fulfill(json={'ok': True, 'cert': scanned[key]})
+        unavailable = offline and key == '192.168.0.2:443'
+        if unavailable:
+            scanned[key].update(availability='offline', availability_checked='2026-10-11T10:00:00Z',
+                                error='HTTPS endpoint unreachable')
+        else:
+            scanned[key].update(cert_type='CA: CertMon', self_signed=False, issuer='CertMon',
+                                availability='online', error=None)
+        route.fulfill(json={'ok': not unavailable, 'cert': scanned[key]})
 
     page.route('**/api/refresh/*', refresh)
     page.evaluate('loadData()')
@@ -41,15 +49,29 @@ def test_refresh_all_and_automatic_refresh_after_upload(page, live_certmon, mode
         assert calls == []
         page.locator('#device-name-filter').fill('Device 1')
         page.locator('#device-refresh-all').click()
-    expect(page.locator('#device-refresh-status')).to_have_text('2 device(s) refreshed.')
+    expect(page.locator('#device-refresh-status')).to_have_text(
+        '1 device(s) refreshed; 1 could not be refreshed.' if offline else '2 device(s) refreshed.')
     assert sorted(calls) == ['192.168.0.1:443', '192.168.0.2:443']
     expect(page.locator('#device-refresh-all')).to_be_enabled()
-    assert page.evaluate("Object.values(currentCertificates).every(c => c.cert_type === 'CA: CertMon')")
-    page.set_viewport_size({'width': 390, 'height': 844})
-    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    if offline:
+        page.locator('#device-name-filter').fill('')
+        card = page.locator('.cert-card').filter(has_text='Device 2')
+        expect(card.locator('.device-availability')).to_have_text('Offline / unreachable')
+        expect(card).to_contain_text('last known certificate')
+        expect(card).to_contain_text('Connection checked')
+        assert page.evaluate("currentCertificates['192.168.0.2:443'].cert_type") == 'Self-signed'
+    else:
+        assert page.evaluate("Object.values(currentCertificates).every(c => c.cert_type === 'CA: CertMon')")
     shots = Path('.tmp/refresh-ui')
     shots.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(shots / f'refresh-{mode}-mobile.png'))
+    page.screenshot(path=str(shots / f'refresh-{mode}-{"offline" if offline else "online"}-desktop.png'))
+    if offline:
+        card.screenshot(path=str(shots / f'refresh-{mode}-offline-card-desktop.png'))
+    page.set_viewport_size({'width': 390, 'height': 844})
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    page.screenshot(path=str(shots / f'refresh-{mode}-{"offline" if offline else "online"}-mobile.png'))
+    if offline:
+        card.screenshot(path=str(shots / f'refresh-{mode}-offline-card-mobile.png'))
 
 
 def test_local_ca_has_no_duplicate_downloads_and_upload_guide_is_in_downloads(page, live_certmon):
